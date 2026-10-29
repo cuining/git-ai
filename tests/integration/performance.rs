@@ -24,6 +24,7 @@ fn setup() {
         daemon_log_upload: true,
         rewrite_metrics_events: false,
         token_usage_metrics: false,
+        enterprise_metrics: false,
         untraced_commit_fixup: false,
         untraced_fixup_ignore_temp_repos: false,
     };

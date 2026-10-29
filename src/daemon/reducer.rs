@@ -47,6 +47,7 @@ pub fn reduce_family_command_with_ref_snapshot(
             refs: analysis_refs,
         },
     )?;
+    let command_start_head = command_start_refs.get("HEAD").cloned();
     apply_ref_changes(state, &cmd);
     apply_worktree_state(state, &cmd);
 
@@ -55,6 +56,7 @@ pub fn reduce_family_command_with_ref_snapshot(
         seq: state.applied_seq,
         command: cmd,
         analysis: analysis.clone(),
+        command_start_head,
     };
     Ok((applied, analysis))
 }
@@ -71,6 +73,7 @@ pub fn reduce_global_command(
         seq: state.applied_seq,
         command: cmd,
         analysis: analysis.clone(),
+        command_start_head: None,
     };
     Ok((applied, analysis))
 }

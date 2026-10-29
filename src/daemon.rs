@@ -927,7 +927,7 @@ fn process_conflict_resolution_working_logs(
     let diff_results = if diff_pairs.is_empty() {
         Vec::new()
     } else {
-        crate::authorship::rewrite::compute_diff_trees_batch(repo, &diff_pairs)?
+        crate::authorship::rewrite::compute_diff_trees_batch(repo, &diff_pairs, false)?
     };
     let diff_by_commit: HashMap<&str, &crate::authorship::rewrite::DiffTreeResult> = qualifying
         .iter()
@@ -999,6 +999,7 @@ fn post_conflict_resolution_working_log(
             compute_stats: false,
             recover_attribution: false,
             commit_source: None,
+            capture_enterprise: false,
         },
         precomputed_parent_diff,
         move |resolution_log| {
@@ -1436,7 +1437,7 @@ fn remove_working_log_attributions_for_pathspecs(
     let working_log = repository.storage.working_log_for_base_commit(head)?;
 
     let initial = working_log.read_initial_attributions();
-    if !initial.files.is_empty() {
+    if !initial.files.is_empty() || !initial.ai_sources.is_empty() {
         let filtered_files = initial
             .files
             .into_iter()
@@ -1450,6 +1451,11 @@ fn remove_working_log_attributions_for_pathspecs(
             file_blobs: filtered_blobs,
             humans: initial.humans,
             sessions: initial.sessions,
+            ai_sources: initial
+                .ai_sources
+                .into_iter()
+                .filter(|(file, _)| !matches_any_pathspec(file, pathspecs))
+                .collect(),
         })?;
     }
 
@@ -1470,13 +1476,21 @@ fn remove_working_log_attributions_for_pathspecs(
 
 fn apply_checkout_switch_working_log_side_effect(
     cmd: &crate::daemon::domain::NormalizedCommand,
+    command_start_head: Option<&str>,
 ) -> Result<(), GitAiError> {
     let Some(worktree) = cmd.worktree.as_ref() else {
         return Ok(());
     };
     let repo = find_repository_in_path(&worktree.to_string_lossy())?;
     let parsed = parsed_invocation_for_normalized_command(cmd);
-    let (old_head, new_head) = ActorDaemonCoordinator::resolve_heads_for_command(cmd);
+    let (mut old_head, new_head) = ActorDaemonCoordinator::resolve_heads_for_command(cmd);
+    if old_head.is_empty()
+        && crate::config::Config::fresh()
+            .feature_flags()
+            .enterprise_metrics
+    {
+        old_head = command_start_head.unwrap_or_default().to_owned();
+    }
 
     if cmd.primary_command.as_deref() == Some("checkout") {
         let pathspecs = parsed.pathspecs();
@@ -2175,7 +2189,7 @@ fn apply_cherry_pick_complete_rewrite(
     let diff_results = if diff_pairs.is_empty() {
         Vec::new()
     } else {
-        crate::authorship::rewrite::compute_diff_trees_batch(repo, &diff_pairs)?
+        crate::authorship::rewrite::compute_diff_trees_batch(repo, &diff_pairs, false)?
     };
     let diff_by_commit: HashMap<&str, &crate::authorship::rewrite::DiffTreeResult> = qualifying
         .iter()
@@ -7872,7 +7886,12 @@ impl ActorDaemonCoordinator {
                                     base_opt.clone(),
                                     new_head.clone(),
                                     author,
-                                    crate::authorship::post_commit::PostCommitOptions::with_recovery(commit_source),
+                                    crate::authorship::post_commit::PostCommitOptions::with_recovery(
+                                        commit_source,
+                                        cmd.primary_command.as_deref() == Some("commit")
+                                            && commit_source.is_none()
+                                            && events.iter().filter(|event| matches!(event, crate::daemon::domain::SemanticEvent::CommitCreated { .. })).count() == 1,
+                                    ),
                                     recovery_file_timestamps.as_ref(),
                                     Some(&recovery_preflight),
                                 )
@@ -8015,7 +8034,10 @@ impl ActorDaemonCoordinator {
                     self.record_recent_replay_prerequisite(&family, prerequisite)?;
                 }
             }
-            apply_checkout_switch_working_log_side_effect(cmd)?;
+            apply_checkout_switch_working_log_side_effect(
+                cmd,
+                applied.command_start_head.as_deref(),
+            )?;
         }
 
         if saw_pull_event && let Some(worktree) = cmd.worktree.as_ref() {

@@ -19,6 +19,8 @@ pub struct WorkingLogEntry {
     pub attributions: Vec<Attribution>,
     #[serde(default)]
     pub line_attributions: Vec<LineAttribution>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai_source: Option<crate::authorship::source_evidence::AiSourceSnapshot>,
 }
 
 impl WorkingLogEntry {
@@ -34,6 +36,7 @@ impl WorkingLogEntry {
             blob_sha,
             attributions,
             line_attributions,
+            ai_source: None,
         }
     }
 }

@@ -630,6 +630,7 @@ fn merge_initial_replacing_paths_with_contents(
             file_blobs,
             humans,
             sessions,
+            ai_sources: HashMap::new(),
         },
     )
 }

@@ -45,6 +45,12 @@ pub struct FileLineStats {
 struct PreviousFileState {
     blob_sha: String,
     attributions: Vec<Attribution>,
+    ai_source: Option<crate::authorship::source_evidence::AiSourceSnapshot>,
+}
+
+struct CheckpointSourceCapture {
+    initial: HashMap<String, crate::authorship::source_evidence::AiSourceSnapshot>,
+    agent: Option<crate::authorship::working_log::AgentId>,
 }
 
 use crate::authorship::working_log::AgentId;
@@ -650,6 +656,7 @@ fn build_previous_file_state_maps(
                 PreviousFileState {
                     blob_sha: entry.blob_sha.clone(),
                     attributions: entry.attributions.clone(),
+                    ai_source: entry.ai_source.clone(),
                 },
             );
 
@@ -676,6 +683,7 @@ fn get_checkpoint_entry_for_file(
     initial_attributions: Arc<HashMap<String, Vec<LineAttribution>>>,
     initial_snapshot_contents: Arc<HashMap<String, Arc<str>>>,
     parent_note_attributions: Arc<HashMap<String, Vec<LineAttribution>>>,
+    source_capture: Option<Arc<CheckpointSourceCapture>>,
     ts: u128,
 ) -> Result<Option<(WorkingLogEntry, FileLineStats)>, GitAiError> {
     // Deterministic blocking work for the TestRepo throughput guard; release builds omit it.
@@ -695,6 +703,16 @@ fn get_checkpoint_entry_for_file(
 
     let previous_state = previous_file_state_by_file.get(&file_path).cloned();
     let has_prior_ai_edits = ai_touched_files.contains(&file_path);
+    let previous_source = source_capture
+        .as_ref()
+        .and_then(|capture| match &previous_state {
+            Some(state) => state.ai_source.as_ref(),
+            None => capture.initial.get(&file_path),
+        });
+    let has_initial_state = !initial_attrs_for_file.is_empty()
+        || source_capture
+            .as_ref()
+            .is_some_and(|capture| capture.initial.contains_key(&file_path));
 
     let current_content = working_log
         .read_current_file_content(&file_path)
@@ -705,7 +723,7 @@ fn get_checkpoint_entry_for_file(
     // attribution-empty entry while still capturing line stats.
     // KnownHuman checkpoints must bypass this path so they record h_<hash> attributions
     // that later AI checkpoints can use to identify human-written lines.
-    if kind == CheckpointKind::Human && !has_prior_ai_edits && initial_attrs_for_file.is_empty() {
+    if kind == CheckpointKind::Human && !has_prior_ai_edits && !has_initial_state {
         let previous_content = if let Some(state) = previous_state.as_ref() {
             Arc::<str>::from(
                 working_log
@@ -721,7 +739,19 @@ fn get_checkpoint_entry_for_file(
         }
 
         let stats = compute_file_line_stats(&previous_content, &current_content);
-        let entry = WorkingLogEntry::new(file_path, file_content_hash, Vec::new(), Vec::new());
+        let mut entry = WorkingLogEntry::new(file_path, file_content_hash, Vec::new(), Vec::new());
+        if source_capture.is_some() {
+            entry.ai_source = Some(
+                crate::authorship::source_evidence::AiSourceSnapshot::capture(
+                    None,
+                    &previous_content,
+                    &current_content,
+                    "human",
+                    None,
+                    ts,
+                )?,
+            );
+        }
         return Ok(Some((entry, stats)));
     }
 
@@ -747,7 +777,7 @@ fn get_checkpoint_entry_for_file(
         // Skip if no changes, UNLESS we have INITIAL attributions for this file
         // (in which case we need to create an entry to record those attributions)
         if content_eq_ignoring_line_endings(&current_content, &previous_content)
-            && initial_attrs_for_file.is_empty()
+            && !has_initial_state
         {
             return Ok(None);
         }
@@ -773,7 +803,7 @@ fn get_checkpoint_entry_for_file(
         // line count (that's what the diff will compare against). When the snapshot
         // matches current content (no edits after INITIAL), use the HEAD content
         // line count so the AI fallback can fire for uncovered lines.
-        let effective_prev_content = if !initial_attrs_for_file.is_empty() {
+        let effective_prev_content = if has_initial_state {
             let snapshot = initial_snapshot_content
                 .as_deref()
                 .unwrap_or(&previous_content);
@@ -808,7 +838,7 @@ fn get_checkpoint_entry_for_file(
         // INITIAL line numbers refer to the file state at the moment INITIAL was written.
         // Snapshot-aware INITIAL storage preserves that exact content; older INITIAL files
         // fall back to the legacy "current content" behavior.
-        let content_for_line_conversion = if !initial_attrs_for_file.is_empty() {
+        let content_for_line_conversion = if has_initial_state {
             initial_snapshot_content
                 .as_deref()
                 .unwrap_or(&current_content)
@@ -827,7 +857,7 @@ fn get_checkpoint_entry_for_file(
         // When INITIAL has a persisted snapshot, use that as the previous content so later
         // edits after a restore/squash are tracked correctly. Older INITIAL files fall back
         // to the legacy current-content behavior.
-        let adjusted_previous = if !initial_attrs_for_file.is_empty() {
+        let adjusted_previous = if has_initial_state {
             initial_snapshot_content.unwrap_or_else(|| current_content.clone())
         } else {
             previous_content
@@ -860,12 +890,15 @@ fn get_checkpoint_entry_for_file(
                 &current_content,
                 ts,
             );
-        let entry = WorkingLogEntry::new(
+        let mut entry = WorkingLogEntry::new(
             file_path,
             file_content_hash,
             remapped_attributions,
             line_attributions,
         );
+        if let Some(source) = previous_source {
+            entry.ai_source = Some(source.project(&previous_content, &current_content)?);
+        }
         return Ok(Some((entry, FileLineStats::default())));
     }
 
@@ -876,6 +909,11 @@ fn get_checkpoint_entry_for_file(
         is_ai_checkpoint: kind.is_ai(),
         previous_content: &previous_content,
         previous_attributions: &prev_attributions,
+        capture_source: source_capture.is_some(),
+        previous_source,
+        source_agent: source_capture
+            .as_ref()
+            .and_then(|capture| capture.agent.as_ref()),
         content: &current_content,
         ts,
     })?;
@@ -909,7 +947,11 @@ async fn get_checkpoint_entries(
     let initial_data = working_log.read_initial_attributions();
     let initial_snapshot_contents: HashMap<String, Arc<str>> = {
         let mut map = HashMap::new();
-        for file_path in initial_data.files.keys() {
+        for file_path in initial_data
+            .files
+            .keys()
+            .chain(initial_data.ai_sources.keys())
+        {
             if let Some(content) =
                 working_log.initial_file_content_from(&initial_data, file_path)?
             {
@@ -918,6 +960,18 @@ async fn get_checkpoint_entries(
         }
         map
     };
+    let source_capture = crate::config::Config::fresh()
+        .feature_flags()
+        .enterprise_metrics
+        .then(|| {
+            Arc::new(CheckpointSourceCapture {
+                initial: initial_data.ai_sources,
+                agent: kind
+                    .is_ai()
+                    .then_some(checkpoint_request.agent_id.clone())
+                    .flatten(),
+            })
+        });
     let initial_attributions = initial_data.files;
     tracing::debug!(
         "[BENCHMARK] Reading initial attributions took {:?}",
@@ -925,8 +979,11 @@ async fn get_checkpoint_entries(
     );
 
     let precompute_start = Instant::now();
-    let (previous_file_state_by_file, ai_touched_files) =
+    let (previous_file_state_by_file, mut ai_touched_files) =
         build_previous_file_state_maps(previous_checkpoints, &initial_attributions);
+    if let Some(capture) = &source_capture {
+        ai_touched_files.extend(capture.initial.keys().cloned());
+    }
     tracing::debug!(
         "[BENCHMARK] Precomputing previous state maps took {:?}",
         precompute_start.elapsed()
@@ -1002,6 +1059,7 @@ async fn get_checkpoint_entries(
         let initial_snapshot_contents = Arc::clone(&initial_snapshot_contents);
         let parent_note_attributions = Arc::clone(&parent_note_attributions);
         let semaphore = Arc::clone(&semaphore);
+        let source_capture = source_capture.clone();
 
         let task = async move {
             let _permit = semaphore
@@ -1023,6 +1081,7 @@ async fn get_checkpoint_entries(
                     initial_attributions.clone(),
                     initial_snapshot_contents.clone(),
                     parent_note_attributions.clone(),
+                    source_capture,
                     ts,
                 )
             })
@@ -1081,6 +1140,9 @@ struct FileEntryInput<'a> {
     is_ai_checkpoint: bool,
     previous_content: &'a str,
     previous_attributions: &'a [Attribution],
+    capture_source: bool,
+    previous_source: Option<&'a crate::authorship::source_evidence::AiSourceSnapshot>,
+    source_agent: Option<&'a crate::authorship::working_log::AgentId>,
     content: &'a str,
     ts: u128,
 }
@@ -1095,6 +1157,9 @@ fn make_entry_for_file(
         is_ai_checkpoint,
         previous_content,
         previous_attributions,
+        capture_source,
+        previous_source,
+        source_agent,
         content,
         ts,
     } = input;
@@ -1154,12 +1219,25 @@ fn make_entry_for_file(
         stats_start.elapsed()
     );
 
-    let entry = WorkingLogEntry::new(
+    let mut entry = WorkingLogEntry::new(
         file_path.to_string(),
         blob_sha.to_string(),
         new_attributions,
         line_attributions,
     );
+
+    if capture_source {
+        entry.ai_source = Some(
+            crate::authorship::source_evidence::AiSourceSnapshot::capture(
+                previous_source,
+                previous_content,
+                content,
+                author_id,
+                source_agent,
+                ts,
+            )?,
+        );
+    }
 
     Ok((entry, line_stats))
 }

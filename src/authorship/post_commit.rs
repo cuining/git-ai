@@ -124,16 +124,21 @@ pub(crate) struct PostCommitOptions {
     /// Recorded on the `Committed` metric as `commit_source`; `None` (null) for
     /// commits attributed on the normal traced path.
     pub commit_source: Option<&'static str>,
+    pub capture_enterprise: bool,
 }
 
 impl PostCommitOptions {
     /// The daemon's post-commit pass: quiet, with stats and attribution recovery.
-    pub(crate) fn with_recovery(commit_source: Option<&'static str>) -> Self {
+    pub(crate) fn with_recovery(
+        commit_source: Option<&'static str>,
+        capture_enterprise: bool,
+    ) -> Self {
         Self {
             supress_output: true,
             compute_stats: true,
             recover_attribution: true,
             commit_source,
+            capture_enterprise,
         }
     }
 }
@@ -172,6 +177,7 @@ where
             compute_stats: true,
             recover_attribution: true,
             commit_source: None,
+            capture_enterprise: false,
         },
         transform,
     )
@@ -332,7 +338,7 @@ where
     }
 
     let committed_diff_base = single_commit_diff_base(&parent_sha, &commit_sha);
-    let (mut authorship_log, initial_attributions, initial_file_contents) = working_va
+    let (mut authorship_log, mut initial_attributions, mut initial_file_contents) = working_va
         .to_authorship_log_and_initial_working_log_with_precomputed_diff(
             repo,
             &parent_sha,
@@ -449,6 +455,29 @@ where
 
     write_note(repo, &commit_sha, &authorship_note_str)?;
 
+    let mut retain_enterprise_input = false;
+    let mut enterprise_facts =
+        if options.capture_enterprise && Config::fresh().feature_flags().enterprise_metrics {
+            match crate::authorship::enterprise::capture_ordinary_commit(
+                repo,
+                &commit_sha,
+                &authorship_log,
+                &working_log,
+                &parent_working_log,
+                &mut initial_attributions,
+                &mut initial_file_contents,
+            ) {
+                Ok(facts) => facts,
+                Err(error) => {
+                    retain_enterprise_input = true;
+                    tracing::warn!("Unable to capture local enterprise commit facts: {}", error);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
     // Compute stats once (needed for both metrics and terminal output), unless preflight
     // estimate predicts this would be too expensive for the commit hook path.
     let mut stats: Option<crate::authorship::stats::CommitStats> = None;
@@ -500,7 +529,7 @@ where
             .and_then(|artifacts| serde_json::to_string(&artifacts.json_hunks).ok());
 
             // Record metrics only when we have full stats.
-            record_commit_metrics(
+            let receipt = record_commit_metrics(
                 repo,
                 &commit_sha,
                 // Store the recorded parent as `base_commit_sha`, not the
@@ -513,6 +542,11 @@ where
                 hunks_json.as_deref(),
                 options.commit_source,
             );
+            if let Some(facts) = enterprise_facts.as_mut()
+                && let Some(receipt) = receipt
+            {
+                facts.legacy_event_hashes.push(receipt);
+            }
             stats = Some(computed);
         }
     }
@@ -536,20 +570,30 @@ where
         }
     }
 
+    if let Some(facts) = enterprise_facts {
+        match crate::metrics::db::MetricsDatabase::global().and_then(|db| {
+            db.lock()
+                .map_err(|_| GitAiError::Generic("metrics database lock poisoned".into()))?
+                .insert_commit_facts(&facts)
+        }) {
+            Ok(()) => {}
+            Err(error) => {
+                retain_enterprise_input = true;
+                tracing::warn!("Unable to persist local enterprise commit facts: {}", error);
+            }
+        }
+    }
+
     // Write INITIAL file for uncommitted AI attributions (if any)
-    if !initial_attributions.files.is_empty() {
+    if !initial_attributions.files.is_empty() || !initial_attributions.ai_sources.is_empty() {
         let new_working_log = repo_storage.working_log_for_base_commit(&commit_sha)?;
-        new_working_log.write_initial_attributions_with_contents(
-            initial_attributions.files,
-            initial_attributions.prompts,
-            initial_attributions.humans,
-            initial_file_contents,
-            initial_attributions.sessions,
-        )?;
+        new_working_log.write_initial_with_contents(initial_attributions, initial_file_contents)?;
     }
 
     // // Clean up old working log
-    repo_storage.delete_working_log_for_base_commit(&parent_sha)?;
+    if !retain_enterprise_input {
+        repo_storage.delete_working_log_for_base_commit(&parent_sha)?;
+    }
 
     // Use Config::fresh() to support runtime config updates
     if !options.supress_output && !Config::fresh().is_quiet() {
@@ -1145,12 +1189,10 @@ fn record_commit_metrics(
     checkpoints: &[Checkpoint],
     hunks_json: Option<&str>,
     commit_source: Option<&str>,
-) {
+) -> Option<String> {
     use crate::metrics::{CommittedValues, record};
 
-    let Some(breakdown) = metric_tool_model_breakdown(stats) else {
-        return;
-    };
+    let breakdown = metric_tool_model_breakdown(stats)?;
 
     // Build values with all stats
     let values = CommittedValues::new()
@@ -1204,7 +1246,12 @@ fn record_commit_metrics(
     let attrs = commit_metric_attrs(repo, commit_sha, parent_sha, human_author);
 
     // Record the metric
-    record(values, attrs);
+    if Config::fresh().feature_flags().enterprise_metrics {
+        crate::metrics::record_with_receipt(values, attrs)
+    } else {
+        record(values, attrs);
+        None
+    }
 }
 
 #[cfg(test)]

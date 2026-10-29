@@ -7,6 +7,7 @@
 
 pub mod attrs;
 pub mod db;
+pub mod enterprise;
 pub mod events;
 pub mod local_stats;
 pub mod model_pricing;
@@ -57,6 +58,21 @@ pub fn record<V: EventValues>(values: V, attrs: EventAttributes) {
     let event = MetricEvent::new(&values, attrs.to_sparse());
     // Write directly to observability log
     crate::observability::log_metrics(vec![event]);
+}
+
+pub(crate) fn record_with_receipt<V: EventValues>(
+    values: V,
+    attrs: EventAttributes,
+) -> Option<String> {
+    if attrs.tool == Some(Some("mock_ai".to_string()))
+        || should_ignore_debug_self_check_event(&attrs)
+    {
+        return None;
+    }
+    let event = MetricEvent::new(&values, attrs.to_sparse());
+    let receipt = enterprise::event_hash(&event).ok();
+    crate::observability::log_metrics(vec![event]);
+    receipt
 }
 
 fn should_ignore_debug_self_check_event(attrs: &EventAttributes) -> bool {

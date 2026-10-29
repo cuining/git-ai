@@ -617,7 +617,7 @@ fn parse_diff_git_header_paths(line: &str) -> Option<(String, String)> {
     ))
 }
 
-fn parse_two_git_path_tokens(raw: &str) -> Option<(String, String)> {
+pub(crate) fn parse_two_git_path_tokens(raw: &str) -> Option<(String, String)> {
     let mut chars = raw.chars().peekable();
     let mut tokens: Vec<String> = Vec::new();
 

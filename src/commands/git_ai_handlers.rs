@@ -54,6 +54,7 @@ pub fn handle_git_ai(args: &[String]) {
             | "uninstall"
             | "uninstall-hooks"
             | "usage"
+            | "export-metrics"
     );
     if needs_daemon {
         use crate::daemon::telemetry_handle::{
@@ -111,6 +112,9 @@ pub fn handle_git_ai(args: &[String]) {
         }
         "usage" => {
             commands::usage::handle_usage(&args[1..]);
+        }
+        "export-metrics" => {
+            commands::export_metrics::handle_export_metrics(&args[1..]);
         }
         "analyze" => {
             commands::analyze::handle_analyze(&args[1..]);
@@ -350,6 +354,7 @@ fn print_help() {
     eprintln!("  usage              Show local AI usage statistics");
     eprintln!("    --period <1d|3d|7d|30d>  Time window (default: 30d)");
     eprintln!("    --json                 Output in JSON format");
+    eprintln!("  export-metrics     Export local code and token metrics as JSON (no upload)");
     eprintln!("  analyze [beta]      Analyze agent sessions and effectiveness");
     eprintln!("  status             Show uncommitted AI authorship status (debug)");
     eprintln!("    --json                 Output in JSON format");

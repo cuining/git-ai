@@ -227,6 +227,8 @@ pub struct AppliedCommand {
     pub seq: u64,
     pub command: NormalizedCommand,
     pub analysis: AnalysisResult,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command_start_head: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

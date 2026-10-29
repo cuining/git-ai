@@ -51,7 +51,7 @@ pub fn reconstruct_working_log_after_backward_reset(
         .collect();
 
     let diff_results = if !diff_pairs.is_empty() {
-        compute_diff_trees_batch(repo, &diff_pairs)?
+        compute_diff_trees_batch(repo, &diff_pairs, false)?
     } else {
         Vec::new()
     };

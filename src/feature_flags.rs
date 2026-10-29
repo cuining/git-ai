@@ -87,6 +87,7 @@ define_feature_flags!(
     daemon_log_upload: daemon_log_upload, debug = true, release = true,
     rewrite_metrics_events: rewrite_metrics_events, debug = true, release = false,
     token_usage_metrics: token_usage_metrics, debug = true, release = true,
+    enterprise_metrics: enterprise_metrics, debug = false, release = false,
     untraced_commit_fixup: untraced_commit_fixup, debug = true, release = true,
     untraced_fixup_ignore_temp_repos: untraced_fixup_ignore_temp_repos, debug = true, release = true,
 );
@@ -285,6 +286,7 @@ mod tests {
             daemon_log_upload: true,
             rewrite_metrics_events: true,
             token_usage_metrics: true,
+            enterprise_metrics: false,
             untraced_commit_fixup: true,
             untraced_fixup_ignore_temp_repos: true,
         };
@@ -315,6 +317,7 @@ mod tests {
             daemon_log_upload: true,
             rewrite_metrics_events: true,
             token_usage_metrics: true,
+            enterprise_metrics: false,
             untraced_commit_fixup: false,
             untraced_fixup_ignore_temp_repos: true,
         };

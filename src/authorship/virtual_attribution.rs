@@ -2691,6 +2691,7 @@ impl VirtualAttributions {
             file_blobs: HashMap::new(),
             humans: initial_humans,
             sessions: initial_sessions,
+            ai_sources: HashMap::new(),
         };
 
         Ok((authorship_log, initial_attributions, initial_file_contents))
@@ -2952,6 +2953,7 @@ impl VirtualAttributions {
             file_blobs: HashMap::new(),
             humans: initial_humans,
             sessions: initial_sessions,
+            ai_sources: HashMap::new(),
         }
     }
 

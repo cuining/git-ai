@@ -35,6 +35,15 @@ pub(crate) struct DiffTreeResult {
     pub hunks_by_file: HashMap<String, Vec<DiffHunk>>,
     pub added_lines_by_file: HashMap<String, Vec<u32>>,
     pub renames: Vec<(String, String)>,
+    pub files: HashMap<String, DiffFileMetadata>,
+    pub metadata_error: Option<&'static str>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct DiffFileMetadata {
+    pub old_mode: Option<String>,
+    pub new_mode: Option<String>,
+    pub binary: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -352,7 +361,7 @@ fn build_diff_tree_stdin(
 /// extract_b_path / parse_diff_tree_output expect. (Contrast diff_added_lines
 /// in repository.rs, which DOES run `git diff` and therefore must force
 /// InternalGitProfile::PatchParse.)
-fn build_diff_tree_stdin_args(repo: &Repository) -> Vec<String> {
+fn build_diff_tree_stdin_args(repo: &Repository, collect_file_metadata: bool) -> Vec<String> {
     let mut args = repo.global_args_for_exec();
     args.extend([
         "diff-tree".to_string(),
@@ -363,6 +372,13 @@ fn build_diff_tree_stdin_args(repo: &Repository) -> Vec<String> {
         "--no-color".to_string(),
         "-r".to_string(),
     ]);
+    if collect_file_metadata {
+        args.extend([
+            "--raw".to_string(),
+            "--inter-hunk-context=0".to_string(),
+            "--submodule=short".to_string(),
+        ]);
+    }
     args
 }
 
@@ -370,6 +386,7 @@ fn compute_diff_tree_stdin(
     repo: &Repository,
     stdin_data: String,
     pair_count: usize,
+    collect_file_metadata: bool,
 ) -> Result<Vec<DiffTreeResult>, GitAiError> {
     // Stream the output line-by-line into the parser instead of buffering it:
     // after a rebase across a large trunk delta, every pair's root-tree diff
@@ -377,8 +394,9 @@ fn compute_diff_tree_stdin(
     // (trunk delta bytes) x (pair count) and buffering it has driven the
     // daemon to multi-GB RSS. The parsed hunk/line structures are a small
     // fraction of the raw patch text.
-    let args = build_diff_tree_stdin_args(repo);
+    let args = build_diff_tree_stdin_args(repo, collect_file_metadata);
     let mut parser = BatchedDiffTreeParser::new(pair_count);
+    parser.collect_file_metadata = collect_file_metadata;
     exec_git_stdin_streaming(&args, stdin_data.as_bytes(), |line| parser.feed_line(line))?;
     Ok(parser.finish())
 }
@@ -547,7 +565,7 @@ fn handle_squash_merge(
     diff_pairs.push((source_head.to_string(), squash_commit.to_string()));
 
     // Single batched diff-tree call for ALL intermediate shifts + final shift
-    let diff_results = compute_diff_trees_batch(repo, &diff_pairs)?;
+    let diff_results = compute_diff_trees_batch(repo, &diff_pairs, false)?;
 
     // Phase 1: Shift intermediate notes to source_head's coordinate space and merge
     let mut merged_log: Option<AuthorshipLog> = None;
@@ -676,6 +694,7 @@ fn post_squash_resolution_working_log(
                 compute_stats: false,
                 recover_attribution: false,
                 commit_source: None,
+                capture_enterprise: false,
             },
             move |resolution_log| {
                 Ok(
@@ -828,7 +847,7 @@ fn shift_authorship_notes_with_existing_mode(
         let unique_shas = unique_pair_shas(&diff_pairs);
         let sha_to_tree = resolve_tree_shas(repo, &unique_shas)?;
         let stdin_data = build_diff_tree_stdin(&diff_pairs, &sha_to_tree)?;
-        let diff_args = build_diff_tree_stdin_args(repo);
+        let diff_args = build_diff_tree_stdin_args(repo, false);
         let mut parser = BatchedDiffTreeParser::new(diff_pairs.len());
 
         exec_git_stdin_streaming(&diff_args, stdin_data.as_bytes(), |line| {
@@ -1318,6 +1337,7 @@ fn get_commit_parents_batch(repo: &Repository, shas: &[String]) -> HashMap<Strin
 pub(crate) fn compute_diff_trees_batch(
     repo: &Repository,
     pairs: &[(String, String)],
+    collect_file_metadata: bool,
 ) -> Result<Vec<DiffTreeResult>, GitAiError> {
     if pairs.is_empty() {
         return Ok(Vec::new());
@@ -1326,7 +1346,7 @@ pub(crate) fn compute_diff_trees_batch(
     let unique_shas = unique_pair_shas(pairs);
     let sha_to_tree = resolve_tree_shas(repo, &unique_shas)?;
     let stdin_data = build_diff_tree_stdin(pairs, &sha_to_tree)?;
-    compute_diff_tree_stdin(repo, stdin_data, pairs.len())
+    compute_diff_tree_stdin(repo, stdin_data, pairs.len(), collect_file_metadata)
 }
 
 /// Incremental parser for the output of `git diff-tree --stdin`, which
@@ -1339,6 +1359,7 @@ struct BatchedDiffTreeParser {
     results: Vec<DiffTreeResult>,
     current: DiffTreeChunkParser,
     seen_first_header: bool,
+    collect_file_metadata: bool,
 }
 
 impl BatchedDiffTreeParser {
@@ -1348,6 +1369,7 @@ impl BatchedDiffTreeParser {
             results: Vec::with_capacity(expected_pairs.min(DIFF_TREE_STREAM_CHUNK_SIZE)),
             current: DiffTreeChunkParser::default(),
             seen_first_header: false,
+            collect_file_metadata: false,
         }
     }
 
@@ -1360,7 +1382,7 @@ impl BatchedDiffTreeParser {
             }
             self.seen_first_header = true;
         } else if self.seen_first_header {
-            self.current.feed_line(line);
+            self.current.feed_line(line, self.collect_file_metadata);
         }
     }
 
@@ -1441,21 +1463,102 @@ struct DiffTreeChunkParser {
     current_file: Option<String>,
     current_rename_from: Option<String>,
     active_hunk_new_line: Option<u32>,
+    files: HashMap<String, DiffFileMetadata>,
+    patch_paths: HashMap<String, String>,
+    metadata_error: Option<&'static str>,
 }
 
 impl DiffTreeChunkParser {
-    fn feed_line(&mut self, line: &str) {
-        if let Some(rest) = line.strip_prefix("diff --git ") {
-            // Extract the b/ path from "a/old b/new"
-            self.current_file = extract_b_path(rest);
+    fn feed_line(&mut self, line: &str, collect_file_metadata: bool) {
+        if collect_file_metadata && let Some(raw) = line.strip_prefix(':') {
+            let mut fields = raw.split('\t');
+            if let (Some(metadata), Some(path)) = (fields.next(), fields.next()) {
+                let modes: Vec<_> = metadata.split_whitespace().take(2).collect();
+                let old_path = crate::utils::unescape_git_path(path);
+                let path = crate::utils::unescape_git_path(fields.next().unwrap_or(path));
+                if modes.len() == 2 {
+                    let header = format!("a/{old_path} b/{path}");
+                    if let Some(previous) = self.patch_paths.insert(header, path.clone())
+                        && previous != path
+                    {
+                        self.metadata_error = Some("ambiguous raw diff patch paths");
+                    }
+                    self.files.insert(
+                        path,
+                        DiffFileMetadata {
+                            old_mode: (modes[0] != "000000").then(|| modes[0].to_owned()),
+                            new_mode: (modes[1] != "000000").then(|| modes[1].to_owned()),
+                            binary: false,
+                        },
+                    );
+                }
+            }
+        } else if let Some(rest) = line.strip_prefix("diff --git ") {
+            self.current_file = if collect_file_metadata {
+                self.patch_paths.get(rest).cloned().or_else(|| {
+                    let (old, new) = crate::commands::diff::parse_two_git_path_tokens(rest)?;
+                    let old = crate::utils::unescape_git_path(&old);
+                    let new = crate::utils::unescape_git_path(&new);
+                    self.patch_paths.get(&format!("{old} {new}")).cloned()
+                })
+            } else {
+                extract_b_path(rest)
+            };
+            if collect_file_metadata && self.current_file.is_none() {
+                self.metadata_error = Some("unrecognized raw diff patch path");
+            }
+            if collect_file_metadata && let Some(path) = &self.current_file {
+                self.files.entry(path.clone()).or_default();
+            }
             self.current_rename_from = None;
             self.active_hunk_new_line = None;
+        } else if collect_file_metadata
+            && let Some(file) = self
+                .current_file
+                .as_ref()
+                .and_then(|path| self.files.get_mut(path))
+            && (line.starts_with("index ")
+                || line.starts_with("old mode ")
+                || line.starts_with("new mode ")
+                || line.starts_with("new file mode ")
+                || line.starts_with("deleted file mode ")
+                || line.starts_with("Binary files "))
+        {
+            if let Some(mode) = line
+                .strip_prefix("old mode ")
+                .or_else(|| line.strip_prefix("deleted file mode "))
+            {
+                file.old_mode = Some(mode.to_owned());
+            } else if let Some(mode) = line
+                .strip_prefix("new mode ")
+                .or_else(|| line.strip_prefix("new file mode "))
+            {
+                file.new_mode = Some(mode.to_owned());
+            } else if line.starts_with("index ") {
+                if let Some(mode) = line.split_whitespace().nth(2) {
+                    file.old_mode.get_or_insert_with(|| mode.to_owned());
+                    file.new_mode.get_or_insert_with(|| mode.to_owned());
+                }
+            } else {
+                file.binary = true;
+            }
         } else if let Some(from_path) = line.strip_prefix("rename from ") {
-            self.current_rename_from = Some(from_path.to_string());
+            self.current_rename_from = Some(if collect_file_metadata {
+                crate::utils::unescape_git_path(from_path)
+            } else {
+                from_path.to_owned()
+            });
             self.active_hunk_new_line = None;
         } else if let Some(to_path) = line.strip_prefix("rename to ") {
             if let Some(from_path) = self.current_rename_from.take() {
-                self.renames.push((from_path, to_path.to_string()));
+                self.renames.push((
+                    from_path,
+                    if collect_file_metadata {
+                        crate::utils::unescape_git_path(to_path)
+                    } else {
+                        to_path.to_owned()
+                    },
+                ));
             }
         } else if line.starts_with("@@")
             && let Some(ref file) = self.current_file
@@ -1494,6 +1597,8 @@ impl DiffTreeChunkParser {
             hunks_by_file: self.hunks_by_file,
             added_lines_by_file: self.added_lines_by_file,
             renames: self.renames,
+            files: self.files,
+            metadata_error: self.metadata_error,
         }
     }
 }
@@ -1502,7 +1607,7 @@ impl DiffTreeChunkParser {
 fn parse_diff_tree_output(output: &str) -> DiffTreeResult {
     let mut parser = DiffTreeChunkParser::default();
     for line in output.lines() {
-        parser.feed_line(line);
+        parser.feed_line(line, false);
     }
     parser.finish()
 }

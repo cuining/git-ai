@@ -34,6 +34,8 @@ pub struct InitialAttributions {
     /// Session records: `s_<session_id>` -> SessionRecord
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub sessions: std::collections::BTreeMap<String, SessionRecord>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub ai_sources: HashMap<String, crate::authorship::source_evidence::AiSourceSnapshot>,
 }
 
 #[derive(Debug, Clone)]
@@ -785,12 +787,30 @@ impl PersistedWorkingLog {
         file_contents: HashMap<String, String>,
         sessions: std::collections::BTreeMap<String, SessionRecord>,
     ) -> Result<(), GitAiError> {
-        let filtered: HashMap<String, Vec<LineAttribution>> = attributions
+        self.write_initial_with_contents(
+            InitialAttributions {
+                files: attributions,
+                prompts,
+                humans,
+                sessions,
+                ..InitialAttributions::default()
+            },
+            file_contents,
+        )
+    }
+
+    pub fn write_initial_with_contents(
+        &self,
+        initial: InitialAttributions,
+        file_contents: HashMap<String, String>,
+    ) -> Result<(), GitAiError> {
+        let filtered: HashMap<String, Vec<LineAttribution>> = initial
+            .files
             .into_iter()
             .filter(|(_, attrs)| !attrs.is_empty())
             .collect();
         let mut file_blobs = HashMap::new();
-        for file_path in filtered.keys() {
+        for file_path in filtered.keys().chain(initial.ai_sources.keys()) {
             let content = file_contents.get(file_path).ok_or_else(|| {
                 GitAiError::Generic(format!(
                     "INITIAL missing file content snapshot for {}",
@@ -798,15 +818,23 @@ impl PersistedWorkingLog {
                 ))
             })?;
             let blob_sha = self.persist_file_version(content)?;
+            if let Some(source) = initial.ai_sources.get(file_path)
+                && !source.matches(content)
+            {
+                return Err(GitAiError::Generic(format!(
+                    "INITIAL source snapshot mismatch for {file_path}"
+                )));
+            }
             file_blobs.insert(file_path.clone(), blob_sha);
         }
 
         self.write_initial(InitialAttributions {
             files: filtered,
-            prompts,
+            prompts: initial.prompts,
             file_blobs,
-            humans,
-            sessions,
+            humans: initial.humans,
+            sessions: initial.sessions,
+            ai_sources: initial.ai_sources,
         })
     }
 
@@ -819,7 +847,7 @@ impl PersistedWorkingLog {
             .filter(|(_, attrs)| !attrs.is_empty())
             .collect();
 
-        if filtered_files.is_empty() {
+        if filtered_files.is_empty() && initial.ai_sources.is_empty() {
             if self.initial_file.exists() {
                 fs::remove_file(&self.initial_file)?;
             }
@@ -827,7 +855,9 @@ impl PersistedWorkingLog {
         }
 
         let mut file_blobs = initial.file_blobs;
-        file_blobs.retain(|file_path, _| filtered_files.contains_key(file_path));
+        file_blobs.retain(|file_path, _| {
+            filtered_files.contains_key(file_path) || initial.ai_sources.contains_key(file_path)
+        });
 
         let initial_data = InitialAttributions {
             files: filtered_files,
@@ -835,6 +865,7 @@ impl PersistedWorkingLog {
             file_blobs,
             humans: initial.humans,
             sessions: initial.sessions,
+            ai_sources: initial.ai_sources,
         };
 
         let json = serde_json::to_string_pretty(&initial_data)?;

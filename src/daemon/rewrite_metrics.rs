@@ -237,7 +237,8 @@ fn hydrate_missing_parent_diffs(repo: &Repository, metric_commits: &mut [Rewrite
         return;
     }
 
-    let Ok(results) = crate::authorship::rewrite::compute_diff_trees_batch(repo, &pairs) else {
+    let Ok(results) = crate::authorship::rewrite::compute_diff_trees_batch(repo, &pairs, false)
+    else {
         return;
     };
     for (index, result) in indices.into_iter().zip(results) {
@@ -561,6 +562,8 @@ mod tests {
             hunks_by_file,
             added_lines_by_file: HashMap::new(),
             renames: Vec::new(),
+            files: HashMap::new(),
+            metadata_error: None,
         };
         let commit = metric_commit("new", &["old"], RewriteMetricOperation::Rebase)
             .with_branch("feature")

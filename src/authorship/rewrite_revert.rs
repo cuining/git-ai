@@ -161,7 +161,7 @@ pub(crate) fn handle_revert_commits_with_metrics(
         diff_pairs.push((r.parent_sha.clone(), r.revert_commit.clone()));
         added_idx.push(aidx);
     }
-    let diff_results = compute_diff_trees_batch(repo, &diff_pairs)?;
+    let diff_results = compute_diff_trees_batch(repo, &diff_pairs, false)?;
 
     // Per-commit reconstruction is now pure in-memory.
     let mut writes: Vec<(String, String)> = Vec::new();

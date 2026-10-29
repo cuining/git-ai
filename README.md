@@ -129,6 +129,9 @@ Calculates % AI-code, AI-lines generated vs committed, accepted rates, human ove
 
 </details>
 
+For local JSON snapshots of code contributions and Token usage, see
+[enterprise metrics export](docs/enterprise-metrics-export.md).
+
 ## AI Blame
 
 Git AI blame is a drop-in replacement for `git blame` that shows AI attribution for each line. It supports [all standard `git blame` flags](https://git-scm.com/docs/git-blame).

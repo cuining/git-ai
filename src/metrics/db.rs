@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
 /// Current schema version (must match MIGRATIONS.len())
-const SCHEMA_VERSION: usize = 5;
+const SCHEMA_VERSION: usize = 6;
 
 // This value is part of the metrics retry index schema. Changing it requires a
 // migration that rebuilds `metrics_retryable` with the same literal used by
@@ -89,6 +89,14 @@ const MIGRATIONS: &[&str] = &[
             AND attempts < 6;
 
     DROP INDEX IF EXISTS metrics_pending_retry;
+    "#,
+    r#"
+    CREATE TABLE IF NOT EXISTS enterprise_commit_facts (
+        repository_key TEXT NOT NULL,
+        commit_sha TEXT NOT NULL,
+        facts_json TEXT NOT NULL,
+        PRIMARY KEY (repository_key, commit_sha)
+    );
     "#,
 ];
 
@@ -272,7 +280,7 @@ impl MetricsDatabase {
     }
 
     /// Get database path: ~/.git-ai/internal/metrics-db
-    fn database_path() -> Result<PathBuf, GitAiError> {
+    pub(crate) fn database_path() -> Result<PathBuf, GitAiError> {
         // Allow test override via environment variable
         #[cfg(any(test, feature = "test-support"))]
         if let Ok(test_path) = std::env::var("GIT_AI_TEST_METRICS_DB_PATH") {
@@ -282,6 +290,100 @@ impl MetricsDatabase {
         let home = dirs::home_dir()
             .ok_or_else(|| GitAiError::Generic("Could not determine home directory".to_string()))?;
         Ok(home.join(".git-ai").join("internal").join("metrics-db"))
+    }
+
+    pub(crate) fn export_snapshot(
+        path: &std::path::Path,
+    ) -> Result<
+        (
+            Vec<MetricEvent>,
+            Vec<crate::metrics::enterprise::CommitFacts>,
+        ),
+        GitAiError,
+    > {
+        let conn = crate::sqlite::open_with_flags_and_memory_limits(
+            path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )?;
+        let transaction = conn.unchecked_transaction()?;
+        let has_kind: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('metrics') WHERE name = 'event_kind')",
+            [],
+            |row| row.get(0),
+        )?;
+        let sql = if has_kind {
+            "SELECT id, event_json FROM metrics WHERE event_kind IN (1, 7, 9) OR event_kind IS NULL ORDER BY id ASC"
+        } else {
+            "SELECT id, event_json FROM metrics ORDER BY id ASC"
+        };
+        let mut statement = transaction.prepare(sql)?;
+        let rows = statement.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut events = Vec::new();
+        for row in rows {
+            let (id, json) = row?;
+            let event: MetricEvent = serde_json::from_str(&json).map_err(|_| {
+                GitAiError::Generic(format!("invalid metric JSON at database row {id}"))
+            })?;
+            if matches!(event.event_id, 1 | 7 | 9) {
+                events.push(event);
+            }
+        }
+        drop(statement);
+        let has_facts: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'enterprise_commit_facts')", [], |row| row.get(0),
+        )?;
+        let mut facts = Vec::new();
+        if has_facts {
+            let mut statement = transaction.prepare("SELECT facts_json FROM enterprise_commit_facts ORDER BY repository_key, commit_sha")?;
+            for row in statement.query_map([], |row| row.get::<_, String>(0))? {
+                facts.push(
+                    serde_json::from_str(&row?)
+                        .map_err(|_| GitAiError::Generic("invalid local commit facts".into()))?,
+                );
+            }
+        }
+        transaction.commit()?;
+        Ok((events, facts))
+    }
+
+    pub(crate) fn insert_commit_facts(
+        &mut self,
+        facts: &crate::metrics::enterprise::CommitFacts,
+    ) -> Result<(), GitAiError> {
+        let transaction = self.conn.transaction()?;
+        let previous: Option<String> = transaction.query_row(
+            "SELECT facts_json FROM enterprise_commit_facts WHERE repository_key = ?1 AND commit_sha = ?2",
+            params![facts.repository_key, facts.commit_sha], |row| row.get(0),
+        ).optional()?;
+        let mut stored = facts.clone();
+        if let Some(previous) = previous {
+            let previous: crate::metrics::enterprise::CommitFacts =
+                serde_json::from_str(&previous)?;
+            let mut comparable = previous.clone();
+            comparable.recorded_at = stored.recorded_at;
+            comparable
+                .legacy_event_hashes
+                .clone_from(&stored.legacy_event_hashes);
+            if comparable != stored {
+                return Err(GitAiError::Generic(
+                    "conflicting immutable local commit facts".into(),
+                ));
+            }
+            stored.recorded_at = previous.recorded_at;
+            stored
+                .legacy_event_hashes
+                .extend(previous.legacy_event_hashes);
+        }
+        stored.legacy_event_hashes.sort();
+        stored.legacy_event_hashes.dedup();
+        transaction.execute(
+            "INSERT INTO enterprise_commit_facts (repository_key, commit_sha, facts_json) VALUES (?1, ?2, ?3) ON CONFLICT(repository_key, commit_sha) DO UPDATE SET facts_json = excluded.facts_json",
+            params![stored.repository_key, stored.commit_sha, serde_json::to_string(&stored)?],
+        )?;
+        transaction.commit()?;
+        Ok(())
     }
 
     /// Initialize schema and handle migrations
@@ -1609,6 +1711,48 @@ mod tests {
             .as_secs()
     }
 
+    #[test]
+    fn enterprise_commit_facts_retries_are_immutable_and_never_pending_uploads() {
+        let (mut db, directory) = create_test_db();
+        let facts = crate::metrics::enterprise::CommitFacts {
+            repository_key: "repository-one".into(),
+            repo_url: None,
+            commit_sha: "commit".into(),
+            parent_shas: Vec::new(),
+            committed_at: 1,
+            recorded_at: 2,
+            legacy_event_hashes: vec!["first-observation".into()],
+            files: Vec::new(),
+        };
+        db.insert_commit_facts(&facts).unwrap();
+        let mut retry = facts.clone();
+        retry.recorded_at = 3;
+        retry.legacy_event_hashes = vec!["second-observation".into()];
+        db.insert_commit_facts(&retry).unwrap();
+        db.insert_commit_facts(&retry).unwrap();
+        let (_, stored) =
+            MetricsDatabase::export_snapshot(&directory.path().join("test-metrics.db")).unwrap();
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].recorded_at, 2);
+        assert_eq!(
+            stored[0].legacy_event_hashes,
+            ["first-observation", "second-observation"]
+        );
+        retry.committed_at = 4;
+        assert!(db.insert_commit_facts(&retry).is_err());
+        assert_eq!(db.count().unwrap(), 0);
+        assert_eq!(db.count_retryable().unwrap(), 0);
+        let (_, unchanged) =
+            MetricsDatabase::export_snapshot(&directory.path().join("test-metrics.db")).unwrap();
+        assert_eq!(unchanged, stored);
+        let mut other_repo = facts;
+        other_repo.repository_key = "repository-two".into();
+        db.insert_commit_facts(&other_repo).unwrap();
+        let (_, both) =
+            MetricsDatabase::export_snapshot(&directory.path().join("test-metrics.db")).unwrap();
+        assert_eq!(both.len(), 2);
+    }
+
     fn days_ago(days: u64) -> u32 {
         seconds_ago(days * 24 * 3600)
     }
@@ -1752,7 +1896,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(version, "5");
+        assert_eq!(version, SCHEMA_VERSION.to_string());
 
         for column in [
             "delivered_ts",
@@ -1848,7 +1992,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(version, "5");
+        assert_eq!(version, SCHEMA_VERSION.to_string());
     }
 
     #[test]
@@ -1887,7 +2031,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(version, "5");
+        assert_eq!(version, SCHEMA_VERSION.to_string());
         assert_eq!(db.count().unwrap(), 1);
         assert_eq!(db.count_retryable().unwrap(), 1);
     }
@@ -1930,7 +2074,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(version, "5");
+        assert_eq!(version, SCHEMA_VERSION.to_string());
 
         for column in [
             "delivered_ts",
@@ -1999,7 +2143,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(version, "5");
+        assert_eq!(version, SCHEMA_VERSION.to_string());
         assert!(db.column_exists("metrics", "event_ts").unwrap());
         assert!(db.column_exists("metrics", "event_kind").unwrap());
         for index in [
@@ -2058,7 +2202,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(version, "5");
+        assert_eq!(version, SCHEMA_VERSION.to_string());
         assert_metric_index_exists(&db, "metrics_retryable");
         assert_metric_index_missing(&db, "metrics_pending_retry");
         assert_eq!(db.count().unwrap(), 1);
