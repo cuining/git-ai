@@ -989,6 +989,9 @@ impl StreamWorker {
                 self.notify_token_usage(&task);
             }
             Ok(Err(e)) => {
+                if task.tool == "opencode" {
+                    self.notify_token_usage(&task);
+                }
                 // Error - handle retry logic
                 self.handle_processing_error(task, e).await;
             }
@@ -1342,6 +1345,9 @@ impl StreamWorker {
                     tracing::error!(error = %e, session_id = %task.session_id, "drain task panicked");
                 }
                 Ok(Err(e)) => {
+                    if task.tool == "opencode" {
+                        self.notify_token_usage(&task);
+                    }
                     tracing::error!(error = %e, session_id = %task.session_id, "drain task processing error");
                 }
                 Ok(Ok(())) => {
@@ -1358,8 +1364,18 @@ impl StreamWorker {
     fn notify_token_usage(&self, task: &ProcessingTask) {
         if task.stream_kind == "transcript"
             && let Some(token_usage) = &self.token_usage_worker
+            && let Ok(Some(stream)) = self.streams_db.get_stream(
+                &task.session_id,
+                "transcript",
+                &task.canonical_path.display().to_string(),
+            )
         {
-            token_usage.notify_stream_processed(&task.session_id, &task.tool, &task.canonical_path);
+            token_usage.notify_stream_processed(
+                &task.session_id,
+                &task.tool,
+                &stream.stream_format,
+                &task.canonical_path,
+            );
         }
     }
 

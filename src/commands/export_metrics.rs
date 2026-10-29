@@ -826,7 +826,7 @@ struct RootTotal {
 
 fn resolve_root(
     session: &str,
-    parents: &BTreeMap<String, Option<String>>,
+    parents: &BTreeMap<String, String>,
 ) -> Result<(String, bool), String> {
     let mut current = session;
     let mut visited = BTreeSet::new();
@@ -835,10 +835,34 @@ fn resolve_root(
             return Err("cyclic parent relationships in Token history".into());
         }
         match parents.get(current) {
-            Some(Some(parent)) => current = parent,
-            Some(None) => return Ok((current.into(), true)),
+            Some(parent) => current = parent,
             None => return Ok((current.into(), false)),
         }
+    }
+}
+
+fn observe_parent(
+    parents: &mut BTreeMap<String, String>,
+    session: String,
+    parent: String,
+) -> Result<(), String> {
+    if let Some(previous) = parents.insert(session, parent.clone())
+        && previous != parent
+    {
+        return Err("conflicting Token session parents".into());
+    }
+    Ok(())
+}
+
+fn same_token_revision(left: &MetricEvent, right: &MetricEvent, username: &str) -> bool {
+    match (token_record(left, username), token_record(right, username)) {
+        (Ok(mut left), Ok(mut right)) => {
+            left.parent_session_id = None;
+            right.parent_session_id = None;
+            left == right
+        }
+        (Err(_), Err(_)) => left.values == right.values,
+        _ => false,
     }
 }
 
@@ -953,9 +977,28 @@ fn snapshot(
     snapshot_with_facts(events, Vec::new(), username, classifier, window)
 }
 
+#[cfg(test)]
 fn snapshot_with_facts(
     events: Vec<MetricEvent>,
     facts: Vec<CommitFacts>,
+    username: &str,
+    classifier: Classifier,
+    window: Window,
+) -> Result<Snapshot, String> {
+    snapshot_with_local_history(
+        events,
+        facts,
+        Default::default(),
+        username,
+        classifier,
+        window,
+    )
+}
+
+fn snapshot_with_local_history(
+    mut events: Vec<MetricEvent>,
+    facts: Vec<CommitFacts>,
+    native: crate::token_usage::native_store::NativeExport,
     username: &str,
     classifier: Classifier,
     window: Window,
@@ -1040,6 +1083,26 @@ fn snapshot_with_facts(
         .flat_map(|(fact, _)| fact.legacy_event_hashes.iter())
         .cloned()
         .collect();
+    let mut parents = BTreeMap::new();
+    for (session, parent) in native.parents {
+        observe_parent(&mut parents, session, parent)?;
+    }
+    diagnostics.extend(native.unavailable.into_iter().map(|reason| Diagnostic {
+        record_type: "token_bucket",
+        reason: reason.diagnostic().into(),
+    }));
+    events.extend(native.events);
+    for event in events.iter().filter(|event| event.event_id == 9) {
+        if let (Some(session), Some(parent)) = (
+            string_attr(event, attr_pos::SESSION_ID),
+            string_attr(event, attr_pos::PARENT_SESSION_ID),
+        ) {
+            observe_parent(&mut parents, session, parent)?;
+        }
+    }
+    for session in parents.keys() {
+        resolve_root(session, &parents)?;
+    }
     let mut token_events: BTreeMap<TokenKey, (u64, MetricEvent)> = BTreeMap::new();
     for event in events {
         if matches!(event.event_id, 1 | 7)
@@ -1077,15 +1140,7 @@ fn snapshot_with_facts(
                             continue;
                         }
                         if revision == *old_revision {
-                            let same =
-                                match (token_record(old, username), token_record(&event, username))
-                                {
-                                    (Ok(a), Ok(b)) => a == b,
-                                    (Err(_), Err(_)) => {
-                                        old.values == event.values && old.attrs == event.attrs
-                                    }
-                                    _ => false,
-                                };
+                            let same = same_token_revision(old, &event, username);
                             if !same {
                                 return Err("conflicting revisions of the same Token bucket".into());
                             }
@@ -1147,22 +1202,11 @@ fn snapshot_with_facts(
             }
         })
         .collect();
-    let mut parents = BTreeMap::new();
-    for token in &tokens {
-        let parent = parents.entry(token.session_id.clone()).or_insert(None);
-        if let Some(observed) = &token.parent_session_id {
-            if let Some(previous) = parent.as_ref()
-                && previous != observed
-            {
-                return Err("conflicting Token session parents".into());
-            }
-            *parent = Some(observed.clone());
-        }
-    }
     let tokens = tokens
         .into_iter()
         .filter(|token| window.contains(token.timestamp / 1000))
         .map(|mut token| {
+            token.parent_session_id = parents.get(&token.session_id).cloned();
             (token.root_session_id, token.root_relation_complete) =
                 resolve_root(&token.session_id, &parents)?;
             Ok(token)
@@ -1191,7 +1235,7 @@ fn snapshot_with_facts(
                 "Local facts count eligible binary, rename-only, and mode-only files once; legacy events cover recorded text hunks only",
                 "Token records are revised five-minute buckets, not completed turns or incremental observations",
                 "Root totals cover observed local sessions; descendant completion is not established",
-                "Independent local Token extraction currently covers Claude and Codex, not OpenCode",
+                "OpenCode covers native SQLite message.data usage only; session_message, cumulative-only history, auxiliary completeness, and completed turns remain unsupported",
                 "Missing or expired local events cannot be reconstructed; unknown attribution is not human attribution",
             ],
         },
@@ -1209,9 +1253,10 @@ fn run(options: Options) -> Result<(), String> {
         .map(Ok)
         .unwrap_or_else(MetricsDatabase::database_path)
         .map_err(|e| e.to_string())?;
-    let (events, facts) = MetricsDatabase::export_snapshot(&database)
+    let (events, facts, native) = MetricsDatabase::export_snapshot(&database)
         .map_err(|e| format!("cannot read local metrics database: {e}"))?;
-    let snapshot = snapshot_with_facts(events, facts, &options.username, classifier, window)?;
+    let snapshot =
+        snapshot_with_local_history(events, facts, native, &options.username, classifier, window)?;
     let mut bytes = serde_json::to_vec_pretty(&snapshot).map_err(|e| e.to_string())?;
     bytes.push(b'\n');
     if let Some(path) = options.output {
@@ -1542,6 +1587,170 @@ mod tests {
         let path = directory.path().join("classification.json");
         std::fs::write(&path, r#"{"language_extensions":{"RS":"MyRust"}}"#).unwrap();
         assert!(Classifier::load(Some(&path)).is_err());
+    }
+
+    fn parent_event(mut event: MetricEvent, parent: &str) -> MetricEvent {
+        event
+            .attrs
+            .insert(attr_pos::PARENT_SESSION_ID.to_string(), json!(parent));
+        event
+    }
+
+    fn token_snapshot(events: Vec<MetricEvent>, since: u64) -> Result<Snapshot, String> {
+        snapshot(
+            events,
+            "employee",
+            classifier(),
+            Window {
+                since,
+                until: u64::MAX,
+            },
+        )
+    }
+
+    #[test]
+    fn retained_token_parents_survive_newer_parentless_counter_revisions() {
+        let result = token_snapshot(
+            vec![
+                parent_event(token(1, 50, "child"), "root"),
+                token(2, 10, "child"),
+                token(1, 20, "root"),
+            ],
+            0,
+        )
+        .unwrap();
+        assert_eq!(result.token_root_totals.len(), 1);
+        assert_eq!(result.token_root_totals[0].total_tokens, 30);
+        assert_eq!(
+            result
+                .token_usage
+                .iter()
+                .find(|r| r.session_id == "child")
+                .unwrap()
+                .parent_session_id
+                .as_deref(),
+            Some("root")
+        );
+        assert!(result.token_usage.iter().all(|r| !r.root_relation_complete));
+    }
+
+    #[test]
+    fn bad_token_counters_still_supply_valid_parent_evidence() {
+        let mut bad = parent_event(token(1, 50, "child"), "root");
+        bad.values
+            .remove(&token_usage_pos::INPUT_TOKENS.to_string());
+        let result =
+            token_snapshot(vec![bad, token(2, 10, "child"), token(1, 20, "root")], 0).unwrap();
+        assert_eq!(result.token_root_totals.len(), 1);
+        assert_eq!(result.token_root_totals[0].total_tokens, 30);
+    }
+
+    #[test]
+    fn invalid_selected_child_preserves_ancestry_for_valid_grandchild_without_stale_usage() {
+        for replacement in [None, Some(json!("private_invalid_counter_ancestry_marker"))] {
+            let mut invalid = parent_event(token(2, 700, "child"), "root");
+            invalid
+                .values
+                .remove(&token_usage_pos::INPUT_TOKENS.to_string());
+            if let Some(value) = replacement {
+                invalid
+                    .values
+                    .insert(token_usage_pos::INPUT_TOKENS.to_string(), value);
+            }
+            let history = vec![
+                token(1, 500, "child"),
+                invalid,
+                parent_event(token(1, 7, "grandchild"), "child"),
+                token(1, 20, "root"),
+            ];
+            for events in [history.clone(), history.into_iter().rev().collect()] {
+                let result = token_snapshot(events, 0).unwrap();
+                assert_eq!(result.token_usage.len(), 2);
+                assert!(
+                    result
+                        .token_usage
+                        .iter()
+                        .all(|row| row.session_id != "child")
+                );
+                let grandchild = result
+                    .token_usage
+                    .iter()
+                    .find(|row| row.session_id == "grandchild")
+                    .unwrap();
+                assert_eq!(grandchild.parent_session_id.as_deref(), Some("child"));
+                assert_eq!(grandchild.root_session_id, "root");
+                assert!(!grandchild.root_relation_complete);
+                assert_eq!(result.token_root_totals.len(), 1);
+                assert_eq!(result.token_root_totals[0].total_tokens, 27);
+                assert_eq!(result.token_root_totals[0].descendant_session_count, 1);
+                assert_eq!(result.coverage.diagnostics.len(), 1);
+                assert!(
+                    !serde_json::to_string(&result)
+                        .unwrap()
+                        .contains("private_invalid_counter_ancestry_marker")
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn token_parent_enrichment_is_independent_of_equal_counter_revision() {
+        for events in [
+            vec![
+                token(1, 10, "child"),
+                parent_event(token(1, 10, "child"), "root"),
+            ],
+            vec![
+                parent_event(token(1, 10, "child"), "root"),
+                token(1, 10, "child"),
+            ],
+        ] {
+            let result = token_snapshot(events, 0).unwrap();
+            assert_eq!(result.token_usage[0].root_session_id, "root");
+            assert_eq!(
+                result.token_usage[0].parent_session_id.as_deref(),
+                Some("root")
+            );
+        }
+    }
+
+    #[test]
+    fn equal_counter_revisions_cannot_hide_conflicting_nonempty_parents() {
+        let history = vec![
+            parent_event(token(1, 10, "child"), "root"),
+            parent_event(token(1, 10, "child"), "other"),
+        ];
+        for events in [history.clone(), history.into_iter().rev().collect()] {
+            assert!(token_snapshot(events, 0).is_err());
+        }
+    }
+
+    #[test]
+    fn token_parent_conflicts_and_cycles_outside_window_are_rejected() {
+        assert!(
+            token_snapshot(
+                vec![
+                    parent_event(token(1, 5, "child"), "root"),
+                    parent_event(token(2, 5, "child"), "other"),
+                ],
+                1000
+            )
+            .is_err()
+        );
+        assert!(
+            token_snapshot(
+                vec![
+                    parent_event(token(1, 5, "one"), "two"),
+                    parent_event(token(1, 5, "two"), "one"),
+                ],
+                1000
+            )
+            .is_err()
+        );
+        let mut bad = parent_event(token(1, 5, "two"), "one");
+        bad.values
+            .remove(&token_usage_pos::INPUT_TOKENS.to_string());
+        assert!(token_snapshot(vec![parent_event(token(1, 5, "one"), "two"), bad], 1000).is_err());
     }
 
     #[test]

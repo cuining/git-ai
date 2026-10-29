@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
 /// Current schema version (must match MIGRATIONS.len())
-const SCHEMA_VERSION: usize = 6;
+const SCHEMA_VERSION: usize = 7;
 
 // This value is part of the metrics retry index schema. Changing it requires a
 // migration that rebuilds `metrics_retryable` with the same literal used by
@@ -98,6 +98,7 @@ const MIGRATIONS: &[&str] = &[
         PRIMARY KEY (repository_key, commit_sha)
     );
     "#,
+    crate::token_usage::native_store::SCHEMA,
 ];
 
 /// Global database singleton
@@ -298,6 +299,7 @@ impl MetricsDatabase {
         (
             Vec<MetricEvent>,
             Vec<crate::metrics::enterprise::CommitFacts>,
+            crate::token_usage::native_store::NativeExport,
         ),
         GitAiError,
     > {
@@ -344,8 +346,43 @@ impl MetricsDatabase {
                 );
             }
         }
+        let native = crate::token_usage::native_store::export(&transaction)?;
         transaction.commit()?;
-        Ok((events, facts))
+        Ok((events, facts, native))
+    }
+
+    pub(crate) fn observe_token_parent(
+        &self,
+        session: &str,
+        parent: &str,
+    ) -> Result<(), GitAiError> {
+        self.conn.execute(
+            "INSERT OR IGNORE INTO enterprise_token_parents(session_id, parent_id) VALUES(?1, ?2)",
+            params![session, parent],
+        )?;
+        Ok(())
+    }
+
+    pub(crate) fn install_native_usage(
+        &mut self,
+        source: &crate::token_usage::native_store::NativeSource<'_>,
+        result: Result<
+            crate::token_usage::opencode::NativeSessionSnapshot,
+            crate::token_usage::opencode::NativeSnapshotError,
+        >,
+        min_bucket: u32,
+        revision_floor: u64,
+    ) -> Result<(), GitAiError> {
+        let transaction = self.conn.transaction()?;
+        crate::token_usage::native_store::install(
+            &transaction,
+            source,
+            result,
+            min_bucket,
+            revision_floor,
+        )?;
+        transaction.commit()?;
+        Ok(())
     }
 
     pub(crate) fn commit_facts_for_repository(
@@ -639,6 +676,21 @@ impl MetricsDatabase {
             return Ok(Vec::new());
         }
 
+        self.insert_events_with_token_parent_retention(
+            events,
+            delivered_ts,
+            crate::config::Config::get()
+                .feature_flags()
+                .enterprise_metrics,
+        )
+    }
+
+    fn insert_events_with_token_parent_retention(
+        &mut self,
+        events: &[String],
+        delivered_ts: Option<u64>,
+        retain_token_parents: bool,
+    ) -> Result<Vec<i64>, GitAiError> {
         let tx = self.conn.transaction()?;
         let mut ids = Vec::with_capacity(events.len());
 
@@ -697,7 +749,21 @@ impl MetricsDatabase {
                         .as_ref()
                         .and_then(|m| m.external_tool_use_id.as_deref()),
                 ])?;
-                ids.push(tx.last_insert_rowid());
+                let id = tx.last_insert_rowid();
+                if retain_token_parents
+                    && let Some(metadata) = &metadata
+                    && metadata.event_kind == 9
+                    && let (Some(session), Some(parent)) =
+                        (&metadata.session_id, &metadata.parent_session_id)
+                    && !session.is_empty()
+                    && !parent.is_empty()
+                {
+                    tx.execute(
+                        "INSERT OR IGNORE INTO enterprise_token_parents(session_id, parent_id) VALUES(?1, ?2)",
+                        params![session, parent],
+                    )?;
+                }
+                ids.push(id);
             }
         }
 
@@ -1785,7 +1851,7 @@ mod tests {
         retry.legacy_event_hashes = vec!["second-observation".into()];
         db.insert_commit_facts(&retry).unwrap();
         db.insert_commit_facts(&retry).unwrap();
-        let (_, stored) =
+        let (_, stored, _) =
             MetricsDatabase::export_snapshot(&directory.path().join("test-metrics.db")).unwrap();
         assert_eq!(stored.len(), 1);
         assert_eq!(stored[0].recorded_at, 2);
@@ -1797,15 +1863,323 @@ mod tests {
         assert!(db.insert_commit_facts(&retry).is_err());
         assert_eq!(db.count().unwrap(), 0);
         assert_eq!(db.count_retryable().unwrap(), 0);
-        let (_, unchanged) =
+        let (_, unchanged, _) =
             MetricsDatabase::export_snapshot(&directory.path().join("test-metrics.db")).unwrap();
         assert_eq!(unchanged, stored);
         let mut other_repo = facts;
         other_repo.repository_key = "repository-two".into();
         db.insert_commit_facts(&other_repo).unwrap();
-        let (_, both) =
+        let (_, both, _) =
             MetricsDatabase::export_snapshot(&directory.path().join("test-metrics.db")).unwrap();
         assert_eq!(both.len(), 2);
+    }
+
+    fn native_snapshot(
+        input: u64,
+        model: &str,
+        time: u32,
+        parent: Option<&str>,
+    ) -> crate::token_usage::opencode::NativeSessionSnapshot {
+        use crate::token_usage::opencode::{NativeSessionSnapshot, NativeUsageObservation};
+        NativeSessionSnapshot {
+            session_id: "native".into(),
+            parent_session_id: parent.map(str::to_owned),
+            created_at_ms: 1,
+            observations: vec![NativeUsageObservation {
+                entry_key: "opencode:6:native:message".into(),
+                message_id: "message".into(),
+                model: model.into(),
+                provider_id: "provider".into(),
+                created_at_ms: i64::from(time) * 1000,
+                updated_at_ms: 2,
+                timestamp_secs: time,
+                tokens: crate::token_usage::TokenCounts {
+                    input,
+                    total: input,
+                    reasoning_output: Some(0),
+                    ..Default::default()
+                },
+            }],
+            replay_diagnostics: Vec::new(),
+        }
+    }
+
+    fn native_source(path: &str) -> crate::token_usage::native_store::NativeSource<'_> {
+        crate::token_usage::native_store::NativeSource {
+            session_id: "internal-native",
+            external_session_id: "native",
+            stream_path: path,
+            observed_parent_session_id: None,
+            repo_url: None,
+        }
+    }
+
+    fn native_values(db: &MetricsDatabase) -> Vec<serde_json::Value> {
+        let tx = db.conn.unchecked_transaction().unwrap();
+        let history = crate::token_usage::native_store::export(&tx).unwrap();
+        history
+            .events
+            .iter()
+            .map(|event| serde_json::to_value(event).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn native_usage_private_projection_is_idempotent_source_specific_and_corrects_old_buckets() {
+        use crate::metrics::events::token_usage_pos as pos;
+        use crate::metrics::pos_encoded::sparse_get_u64;
+        let (mut db, directory) = create_test_db();
+        db.install_native_usage(
+            &native_source("one"),
+            Ok(native_snapshot(0, "model", 301, None)),
+            0,
+            10,
+        )
+        .unwrap();
+        assert!(native_values(&db).is_empty());
+        db.install_native_usage(
+            &native_source("one"),
+            Ok(native_snapshot(100, "model", 301, None)),
+            0,
+            10,
+        )
+        .unwrap();
+        let initial = native_values(&db);
+        db.install_native_usage(
+            &native_source("one"),
+            Ok(native_snapshot(100, "model", 301, None)),
+            0,
+            20,
+        )
+        .unwrap();
+        db.install_native_usage(
+            &native_source("copy"),
+            Ok(native_snapshot(100, "model", 301, Some("root"))),
+            0,
+            20,
+        )
+        .unwrap();
+        assert_eq!(
+            native_values(&db),
+            initial,
+            "copy IDs must not double usage or change its ingestion revision"
+        );
+        let mut other = native_snapshot(7, "other-model", 601, None);
+        other.observations[0].entry_key = "opencode:6:native:other".into();
+        other.observations[0].message_id = "other".into();
+        db.install_native_usage(&native_source("other"), Ok(other), 0, 20)
+            .unwrap();
+        let mut empty = native_snapshot(0, "model", 301, None);
+        empty.observations.clear();
+        db.install_native_usage(&native_source("one"), Ok(empty.clone()), 0, 20)
+            .unwrap();
+        assert_eq!(
+            native_values(&db).len(),
+            2,
+            "deleting one source must retain its copied observation and the independent source"
+        );
+        db.install_native_usage(&native_source("copy"), Ok(empty), 0, 20)
+            .unwrap();
+        let (_, _, history) =
+            MetricsDatabase::export_snapshot(&directory.path().join("test-metrics.db")).unwrap();
+        let totals: Vec<_> = history
+            .events
+            .iter()
+            .map(|event| {
+                sparse_get_u64(&event.values, pos::TOTAL_TOKENS)
+                    .flatten()
+                    .unwrap()
+            })
+            .collect();
+        assert_eq!(totals, [0, 7]);
+        assert_eq!(
+            history.parents,
+            [(
+                "internal-native".into(),
+                crate::authorship::authorship_log_serialization::generate_session_id(
+                    "root", "opencode"
+                )
+            )]
+        );
+        assert_eq!(db.count().unwrap(), 0);
+        assert_eq!(db.count_retryable().unwrap(), 0);
+        db.reingest_metrics(None, None).unwrap();
+        assert_eq!(db.count_retryable().unwrap(), 0);
+        assert_eq!(native_values(&db).len(), 2);
+    }
+
+    #[test]
+    fn native_usage_conflicts_and_aggregate_overflow_are_unavailable_without_integer_corruption() {
+        use crate::metrics::events::token_usage_pos as pos;
+        use crate::metrics::pos_encoded::sparse_get_u64;
+        use crate::token_usage::native_store::UnavailableReason;
+        let (mut db, directory) = create_test_db();
+        let path = directory.path().join("test-metrics.db");
+        db.install_native_usage(
+            &native_source("one"),
+            Ok(native_snapshot(100, "model", 301, None)),
+            0,
+            10,
+        )
+        .unwrap();
+        let initial = native_values(&db);
+        db.install_native_usage(
+            &native_source("copy"),
+            Ok(native_snapshot(50, "model", 301, None)),
+            0,
+            20,
+        )
+        .unwrap();
+        let (_, _, history) = MetricsDatabase::export_snapshot(&path).unwrap();
+        assert!(history.events.is_empty());
+        assert_eq!(history.unavailable, [UnavailableReason::ConflictingSources]);
+        db.install_native_usage(
+            &native_source("copy"),
+            Ok(native_snapshot(100, "model", 301, None)),
+            0,
+            20,
+        )
+        .unwrap();
+        assert_eq!(native_values(&db), initial);
+        let mut large = native_snapshot(i64::MAX as u64, "large-model", 601, None);
+        large.observations[0].entry_key.push_str("-large");
+        large.observations[0].message_id.push_str("-large");
+        let mut second = large.observations[0].clone();
+        second.entry_key.push_str("-second");
+        second.message_id.push_str("-second");
+        large.observations.push(second.clone());
+        db.install_native_usage(&native_source("large"), Ok(large.clone()), 0, 20)
+            .unwrap();
+        let (_, _, history) = MetricsDatabase::export_snapshot(&path).unwrap();
+        let event = history
+            .events
+            .iter()
+            .find(|event| {
+                sparse_get_u64(&event.values, pos::TOTAL_TOKENS).flatten() == Some(u64::MAX - 1)
+            })
+            .unwrap();
+        assert_eq!(
+            sparse_get_u64(&event.values, pos::INPUT_TOKENS).flatten(),
+            Some(u64::MAX - 1)
+        );
+        second.entry_key.push_str("-third");
+        second.message_id.push_str("-third");
+        large.observations.push(second);
+        db.install_native_usage(&native_source("large"), Ok(large), 0, 20)
+            .unwrap();
+        let (_, _, history) = MetricsDatabase::export_snapshot(&path).unwrap();
+        assert!(history.events.is_empty());
+        assert_eq!(history.unavailable, [UnavailableReason::CounterOverflow]);
+    }
+
+    #[test]
+    fn native_usage_rolls_back_source_parent_status_and_projection_on_failure() {
+        use crate::token_usage::opencode::NativeSnapshotError;
+        let (mut db, directory) = create_test_db();
+        db.install_native_usage(
+            &native_source("one"),
+            Ok(native_snapshot(100, "old-model", 301, None)),
+            0,
+            10,
+        )
+        .unwrap();
+        let initial = native_values(&db);
+        db.conn.execute_batch("CREATE TRIGGER fail_native_projection BEFORE UPDATE ON enterprise_native_sessions BEGIN SELECT RAISE(ABORT, 'injected storage failure'); END;").unwrap();
+        assert!(
+            db.install_native_usage(
+                &native_source("one"),
+                Ok(native_snapshot(20, "new-model", 601, Some("root"))),
+                0,
+                20
+            )
+            .is_err()
+        );
+        assert_eq!(native_values(&db), initial);
+        let (_, _, history) =
+            MetricsDatabase::export_snapshot(&directory.path().join("test-metrics.db")).unwrap();
+        assert!(history.parents.is_empty());
+        let snapshot: String = db
+            .conn
+            .query_row(
+                "SELECT snapshot_json FROM enterprise_native_sources",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(snapshot.contains("old-model"));
+        assert!(!snapshot.contains("new-model"));
+        assert!(
+            db.install_native_usage(
+                &native_source("one"),
+                Err(NativeSnapshotError::ReadFailure),
+                0,
+                20
+            )
+            .is_err()
+        );
+        assert_eq!(
+            native_values(&db),
+            initial,
+            "failed unavailable writes must roll back too"
+        );
+        db.conn
+            .execute_batch("DROP TRIGGER fail_native_projection")
+            .unwrap();
+        db.install_native_usage(
+            &native_source("one"),
+            Err(NativeSnapshotError::ReadFailure),
+            0,
+            20,
+        )
+        .unwrap();
+        drop(db);
+        let path = directory.path().join("test-metrics.db");
+        let (_, _, history) = MetricsDatabase::export_snapshot(&path).unwrap();
+        assert!(history.events.is_empty());
+        assert_eq!(
+            history.unavailable,
+            [crate::token_usage::native_store::UnavailableReason::ReadFailure]
+        );
+        let mut db = MetricsDatabase::open_at_path(&path).unwrap();
+        db.install_native_usage(
+            &native_source("one"),
+            Ok(native_snapshot(20, "new-model", 601, Some("root"))),
+            0,
+            20,
+        )
+        .unwrap();
+        let (_, _, history) = MetricsDatabase::export_snapshot(&path).unwrap();
+        assert!(history.unavailable.is_empty());
+        assert_eq!(history.events.len(), 2);
+        assert_eq!(history.parents.len(), 1);
+    }
+
+    #[test]
+    fn token_parent_observations_survive_counter_event_retention_and_bad_counters() {
+        use crate::metrics::{EventAttributes, PosEncoded, TokenUsageValues};
+        let (mut db, directory) = create_test_db();
+        let event = MetricEvent::new(
+            &TokenUsageValues::new(),
+            EventAttributes::with_version("test")
+                .tool("claude")
+                .session_id("child")
+                .parent_session_id("root")
+                .to_sparse(),
+        );
+        let json = serde_json::to_string(&event).unwrap();
+        db.insert_events_with_token_parent_retention(std::slice::from_ref(&json), None, false)
+            .unwrap();
+        let (_, _, history) =
+            MetricsDatabase::export_snapshot(&directory.path().join("test-metrics.db")).unwrap();
+        assert!(history.parents.is_empty());
+        db.insert_events_with_token_parent_retention(&[json], None, true)
+            .unwrap();
+        db.conn.execute("DELETE FROM metrics", []).unwrap();
+        db.observe_token_parent("child", "root").unwrap();
+        let (events, _, history) =
+            MetricsDatabase::export_snapshot(&directory.path().join("test-metrics.db")).unwrap();
+        assert!(events.is_empty());
+        assert_eq!(history.parents, [("child".into(), "root".into())]);
     }
 
     fn days_ago(days: u64) -> u32 {

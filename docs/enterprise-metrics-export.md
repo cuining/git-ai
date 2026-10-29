@@ -19,16 +19,29 @@ read a specific existing database. A missing or unreadable source is an error;
 the command does not create a replacement database. Existing output files are
 never overwritten. Omit `--output` to write JSON to stdout.
 
-Prospective enterprise collection requires the `enterprise_metrics` feature flag.
-It defaults to `false` in debug and release builds. Set
-`GIT_AI_ENTERPRISE_METRICS=true` for the daemon, or set
-`"feature_flags": {"enterprise_metrics": true}` in its configuration. Existing
-snapshots remain readable when collection is disabled.
+Prospective enterprise collection requires `feature_flags.enterprise_metrics`.
+The flag defaults to `false` in debug and release builds. The supported config
+command enables collection for the running daemon after a restart.
+
+```bash
+git-ai config --add feature_flags.enterprise_metrics true
+git-ai bg restart
+```
+
+`GIT_AI_ENTERPRISE_METRICS=true` in the daemon's environment also enables the
+flag. New OpenCode usage requires the existing `transcript_streaming` and
+`token_usage_metrics` flags, which default to `true`. A tracked OpenCode session
+is acquired through the existing OpenCode checkpoint hook. The usage worker
+rescans tracked sessions at startup, after transcript processing, and during its
+periodic sweep. `git-ai await` drains notification-driven work. A startup backfill
+can continue afterward. Export itself does not trigger acquisition. Existing
+snapshots remain readable when enterprise collection is disabled.
 
 Collection covers traced ordinary commits, amend, mapped rebase, cherry-pick,
 deferred cherry-pick, revert, squash provenance, and supported clean two-parent
 merges. Operation capture hydrates immutable Git inputs in batches outside Trace2
-ingestion. Fixups and unrecorded historical operations remain unavailable.
+ingestion. Proven autosquash mappings can retain multiple sources. Unproven
+fixup mappings and unrecorded historical operations remain unavailable.
 
 Local commit facts and source-only checkpoint observations are separate from
 pending upload events. Collection works when `rewrite_metrics_events` is false.
@@ -89,7 +102,7 @@ recorded.
 ## Output contract
 
 The top-level `schema_version` is `git-ai.enterprise-metrics/1`. This is a local
-snapshot format, **not** a drop-in implementation of the Moss protocol.
+snapshot format. `moss_compatible` remains `false`.
 
 - `commits`: production/test additions, deletions, final AI contributions, file
   counts, language counts, Agent breakdown, recorded repository/branch/commit
@@ -130,7 +143,8 @@ snapshot format, **not** a drop-in implementation of the Moss protocol.
   `(session_id, model, speed, timestamp)` key. These values are cumulative bucket
   revisions, not additive observations or completed user turns. Downward and
   zero corrections are retained. Conflicting payloads with the same revision
-  fail the export instead of choosing an arbitrary result.
+  fail the export. Nullable parent enrichment is independent of counter revision
+  equality.
 - Token totals equal ordinary input + output + cache reads + cache creation.
   `reasoning_tokens` is a subset of output and must not be added again. Missing
   reasoning counts remain `null`.
@@ -139,14 +153,73 @@ snapshot format, **not** a drop-in implementation of the Moss protocol.
   model's observed descendant count. Root totals are an alternative aggregate;
   do not add them to the leaf records. `aggregation_complete` remains `false`
   because a local snapshot does not prove every descendant has finished.
-  A later recorded parent ID can enrich older buckets with missing ancestry;
-  different nonempty parent IDs are treated as a conflict. Root aggregates can
-  therefore change as more history becomes available. Replace snapshots rather
-  than adding the same root totals again on every export.
+  With enterprise collection enabled, nonempty parent observations persist
+  independently of mutable counters. Disabled collection preserves the parent
+  attributes already present on ordinary events.
+  Export also collects valid parent metadata from every retained legacy revision,
+  including records with invalid counters. Graph validation precedes counter
+  selection and date filtering. Different nonempty parents and cycles fail the
+  export even outside the requested window. An absent parent is unknown and
+  never proves a root, so `root_relation_complete` remains `false`.
+  Internal session IDs stay distinct from native `external_session_id` values.
+  Replace previous root snapshots as ancestry or counters change.
 - `coverage`: explicit limitations and skipped-record diagnostics. The current
   export always sets `moss_compatible: false`. Independent local Token extraction
-  currently covers Claude Code and Codex; OpenCode extraction, completed-turn
-  output, and complete generation ancestry remain separate work.
+  covers existing Claude Code and Codex JSONL, plus the native OpenCode SQLite
+  message format described below. Completed-turn output and full generation
+  ancestry remain unsupported.
+
+The final AI committed share is accepted AI added lines divided by eligible
+added lines for the selected classification. A zero denominator is unavailable.
+The share measures recorded final acceptance. Surviving-source lower bounds,
+full generation, and employee productivity are separate quantities.
+
+## Native OpenCode Token usage
+
+The supported source is `message.data` assistant usage with real `session`
+metadata, as verified against OpenCode v1.18.18 commit
+`31406ccc51b4bd2a4e1e086b2bcaa5f7f804f26d`. Stored input already excludes
+caches. Normalized output adds stored visible output and reasoning. Total adds
+input, normalized output, cache read, and cache write once. For stored input
+100, output 40, reasoning 10, cache read 30, and cache write 20, export reports
+output 50 and total 200. Reasoning remains an output subset. Step-finish parts
+and session cumulative totals are alternate representations and are not added.
+
+Each acquisition reads one consistent read-only SQLite transaction. It selects
+usage, model, and session metadata without reading text or tool parts. Complete
+session snapshots replace that source's previous observations atomically with
+bucket revisions and availability. Main-file timestamps and size do not skip
+SQLite reads. Shared databases, WAL-only changes, tied update times, decreases,
+message deletion, and model or timestamp moves can revise old and new buckets.
+Initially empty usage creates no bucket. A later zero revision corrects usage
+that was previously present. Unchanged rescans and daemon restarts preserve the
+revision. `emitted_seq` is an ingestion revision and has no turn identity.
+
+Native message identity includes tool, native session, and native message ID.
+A message created before its new session proves copied fork history and is
+excluded. Equal or missing creation boundaries are ambiguous and unavailable.
+Only `session.parent_id` supplies ancestry. Assistant `parentID` links a user
+message and supplies no session parent evidence.
+
+A failed or invalid snapshot retains the previous parsing state and persists a
+closed `native_usage_unavailable_*` diagnostic. Its current local buckets are
+withheld, including previously valid usage. A validated session parent from the
+same source transaction remains available even when the first usage read fails. The exporter does not turn an
+unreadable observation into zero or resurrect an older valid counter. A valid
+complete rescan recovers the session. Conflicting copies of one native message
+and overflowing aggregate counters also withhold the session.
+
+New OpenCode usage stays in private local tables in `metrics-db`. Neither the
+ordinary pending uploader nor `git-ai reingest --all` reads those tables.
+Pre-existing SessionEvents and Claude or Codex uploads retain their existing
+policy. Export does not change daemon upload configuration, pricing, or network
+behavior. The local snapshot adds no enterprise identity service, authenticated
+employee binding, or enterprise delivery API.
+
+Historical JSON without usage, the newer `session_message` schema, cumulative-only
+`session.tokens_*` history, auxiliary or compaction completeness, Moss v1 or v2
+naming, completed user turns, and unknown native roots remain unsupported.
+There is no synthetic completion state or cumulative-history adapter.
 
 ## Retained history and merge eligibility
 
@@ -170,15 +243,19 @@ Byte-identical imported snapshots support repeated literal lines because their
 coordinates are unchanged. Changed mappings with repeated nonempty lines remain
 unsupported. Conflict or manual resolution, octopus, ambiguous import mapping,
 and missing source produce closed diagnostic reasons and withheld merge rows.
-These are unavailable observations, not known zero code output. Unsupported
-mappings do not establish complete source ancestry.
+These observations remain unavailable. Unsupported mappings do not establish
+complete source ancestry. Final acceptance follows existing authorship Notes,
+including their first-file and later-attestation precedence. A source-only
+unstaged line that moves into a staged range can lack final AI ownership in
+Notes. Independent surviving-source evidence can still exist. The export does
+not reconstruct missing final ownership or change the public Notes format.
 
 Only explicitly listed metadata and counters are serialized. Prompt text,
 transcript events, tool arguments/results, source content, commit messages,
 authorship Notes, API credentials, and arbitrary custom attributes are not
 copied into the snapshot.
 
-All exported dates are explicitly UTC; timestamps have the source dataset's
+All exported dates are explicitly UTC. Timestamps have the source dataset's
 second precision, represented as milliseconds where named `timestamp`.
 `timestamp_source` identifies actual commit time or legacy recording time.
 `recorded_at` retains capture time separately. New facts expose their immutable

@@ -58,7 +58,7 @@ use crate::metrics::{EventAttributes, MetricEvent, PosEncoded, TokenUsageValues}
 use crate::streams::db::{StreamRecord, StreamsDatabase};
 use crate::token_usage::db::{BatchCommit, TokenUsageDatabase, TrackedFile};
 use crate::token_usage::extractor::{ParentPrefixRequest, UsageSignature};
-use crate::token_usage::{Speed, extractor_for_tool};
+use crate::token_usage::{Speed, UsageSource, extractor_for_tool, usage_source};
 
 /// One raw JSONL line read as bytes: unlike UTF-8-strict `read_line`, a
 /// single invalid byte cannot wedge the cursor forever (the line decodes
@@ -244,8 +244,14 @@ pub struct TokenUsageWorkerHandle {
 impl TokenUsageWorkerHandle {
     /// Notify the worker that the stream worker finished processing a
     /// transcript (cheap, non-blocking; unsupported tools are dropped here).
-    pub fn notify_stream_processed(&self, session_id: &str, tool: &str, stream_path: &Path) {
-        if extractor_for_tool(tool).is_none() {
+    pub fn notify_stream_processed(
+        &self,
+        session_id: &str,
+        tool: &str,
+        stream_format: &str,
+        stream_path: &Path,
+    ) {
+        if usage_source(tool, stream_format).is_none() {
             return;
         }
         let _ = self.notify_tx.send(TokenUsageTask {
@@ -677,10 +683,10 @@ fn sweep_candidates(
             return Vec::new();
         }
     };
-    let tracked: HashMap<String, TrackedFile> = match token_db.all_files() {
+    let tracked: HashMap<(String, String), TrackedFile> = match token_db.all_files() {
         Ok(files) => files
             .into_iter()
-            .map(|file| (file.stream_path.clone(), file))
+            .map(|file| ((file.session_id.clone(), file.stream_path.clone()), file))
             .collect(),
         Err(e) => {
             tracing::warn!(error = %e, "token-usage sweep: failed to list tracked files");
@@ -689,13 +695,23 @@ fn sweep_candidates(
     };
     let mut tasks = Vec::new();
     for stream in streams {
-        if stream.stream_kind != "transcript" || extractor_for_tool(&stream.tool).is_none() {
+        if stream.stream_kind != "transcript"
+            || usage_source(&stream.tool, &stream.stream_format).is_none()
+        {
+            continue;
+        }
+        if usage_source(&stream.tool, &stream.stream_format) == Some(UsageSource::OpenCodeSqlite) {
+            tasks.push(TokenUsageTask {
+                session_id: stream.session_id,
+                tool: stream.tool,
+                stream_path: stream.stream_path,
+            });
             continue;
         }
         let Ok(metadata) = std::fs::metadata(&stream.stream_path) else {
             continue;
         };
-        if let Some(file) = tracked.get(&stream.stream_path)
+        if let Some(file) = tracked.get(&(stream.session_id.clone(), stream.stream_path.clone()))
             && file.last_known_size as u64 == metadata.len()
             && file.last_modified == modified_secs(&metadata)
             && !file.pending_flush
@@ -810,6 +826,54 @@ fn process_task_blocking(
     else {
         return Ok(());
     };
+    match usage_source(&stream.tool, &stream.stream_format) {
+        Some(UsageSource::OpenCodeSqlite) => {
+            if shutdown_flag.load(Ordering::Relaxed) {
+                return Ok(());
+            }
+            let result = crate::token_usage::opencode::read_native_session(
+                Path::new(&stream.stream_path),
+                &stream.external_session_id,
+            );
+            let repo_url = resolve_repo_url_for_stream(streams_db, &stream);
+            let database = crate::metrics::db::MetricsDatabase::global()?;
+            let mut database = database
+                .lock()
+                .map_err(|_| GitAiError::Generic("metrics database lock poisoned".into()))?;
+            return database.install_native_usage(
+                &crate::token_usage::native_store::NativeSource {
+                    session_id: &stream.session_id,
+                    external_session_id: &stream.external_session_id,
+                    stream_path: &stream.stream_path,
+                    observed_parent_session_id: result.observed_parent_session_id.as_deref(),
+                    repo_url: repo_url.as_deref(),
+                },
+                result.usage,
+                retention_cutoff_bucket(now_secs()),
+                now_secs().max(0) as u64,
+            );
+        }
+        Some(UsageSource::Jsonl) => {
+            if crate::config::Config::get()
+                .feature_flags()
+                .enterprise_metrics
+                && let Some(parent) = stream
+                    .external_parent_session_id
+                    .as_deref()
+                    .filter(|parent| !parent.is_empty())
+            {
+                let database = crate::metrics::db::MetricsDatabase::global()?;
+                let database = database
+                    .lock()
+                    .map_err(|_| GitAiError::Generic("metrics database lock poisoned".into()))?;
+                database.observe_token_parent(
+                    &stream.session_id,
+                    &generate_session_id(parent, &stream.tool),
+                )?;
+            }
+        }
+        None => return Ok(()),
+    }
     let identity = SessionIdentity::from_stream(&stream);
     let result = process_file(
         token_db,
@@ -2641,7 +2705,12 @@ mod tests {
             stream_kind: "transcript".to_string(),
             tool: tool.to_string(),
             stream_path: path.to_string(),
-            stream_format: "ClaudeJsonl".to_string(),
+            stream_format: if tool == "codex" {
+                "CodexJsonl"
+            } else {
+                "ClaudeJsonl"
+            }
+            .to_string(),
             watermark_type: "ByteOffset".to_string(),
             watermark_value: "0".to_string(),
             external_session_id: format!("{session_id}-ext"),
@@ -3052,7 +3121,7 @@ mod tests {
             claude_line("m2", "r2", &recent_ts(6, 0), 70)
         ));
         fs::write(&path, content).unwrap();
-        handle.notify_stream_processed("s_gate", "claude", &path);
+        handle.notify_stream_processed("s_gate", "claude", "ClaudeJsonl", &path);
         wait_for_bucket(&collected, bucket_of(6, 0)).await;
         assert_eq!(
             *throttle_calls.lock().unwrap(),
