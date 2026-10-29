@@ -56,6 +56,7 @@ pub(crate) enum RewriteMetricOperation {
     Revert,
     UpdateRef,
     NonFastForward,
+    Merge,
 }
 
 impl RewriteMetricOperation {
@@ -69,6 +70,7 @@ impl RewriteMetricOperation {
             Self::Revert => "revert",
             Self::UpdateRef => "update_ref",
             Self::NonFastForward => "non_fast_forward",
+            Self::Merge => "merge",
         }
     }
 }
@@ -82,6 +84,15 @@ pub(crate) struct RewriteMetricCommit {
     pub parent_sha: Option<String>,
     pub authorship_note: Option<String>,
     pub parent_diff: Option<DiffTreeResult>,
+    pub source_history: Option<crate::authorship::enterprise::SourceHistory>,
+    pub legacy_event_hashes: Vec<String>,
+    pub delivery: RewriteMetricDelivery,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RewriteMetricDelivery {
+    LegacyEligible,
+    LocalOnly,
 }
 
 impl RewriteMetricCommit {
@@ -104,6 +115,13 @@ impl RewriteMetricCommit {
             parent_sha: None,
             authorship_note: None,
             parent_diff: None,
+            source_history: None,
+            legacy_event_hashes: Vec::new(),
+            delivery: if operation == RewriteMetricOperation::Merge {
+                RewriteMetricDelivery::LocalOnly
+            } else {
+                RewriteMetricDelivery::LegacyEligible
+            },
         }
     }
 
@@ -125,6 +143,19 @@ impl RewriteMetricCommit {
 
     pub(crate) fn with_authorship_note(mut self, authorship_note: impl Into<String>) -> Self {
         self.authorship_note = Some(authorship_note.into());
+        self
+    }
+
+    pub(crate) fn local_only(mut self) -> Self {
+        self.delivery = RewriteMetricDelivery::LocalOnly;
+        self
+    }
+
+    pub(crate) fn with_source_history(
+        mut self,
+        history: Option<crate::authorship::enterprise::SourceHistory>,
+    ) -> Self {
+        self.source_history = history;
         self
     }
 
@@ -158,6 +189,10 @@ impl RewriteOutcome {
 
 pub(crate) fn rewrite_metrics_enabled() -> bool {
     Config::get().get_feature_flags().rewrite_metrics_events
+}
+
+pub(crate) fn rewrite_capture_enabled() -> bool {
+    rewrite_metrics_enabled() || Config::fresh().feature_flags().enterprise_metrics
 }
 
 pub(crate) fn metric_commits_from_mappings(
@@ -228,7 +263,7 @@ fn write_authorship_log_for_metrics(
     log: &AuthorshipLog,
 ) -> Result<Option<String>, GitAiError> {
     let serialized = write_authorship_log(repo, commit_sha, log)?;
-    if rewrite_metrics_enabled() {
+    if rewrite_capture_enabled() {
         Ok(Some(serialized))
     } else {
         Ok(None)
@@ -238,7 +273,7 @@ fn write_authorship_log_for_metrics(
 fn post_squash_metric_note_from_result(
     result: crate::authorship::post_commit::PostCommitDetailedResult,
 ) -> Option<String> {
-    if rewrite_metrics_enabled() {
+    if rewrite_capture_enabled() {
         Some(result.authorship_note)
     } else {
         None
@@ -442,7 +477,7 @@ pub(crate) fn handle_rewrite_event_with_metrics(
             );
             let shifted_notes =
                 shift_authorship_notes_merging_existing_with_notes(repo, &mappings)?;
-            if !rewrite_metrics_enabled() {
+            if !rewrite_capture_enabled() {
                 return Ok(RewriteOutcome::empty());
             }
             let metric_commits =
@@ -484,7 +519,7 @@ pub(crate) fn handle_non_fast_forward_rewrite_with_operation(
     let source_shas: Vec<String> = mappings.iter().map(|(source, _)| source.clone()).collect();
     crate::git::sync_authorship::fetch_missing_notes_for_commits_best_effort(repo, &source_shas);
     let shifted_notes = shift_authorship_notes_merging_existing_with_notes(repo, &mappings)?;
-    if !rewrite_metrics_enabled() {
+    if !rewrite_capture_enabled() {
         return Ok(RewriteOutcome::empty());
     }
     let metric_commits = metric_commits_from_mappings(&mappings, operation);
@@ -655,7 +690,7 @@ fn squash_metric_outcome(
     onto: &str,
     note: Option<String>,
 ) -> RewriteOutcome {
-    if !rewrite_metrics_enabled() {
+    if !rewrite_capture_enabled() {
         return RewriteOutcome::empty();
     }
     let mut metric_commit = RewriteMetricCommit::new(

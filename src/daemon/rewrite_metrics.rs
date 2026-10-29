@@ -13,6 +13,28 @@ pub(crate) fn spawn_rewrite_commit_metrics(
     repo: &Repository,
     metric_commits: Vec<RewriteMetricCommit>,
 ) {
+    if crate::config::Config::fresh()
+        .feature_flags()
+        .enterprise_metrics
+        && !metric_commits.is_empty()
+    {
+        crate::daemon::run_blocking_side_effect(|| {
+            let result = crate::authorship::enterprise::capture_rewrite_commits(
+                repo,
+                &dedupe_metric_commits(metric_commits.clone()),
+            )
+            .and_then(|facts| {
+                let database = crate::metrics::db::MetricsDatabase::global()?;
+                let mut database = database
+                    .lock()
+                    .map_err(|_| GitAiError::Generic("metrics database lock poisoned".into()))?;
+                database.insert_commit_facts_batch(&facts)
+            });
+            if let Err(error) = result {
+                tracing::warn!(%error, "Unable to capture local rewrite facts");
+            }
+        });
+    }
     if !crate::authorship::rewrite::rewrite_metrics_enabled() {
         return;
     }
@@ -85,6 +107,17 @@ fn merge_metric_commit_context(target: &mut RewriteMetricCommit, source: Rewrite
     if target.authorship_note.is_none() {
         target.authorship_note = source.authorship_note;
     }
+    target
+        .legacy_event_hashes
+        .extend(source.legacy_event_hashes);
+    target.legacy_event_hashes.sort();
+    target.legacy_event_hashes.dedup();
+    if source.delivery == crate::authorship::rewrite::RewriteMetricDelivery::LegacyEligible {
+        target.delivery = source.delivery;
+    }
+    if target.source_history.is_none() {
+        target.source_history = source.source_history;
+    }
     if target.parent_diff.is_none() {
         target.parent_diff = source.parent_diff;
     }
@@ -94,7 +127,15 @@ fn build_rewrite_metric_events(
     repo: &Repository,
     metric_commits: &[RewriteMetricCommit],
 ) -> Vec<MetricEvent> {
-    let mut metric_commits = dedupe_metric_commits(metric_commits.to_vec());
+    let mut metric_commits: Vec<_> = dedupe_metric_commits(metric_commits.to_vec())
+        .into_iter()
+        .filter(|commit| {
+            commit.delivery == crate::authorship::rewrite::RewriteMetricDelivery::LegacyEligible
+        })
+        .collect();
+    if metric_commits.is_empty() {
+        return Vec::new();
+    }
     hydrate_missing_parent_shas(repo, &mut metric_commits);
     hydrate_missing_parent_diffs(repo, &mut metric_commits);
     let batch_context = RewriteMetricBatchContext::new(repo);
@@ -250,6 +291,9 @@ fn build_rewrite_committed_metric_event(
     metric_commit: &RewriteMetricCommit,
     batch_context: &RewriteMetricBatchContext,
 ) -> Result<Option<MetricEvent>, GitAiError> {
+    if metric_commit.delivery == crate::authorship::rewrite::RewriteMetricDelivery::LocalOnly {
+        return Ok(None);
+    }
     let Some(raw_note) = metric_commit.authorship_note.as_ref() else {
         return Ok(None);
     };
@@ -454,6 +498,48 @@ mod tests {
                 vec![LineRange::Single(line)],
             ));
         log.serialize_to_string().expect("serialize note")
+    }
+
+    #[test]
+    fn local_only_operation_tuples_cannot_enter_legacy_events() {
+        let context = RewriteMetricBatchContext {
+            ignore_patterns: Vec::new(),
+            repo_url: None,
+            custom_attributes_json: None,
+        };
+        let mut diff = DiffTreeResult::default();
+        diff.hunks_by_file.insert(
+            "a.rs".into(),
+            vec![crate::authorship::hunk_shift::DiffHunk {
+                old_start: 0,
+                old_count: 0,
+                new_start: 1,
+                new_count: 1,
+            }],
+        );
+        let legacy = metric_commit("new", &["old"], RewriteMetricOperation::Rebase)
+            .with_parent_sha("parent")
+            .with_authorship_note(note_for_ai_line("a.rs", 1))
+            .with_parent_diff(diff.clone());
+        assert!(
+            build_rewrite_committed_metric_event(&legacy, &context)
+                .unwrap()
+                .is_some()
+        );
+        let merge = metric_commit("merge", &[], RewriteMetricOperation::Merge)
+            .with_parent_sha("parent")
+            .with_authorship_note(note_for_ai_line("a.rs", 1))
+            .with_parent_diff(diff);
+        assert!(
+            build_rewrite_committed_metric_event(&merge, &context)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            build_rewrite_committed_metric_event(&legacy.local_only(), &context)
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]

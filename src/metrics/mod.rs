@@ -7,7 +7,7 @@
 
 pub mod attrs;
 pub mod db;
-pub mod enterprise;
+pub(crate) mod enterprise;
 pub mod events;
 pub mod local_stats;
 pub mod model_pricing;

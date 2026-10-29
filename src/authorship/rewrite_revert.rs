@@ -35,7 +35,7 @@ pub(crate) fn handle_revert_commits_with_metrics(
     if specs.is_empty() {
         return Ok(Vec::new());
     }
-    let collect_metrics = crate::authorship::rewrite::rewrite_metrics_enabled();
+    let collect_metrics = crate::authorship::rewrite::rewrite_capture_enabled();
 
     // Resolve every spec's parent_sha (only those missing need a lookup) and the
     // source_base_sha (= first parent of the reverted commit, or of the parent
@@ -161,11 +161,32 @@ pub(crate) fn handle_revert_commits_with_metrics(
         diff_pairs.push((r.parent_sha.clone(), r.revert_commit.clone()));
         added_idx.push(aidx);
     }
-    let diff_results = compute_diff_trees_batch(repo, &diff_pairs, false)?;
+    let diff_results = compute_diff_trees_batch(
+        repo,
+        &diff_pairs,
+        crate::config::Config::fresh()
+            .feature_flags()
+            .enterprise_metrics,
+    )?;
 
     // Per-commit reconstruction is now pure in-memory.
     let mut writes: Vec<(String, String)> = Vec::new();
     let mut metric_commits: Vec<RewriteMetricCommit> = Vec::new();
+    if crate::config::Config::fresh()
+        .feature_flags()
+        .enterprise_metrics
+    {
+        metric_commits.extend(resolved.iter().enumerate().map(|(index, item)| {
+            RewriteMetricCommit::new(
+                item.revert_commit.clone(),
+                item.original_shas.clone(),
+                RewriteMetricOperation::Revert,
+            )
+            .local_only()
+            .with_parent_sha(item.parent_sha.clone())
+            .with_parent_diff(diff_results[added_idx[index]].clone())
+        }));
+    }
     for (i, r) in resolved.iter().enumerate() {
         let Some(shift) = shift_idx[i] else {
             continue;

@@ -897,7 +897,7 @@ fn process_conflict_resolution_working_logs(
         .iter()
         .map(|(commit_sha, _)| commit_sha.clone())
         .collect::<Vec<_>>();
-    let collect_metric_context = crate::authorship::rewrite::rewrite_metrics_enabled();
+    let collect_metric_context = crate::authorship::rewrite::rewrite_capture_enabled();
     let mut metric_context = if collect_metric_context {
         RewriteMetricContext {
             parent_by_commit: commit_parent_pairs
@@ -927,7 +927,13 @@ fn process_conflict_resolution_working_logs(
     let diff_results = if diff_pairs.is_empty() {
         Vec::new()
     } else {
-        crate::authorship::rewrite::compute_diff_trees_batch(repo, &diff_pairs, false)?
+        crate::authorship::rewrite::compute_diff_trees_batch(
+            repo,
+            &diff_pairs,
+            crate::config::Config::fresh()
+                .feature_flags()
+                .enterprise_metrics,
+        )?
     };
     let diff_by_commit: HashMap<&str, &crate::authorship::rewrite::DiffTreeResult> = qualifying
         .iter()
@@ -2189,7 +2195,13 @@ fn apply_cherry_pick_complete_rewrite(
     let diff_results = if diff_pairs.is_empty() {
         Vec::new()
     } else {
-        crate::authorship::rewrite::compute_diff_trees_batch(repo, &diff_pairs, false)?
+        crate::authorship::rewrite::compute_diff_trees_batch(
+            repo,
+            &diff_pairs,
+            crate::config::Config::fresh()
+                .feature_flags()
+                .enterprise_metrics,
+        )?
     };
     let diff_by_commit: HashMap<&str, &crate::authorship::rewrite::DiffTreeResult> = qualifying
         .iter()
@@ -2241,6 +2253,8 @@ fn apply_cherry_pick_no_commit_rewrite(
     sources: &[String],
     parent_head: &str,
     new_head: &str,
+    commit_metric_receipt: Option<String>,
+    source_history: Option<crate::authorship::enterprise::SourceHistory>,
 ) -> Result<(), GitAiError> {
     if sources.is_empty() || new_head.is_empty() {
         return Ok(());
@@ -2254,19 +2268,23 @@ fn apply_cherry_pick_no_commit_rewrite(
         crate::authorship::rewrite::shift_authorship_notes_merging_existing_with_notes(
             repo, &mappings,
         )?;
-    if crate::authorship::rewrite::rewrite_metrics_enabled() {
+    if crate::authorship::rewrite::rewrite_capture_enabled() {
         let mut metric_commit = crate::authorship::rewrite::RewriteMetricCommit::new(
             new_head.to_string(),
             sources.to_vec(),
             crate::authorship::rewrite::RewriteMetricOperation::CherryPickNoCommit,
         )
-        .with_parent_sha(parent_head.to_string());
+        .with_parent_sha(parent_head.to_string())
+        .with_source_history(source_history);
         if let Some((_, note)) = shifted_notes
             .into_iter()
             .find(|(commit_sha, _)| commit_sha == new_head)
         {
             metric_commit = metric_commit.with_authorship_note(note);
         }
+        metric_commit
+            .legacy_event_hashes
+            .extend(commit_metric_receipt);
         crate::daemon::rewrite_metrics::spawn_rewrite_commit_metrics(repo, vec![metric_commit]);
     }
     Ok(())
@@ -7877,10 +7895,47 @@ impl ActorDaemonCoordinator {
                                 );
                             };
 
+                            let pending_cherry_pick =
+                                if !lite_mode && cmd.primary_command.as_deref() == Some("commit") {
+                                    self.take_pending_cherry_pick_no_commit_for_worktree(
+                                        worktree.as_ref(),
+                                    )?
+                                } else {
+                                    None
+                                };
+                            let deferred_cherry_pick =
+                                pending_cherry_pick.as_ref().is_some_and(|pending| {
+                                    base.as_deref() == Some(pending.head.as_str())
+                                });
+                            let deferred_source_history = if deferred_cherry_pick
+                                && crate::config::Config::fresh()
+                                    .feature_flags()
+                                    .enterprise_metrics
+                            {
+                                let captured = (|| {
+                                    let working_log = repo.storage.working_log_for_base_commit(
+                                        base_opt.as_deref().unwrap_or("initial"),
+                                    )?;
+                                    let checkpoints = working_log.read_all_checkpoints()?;
+                                    crate::authorship::enterprise::SourceHistory::read(
+                                        &working_log,
+                                        &checkpoints,
+                                    )
+                                })();
+                                match captured {
+                                    Ok(history) => Some(history),
+                                    Err(error) => {
+                                        tracing::warn!(%error, "Unable to retain deferred cherry-pick source history");
+                                        None
+                                    }
+                                }
+                            } else {
+                                None
+                            };
                             // Post-commit note generation does synchronous git/filesystem work
                             // and may briefly wait for transcript recovery. Mark it as blocking
                             // so the transcript worker can process the recovery sweep promptly.
-                            run_blocking_side_effect(|| {
+                            let post_commit_result = run_blocking_side_effect(|| {
                                 crate::authorship::post_commit::post_commit_from_working_log_with_recovery_timestamps(
                                     &repo,
                                     base_opt.clone(),
@@ -7890,6 +7945,7 @@ impl ActorDaemonCoordinator {
                                         commit_source,
                                         cmd.primary_command.as_deref() == Some("commit")
                                             && commit_source.is_none()
+                                            && !deferred_cherry_pick
                                             && events.iter().filter(|event| matches!(event, crate::daemon::domain::SemanticEvent::CommitCreated { .. })).count() == 1,
                                     ),
                                     recovery_file_timestamps.as_ref(),
@@ -7899,10 +7955,7 @@ impl ActorDaemonCoordinator {
 
                             if !lite_mode
                                 && cmd.primary_command.as_deref() == Some("commit")
-                                && let Some(pending) = self
-                                    .take_pending_cherry_pick_no_commit_for_worktree(
-                                        worktree.as_ref(),
-                                    )?
+                                && let Some(pending) = pending_cherry_pick
                             {
                                 if base.as_deref().is_some_and(|base| base == pending.head) {
                                     apply_cherry_pick_no_commit_rewrite(
@@ -7910,6 +7963,8 @@ impl ActorDaemonCoordinator {
                                         &pending.source_commits,
                                         &pending.head,
                                         new_head,
+                                        post_commit_result.commit_metric_receipt,
+                                        deferred_source_history,
                                     )?;
                                 } else {
                                     self.set_pending_cherry_pick_no_commit_for_worktree(
@@ -7962,7 +8017,7 @@ impl ActorDaemonCoordinator {
                                     Some(&recovery_preflight),
                                 )
                             })?;
-                            if crate::authorship::rewrite::rewrite_metrics_enabled() {
+                            if crate::authorship::rewrite::rewrite_capture_enabled() {
                                 crate::daemon::rewrite_metrics::spawn_rewrite_commit_metrics(
                                     &repo,
                                     vec![
@@ -7972,11 +8027,34 @@ impl ActorDaemonCoordinator {
                                             crate::authorship::rewrite::RewriteMetricOperation::Amend,
                                         )
                                         .with_parent_sha(amend_result.parent_sha)
-                                        .with_authorship_note(amend_result.authorship_note),
+                                        .with_authorship_note(amend_result.authorship_note)
+                                        .with_source_history(amend_result.source_history),
                                     ],
                                 );
                             }
                         }
+                    }
+                    crate::daemon::domain::SemanticEvent::RefUpdated {
+                        reference,
+                        old,
+                        new,
+                    } if !lite_mode
+                        && reference == "HEAD"
+                        && old != new
+                        && cmd.primary_command.as_deref() == Some("merge")
+                        && crate::config::Config::fresh()
+                            .feature_flags()
+                            .enterprise_metrics =>
+                    {
+                        let repo = find_repository_in_path(&worktree)?;
+                        crate::daemon::rewrite_metrics::spawn_rewrite_commit_metrics(
+                            &repo,
+                            vec![crate::authorship::rewrite::RewriteMetricCommit::new(
+                                new.clone(),
+                                Vec::new(),
+                                crate::authorship::rewrite::RewriteMetricOperation::Merge,
+                            )],
+                        );
                     }
                     crate::daemon::domain::SemanticEvent::Reset {
                         kind,

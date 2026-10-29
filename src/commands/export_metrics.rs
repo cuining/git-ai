@@ -223,6 +223,7 @@ struct CommitRecord {
     parent_commits: Option<Vec<String>>,
     diff_coverage: &'static str,
     source_evidence: &'static str,
+    merge_eligibility: Option<crate::metrics::enterprise::MergeFacts>,
     #[serde(flatten)]
     counts: CodeCounts,
     changed_file_num: usize,
@@ -235,6 +236,7 @@ struct CommitRecord {
 
 #[derive(Default)]
 struct FileCounts {
+    deleted_path: Option<String>,
     added: Vec<(u32, u32)>,
     deleted: Vec<(u32, u32)>,
     ai: Vec<(u32, u32)>,
@@ -316,11 +318,18 @@ fn summarize_files(
             return Err("diff metadata contains overlapping attribution".into());
         }
         let test = classifier.is_test(path);
-        counts.add(test, added, deleted, ai);
+        let deleted_path = file.deleted_path.as_deref().unwrap_or(path);
+        let deleted_test = classifier.is_test(deleted_path);
+        counts.add(test, added, 0, ai);
+        counts.add(deleted_test, 0, deleted, 0);
         languages
             .entry(classifier.language(path).into())
             .or_default()
-            .add(test, added, deleted, ai);
+            .add(test, added, 0, ai);
+        languages
+            .entry(classifier.language(deleted_path).into())
+            .or_default()
+            .add(deleted_test, 0, deleted, 0);
         ai_files += usize::from(ai > 0);
         known_human += human;
         unknown += added - ai - human;
@@ -533,6 +542,7 @@ fn commit_record(
         parent_commits: None,
         diff_coverage: "recorded_text_hunks",
         source_evidence: "unavailable",
+        merge_eligibility: None,
         counts: summary.counts,
         changed_file_num: files.len(),
         ai_changed_file_num: summary.ai_files,
@@ -552,14 +562,26 @@ fn fact_record(
     let mut source_available = false;
     for fact in &facts.files {
         let path = &fact.path;
-        if path.starts_with('/') || path.split('/').any(|part| part == "..") {
+        let old_path = fact.previous_path.as_deref().unwrap_or(path);
+        if [path.as_str(), old_path]
+            .iter()
+            .any(|path| path.starts_with('/') || path.split('/').any(|part| part == ".."))
+        {
             return Err("local facts contain a non-relative path".into());
         }
-        if path == ".gitmodules"
-            || path.rsplit('/').next() == Some("page.lock")
-            || (fact.old_mode.as_deref().is_none_or(|mode| mode == "160000")
-                && fact.new_mode.as_deref().is_none_or(|mode| mode == "160000"))
-        {
+        let eligible =
+            |path: &str| path != ".gitmodules" && path.rsplit('/').next() != Some("page.lock");
+        let new_eligible = eligible(path)
+            && fact
+                .new_mode
+                .as_deref()
+                .is_some_and(|mode| mode != "160000");
+        let old_eligible = eligible(old_path)
+            && fact
+                .old_mode
+                .as_deref()
+                .is_some_and(|mode| mode != "160000");
+        if !new_eligible && !old_eligible {
             continue;
         }
         if fact
@@ -590,15 +612,18 @@ fn fact_record(
                 return Err("local attribution is outside the committed additions".into());
             }
         }
-        let mut file = FileCounts::default();
+        let mut file = FileCounts {
+            deleted_path: fact.previous_path.clone(),
+            ..Default::default()
+        };
         if !fact.binary {
-            if fact.new_mode.as_deref() != Some("160000") {
+            if new_eligible {
                 file.added.clone_from(&fact.added);
             }
-            if fact.old_mode.as_deref() != Some("160000") {
+            if old_eligible {
                 file.deleted.clone_from(&fact.deleted);
             }
-            if fact.new_mode.as_deref() != Some("160000") {
+            if new_eligible {
                 file.agents.clone_from(&fact.accepted);
                 file.ai = fact.accepted.values().flatten().copied().collect();
                 file.human.clone_from(&fact.known_human);
@@ -611,17 +636,63 @@ fn fact_record(
         files.insert(path.clone(), file);
     }
     let summary = summarize_files(&mut files, classifier, source_available)?;
+    if let Some(merge) = &facts.merge {
+        use crate::metrics::enterprise::MergeDecision;
+        let majority =
+            merge.verified_ai > 0 && merge.verified_ai.saturating_mul(2) > merge.related_additions;
+        let valid_decision = match merge.decision {
+            MergeDecision::Eligible => facts.parent_shas.len() == 2 && majority,
+            MergeDecision::NotStrictMajority => {
+                facts.parent_shas.len() == 2 && merge.verified_ai > 0 && !majority
+            }
+            MergeDecision::MissingSource => facts.parent_shas.len() == 2 && merge.verified_ai == 0,
+            MergeDecision::Octopus => facts.parent_shas.len() > 2,
+            _ => facts.parent_shas.len() >= 2,
+        };
+        if !valid_decision
+            || merge.verified_ai > merge.related_additions
+            || merge.related_additions
+                > summary.counts.prod_code_line_num + summary.counts.test_code_line_num
+            || merge.verified_ai
+                > summary
+                    .counts
+                    .prod_ai_surviving_source_line_num
+                    .unwrap_or(0)
+                    + summary
+                        .counts
+                        .test_ai_surviving_source_line_num
+                        .unwrap_or(0)
+        {
+            return Err("invalid local merge evidence".into());
+        }
+    }
     let time = DateTime::<Utc>::from_timestamp(
         i64::try_from(facts.committed_at).map_err(|_| "invalid commit time")?,
         0,
     )
     .ok_or("invalid commit time")?;
+    let mut sources = BTreeSet::new();
+    for relation in &facts.relations {
+        if relation.source_commits.is_empty()
+            || relation
+                .source_commits
+                .iter()
+                .any(|sha| sha.is_empty() || sha == &facts.commit_sha)
+        {
+            return Err("invalid local operation relation".into());
+        }
+        sources.extend(relation.source_commits.iter().cloned());
+    }
     Ok(CommitRecord {
         repo: sanitized_repo(facts.repo_url.clone()),
         branch: None,
         commit: facts.commit_sha.clone(),
-        source_commit: None,
-        source_commits: Vec::new(),
+        source_commit: if sources.len() == 1 {
+            sources.first().cloned()
+        } else {
+            None
+        },
+        source_commits: sources.into_iter().collect(),
         user_name: username.into(),
         create_at: time.format("%Y-%m-%d %H:%M:%S").to_string(),
         timestamp: facts
@@ -640,6 +711,7 @@ fn fact_record(
         } else {
             "unavailable"
         },
+        merge_eligibility: facts.merge.clone(),
         counts: summary.counts,
         changed_file_num: files.len(),
         ai_changed_file_num: summary.ai_files,
@@ -897,13 +969,78 @@ fn snapshot_with_facts(
             Ok((fact, record))
         })
         .collect::<Result<Vec<_>, String>>()?;
+    let mut diagnostics = Vec::new();
+    let mut replacement_targets = BTreeMap::<(String, String), BTreeSet<String>>::new();
+    let identities: BTreeSet<_> = facts
+        .iter()
+        .map(|(fact, _)| (fact.repository_key.clone(), fact.commit_sha.clone()))
+        .collect();
+    for (fact, _) in &facts {
+        if fact.merge.is_some() {
+            continue;
+        }
+        if !fact.replacement_source_available() {
+            if fact
+                .relations
+                .iter()
+                .any(|relation| relation.kind.replaces())
+            {
+                diagnostics.push(Diagnostic {
+                    record_type: "commit",
+                    reason: "replacement_target_source_unavailable".into(),
+                });
+            }
+            continue;
+        }
+        for relation in &fact.relations {
+            if relation.kind.replaces() {
+                for source in &relation.source_commits {
+                    if identities.contains(&(fact.repository_key.clone(), source.clone())) {
+                        replacement_targets
+                            .entry((fact.repository_key.clone(), source.clone()))
+                            .or_default()
+                            .insert(fact.commit_sha.clone());
+                    } else {
+                        diagnostics.push(Diagnostic {
+                            record_type: "commit",
+                            reason: "replacement_source_unavailable".into(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+    let mut superseded = BTreeSet::new();
+    for key in replacement_targets.keys() {
+        let mut current = key.clone();
+        let mut path = BTreeSet::new();
+        let valid = loop {
+            if !path.insert(current.clone()) {
+                break false;
+            }
+            let Some(targets) = replacement_targets.get(&current) else {
+                break true;
+            };
+            if targets.len() != 1 {
+                break false;
+            }
+            current.1 = targets.first().unwrap().clone();
+        };
+        if valid {
+            superseded.insert(key.clone());
+        } else {
+            diagnostics.push(Diagnostic {
+                record_type: "commit",
+                reason: "replacement_conflict_or_cycle".into(),
+            });
+        }
+    }
     let bound_events: BTreeSet<_> = facts
         .iter()
         .flat_map(|(fact, _)| fact.legacy_event_hashes.iter())
         .cloned()
         .collect();
     let mut token_events: BTreeMap<TokenKey, (u64, MetricEvent)> = BTreeMap::new();
-    let mut diagnostics = Vec::new();
     for event in events {
         if matches!(event.event_id, 1 | 7)
             && bound_events.contains(
@@ -965,6 +1102,25 @@ fn snapshot_with_facts(
         }
     }
     for (fact, record) in facts {
+        if let Some(merge) = &fact.merge {
+            use crate::metrics::enterprise::MergeDecision;
+            if merge.decision != MergeDecision::Eligible {
+                diagnostics.push(Diagnostic {
+                    record_type: "commit",
+                    reason: format!("merge_{}", merge.decision.as_str()),
+                });
+                continue;
+            }
+        } else if fact.parent_shas.len() > 1 {
+            diagnostics.push(Diagnostic {
+                record_type: "commit",
+                reason: "merge_evidence_unavailable".into(),
+            });
+            continue;
+        }
+        if superseded.contains(&(fact.repository_key.clone(), fact.commit_sha.clone())) {
+            continue;
+        }
         commits.insert(
             (
                 record.repo.clone(),
@@ -974,22 +1130,9 @@ fn snapshot_with_facts(
             (u32::MAX, record),
         );
     }
-    let superseded: BTreeSet<_> = commits
-        .values()
-        .flat_map(|(_, record)| {
-            record
-                .source_commits
-                .iter()
-                .filter(|source| *source != &record.commit)
-                .map(|source| (record.repo.clone(), source.clone()))
-        })
-        .collect();
     let commits = commits
         .into_iter()
-        .filter_map(|(key, (_, record))| {
-            (!superseded.contains(&(key.0, key.1)) && window.contains(record.timestamp / 1000))
-                .then_some(record)
-        })
+        .filter_map(|(_, (_, record))| window.contains(record.timestamp / 1000).then_some(record))
         .collect();
     let tokens: Vec<_> = token_events
         .into_values()
@@ -1043,7 +1186,8 @@ fn snapshot_with_facts(
             diagnostics,
             limitations: vec![
                 "Full AI generation ancestry is unavailable; optional verified surviving-source counts are partial lower bounds",
-                "Merge eligibility and historical rewrite coverage do not establish Moss compatibility",
+                "Retained local history suppresses only verified amend/rebase replacements; partial or ambiguous observations remain visible",
+                "Clean two-parent imported-source eligibility is supported; unsupported merge mappings are withheld and do not establish Moss compatibility",
                 "Local facts count eligible binary, rename-only, and mode-only files once; legacy events cover recorded text hunks only",
                 "Token records are revised five-minute buckets, not completed turns or incremental observations",
                 "Root totals cover observed local sessions; descendant completion is not established",
@@ -1215,6 +1359,8 @@ mod tests {
             committed_at: 1,
             recorded_at: 2,
             legacy_event_hashes: vec![crate::metrics::enterprise::event_hash(&event).unwrap()],
+            relations: Vec::new(),
+            merge: None,
             files: vec![crate::metrics::enterprise::CommitFileFacts {
                 path: "a.rs".into(),
                 previous_path: None,
@@ -1267,7 +1413,7 @@ mod tests {
     }
 
     #[test]
-    fn valid_rewrite_supersedes_original() {
+    fn legacy_source_links_alone_preserve_original() {
         let first = committed(json!([hunk("a.rs", "addition", 1, 2)]));
         let mut new_hunk = hunk("a.rs", "addition", 1, 3);
         new_hunk["commit_sha"] = json!("rewritten");
@@ -1289,9 +1435,14 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(snapshot.commits.len(), 1);
-        assert_eq!(snapshot.commits[0].source_commit.as_deref(), Some("commit"));
-        assert_eq!(snapshot.commits[0].counts.prod_code_line_num, 3);
+        assert_eq!(snapshot.commits.len(), 2);
+        let rewritten = snapshot
+            .commits
+            .iter()
+            .find(|record| record.commit == "rewritten")
+            .unwrap();
+        assert_eq!(rewritten.source_commit.as_deref(), Some("commit"));
+        assert_eq!(rewritten.counts.prod_code_line_num, 3);
     }
 
     #[test]
@@ -1417,5 +1568,159 @@ mod tests {
         assert_eq!(result.token_root_totals[0].root_session_id, "root");
         assert_eq!(result.token_root_totals[0].input_tokens, 23);
         assert_eq!(result.token_root_totals[0].descendant_session_count, 1);
+    }
+}
+
+#[cfg(test)]
+mod relation_tests {
+    use super::*;
+    use crate::metrics::enterprise::{
+        CommitFileFacts, CommitRelation, CommitRelationKind, MergeDecision, MergeFacts,
+    };
+
+    fn fact(sha: &str, time: u64) -> CommitFacts {
+        CommitFacts {
+            repository_key: "repo".into(),
+            repo_url: None,
+            commit_sha: sha.into(),
+            parent_shas: Vec::new(),
+            committed_at: time,
+            recorded_at: time,
+            legacy_event_hashes: Vec::new(),
+            relations: Vec::new(),
+            merge: None,
+            files: vec![CommitFileFacts {
+                path: "a.rs".into(),
+                previous_path: None,
+                old_mode: None,
+                new_mode: Some("100644".into()),
+                binary: false,
+                added: vec![(1, 1)],
+                deleted: Vec::new(),
+                accepted: BTreeMap::new(),
+                known_human: Vec::new(),
+                source: Some(BTreeMap::new()),
+                source_snapshot: None,
+            }],
+        }
+    }
+
+    fn replacement(sha: &str, time: u64, originals: &[&str]) -> CommitFacts {
+        let mut target = fact(sha, time);
+        target.relations.push(CommitRelation {
+            kind: CommitRelationKind::RebaseReplacement,
+            source_commits: originals.iter().map(|source| (*source).into()).collect(),
+        });
+        target
+    }
+
+    fn project(facts: Vec<CommitFacts>, until: u64) -> Snapshot {
+        snapshot_with_facts(
+            Vec::new(),
+            facts,
+            "employee",
+            Classifier::load(None).unwrap(),
+            Window { since: 0, until },
+        )
+        .unwrap()
+    }
+
+    fn shas(snapshot: &Snapshot) -> BTreeSet<&str> {
+        snapshot
+            .commits
+            .iter()
+            .map(|record| record.commit.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn enterprise_replacement_chains_resolve_before_windowing() {
+        assert!(
+            project(
+                vec![
+                    fact("a", 5),
+                    replacement("b", 15, &["a"]),
+                    replacement("c", 25, &["b"])
+                ],
+                20
+            )
+            .commits
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn enterprise_conflicting_and_cyclic_replacements_preserve_observations() {
+        let conflict = project(
+            vec![
+                fact("a", 5),
+                replacement("b", 15, &["a"]),
+                replacement("c", 25, &["a"]),
+            ],
+            100,
+        );
+        assert_eq!(shas(&conflict), BTreeSet::from(["a", "b", "c"]));
+        let cycle = project(
+            vec![replacement("a", 5, &["b"]), replacement("b", 15, &["a"])],
+            100,
+        );
+        assert_eq!(shas(&cycle), BTreeSet::from(["a", "b"]));
+    }
+
+    #[test]
+    fn enterprise_partial_target_cannot_suppress_original() {
+        let mut target = replacement("b", 15, &["a"]);
+        target.files[0].source = None;
+        assert_eq!(
+            shas(&project(vec![fact("a", 5), target], 100)),
+            BTreeSet::from(["a", "b"])
+        );
+    }
+
+    #[test]
+    fn enterprise_many_source_identity_and_repository_isolation_survive_projection() {
+        let mut other = fact("a", 5);
+        other.repository_key = "other-repo".into();
+        let snapshot = project(
+            vec![
+                fact("a", 5),
+                fact("b", 10),
+                replacement("c", 15, &["b", "a"]),
+                other,
+            ],
+            100,
+        );
+        assert_eq!(shas(&snapshot), BTreeSet::from(["a", "c"]));
+        let target = snapshot
+            .commits
+            .iter()
+            .find(|record| record.commit == "c")
+            .unwrap();
+        assert_eq!(target.source_commits, ["a", "b"]);
+        assert!(target.source_commit.is_none());
+    }
+
+    #[test]
+    fn enterprise_invalid_merge_gate_is_rejected_before_receipts() {
+        let mut invalid = fact("merge", 20);
+        invalid.parent_shas = vec!["p1".into(), "p2".into()];
+        invalid.merge = Some(MergeFacts {
+            related_additions: 1,
+            verified_ai: 0,
+            decision: MergeDecision::Eligible,
+        });
+        assert!(
+            snapshot_with_facts(
+                Vec::new(),
+                vec![invalid],
+                "employee",
+                Classifier::load(None).unwrap(),
+                Window {
+                    since: 0,
+                    until: 100
+                }
+            )
+            .is_err()
+        );
     }
 }

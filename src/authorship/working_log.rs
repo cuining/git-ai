@@ -21,6 +21,8 @@ pub struct WorkingLogEntry {
     pub line_attributions: Vec<LineAttribution>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ai_source: Option<crate::authorship::source_evidence::AiSourceSnapshot>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub source_observation_only: bool,
 }
 
 impl WorkingLogEntry {
@@ -37,6 +39,7 @@ impl WorkingLogEntry {
             attributions,
             line_attributions,
             ai_source: None,
+            source_observation_only: false,
         }
     }
 }

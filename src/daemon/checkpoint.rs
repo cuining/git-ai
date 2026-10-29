@@ -384,7 +384,10 @@ fn execute_resolved_checkpoint(
         entries.len(),
         entries_start.elapsed()
     );
-    let entry_count = entries.len();
+    let entry_count = entries
+        .iter()
+        .filter(|entry| !entry.source_observation_only)
+        .count();
 
     if !entries.is_empty() {
         let checkpoint_create_start = Instant::now();
@@ -441,46 +444,51 @@ fn execute_resolved_checkpoint(
             .last()
             .expect("the appended checkpoint must remain in the working log");
 
-        let mut attrs =
-            build_checkpoint_attrs(repo, &resolved.base_commit, checkpoint.agent_id.as_ref());
+        if entry_count > 0 {
+            let mut attrs =
+                build_checkpoint_attrs(repo, &resolved.base_commit, checkpoint.agent_id.as_ref());
 
-        // Add trace_id to attributes - links all checkpoint events together
-        if let Some(ref tid) = checkpoint.trace_id {
-            attrs = attrs.trace_id(tid);
-        }
-
-        // Extract tool_use_id from metadata if available
-        // tool_use_id tracks specific tool invocations (e.g., bash tool calls from AI agents)
-        // Allows linking checkpoint events to the exact tool use that triggered them
-        let tool_use_id = checkpoint_request
-            .metadata
-            .get("tool_use_id")
-            .map(|s| s.as_str());
-
-        let edit_kind = checkpoint_request
-            .metadata
-            .get("edit_kind")
-            .map(|s| s.as_str());
-
-        for (entry, file_stat) in checkpoint.entries.iter().zip(file_stats.iter()) {
-            let mut values = crate::metrics::CheckpointValues::new()
-                .checkpoint_ts(checkpoint.timestamp)
-                .kind(checkpoint.kind.to_str().to_string())
-                .file_path(entry.file.clone())
-                .lines_added(file_stat.additions)
-                .lines_deleted(file_stat.deletions)
-                .lines_added_sloc(file_stat.additions_sloc)
-                .lines_deleted_sloc(file_stat.deletions_sloc);
-
-            if let Some(tuid) = tool_use_id {
-                values = values.external_tool_use_id(tuid);
-            }
-            if let Some(ek) = edit_kind {
-                values = values.edit_kind(ek);
+            // Add trace_id to attributes - links all checkpoint events together
+            if let Some(ref tid) = checkpoint.trace_id {
+                attrs = attrs.trace_id(tid);
             }
 
-            let file_attrs = attrs.clone().author(&checkpoint.author);
-            crate::metrics::record(values, file_attrs);
+            // Extract tool_use_id from metadata if available
+            // tool_use_id tracks specific tool invocations (e.g., bash tool calls from AI agents)
+            // Allows linking checkpoint events to the exact tool use that triggered them
+            let tool_use_id = checkpoint_request
+                .metadata
+                .get("tool_use_id")
+                .map(|s| s.as_str());
+
+            let edit_kind = checkpoint_request
+                .metadata
+                .get("edit_kind")
+                .map(|s| s.as_str());
+
+            for (entry, file_stat) in checkpoint.entries.iter().zip(file_stats.iter()) {
+                if entry.source_observation_only {
+                    continue;
+                }
+                let mut values = crate::metrics::CheckpointValues::new()
+                    .checkpoint_ts(checkpoint.timestamp)
+                    .kind(checkpoint.kind.to_str().to_string())
+                    .file_path(entry.file.clone())
+                    .lines_added(file_stat.additions)
+                    .lines_deleted(file_stat.deletions)
+                    .lines_added_sloc(file_stat.additions_sloc)
+                    .lines_deleted_sloc(file_stat.deletions_sloc);
+
+                if let Some(tuid) = tool_use_id {
+                    values = values.external_tool_use_id(tuid);
+                }
+                if let Some(ek) = edit_kind {
+                    values = values.edit_kind(ek);
+                }
+
+                let file_attrs = attrs.clone().author(&checkpoint.author);
+                crate::metrics::record(values, file_attrs);
+            }
         }
     }
 
@@ -669,6 +677,22 @@ fn build_previous_file_state_maps(
     (previous_file_state_by_file, ai_touched_files)
 }
 
+fn source_observation(
+    file: String,
+    blob_sha: String,
+    content: &str,
+    ts: u128,
+) -> Result<WorkingLogEntry, GitAiError> {
+    let mut entry = WorkingLogEntry::new(file, blob_sha, Vec::new(), Vec::new());
+    entry.ai_source = Some(
+        crate::authorship::source_evidence::AiSourceSnapshot::capture(
+            None, content, content, "human", None, ts,
+        )?,
+    );
+    entry.source_observation_only = true;
+    Ok(entry)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn get_checkpoint_entry_for_file(
     file_path: String,
@@ -735,7 +759,12 @@ fn get_checkpoint_entry_for_file(
         };
 
         if content_eq_ignoring_line_endings(&current_content, &previous_content) {
-            return Ok(None);
+            return if source_capture.is_some() {
+                source_observation(file_path, file_content_hash, &current_content, ts)
+                    .map(|entry| Some((entry, FileLineStats::default())))
+            } else {
+                Ok(None)
+            };
         }
 
         let stats = compute_file_line_stats(&previous_content, &current_content);
@@ -779,7 +808,12 @@ fn get_checkpoint_entry_for_file(
         if content_eq_ignoring_line_endings(&current_content, &previous_content)
             && !has_initial_state
         {
-            return Ok(None);
+            return if source_capture.is_some() {
+                source_observation(file_path, file_content_hash, &current_content, ts)
+                    .map(|entry| Some((entry, FileLineStats::default())))
+            } else {
+                Ok(None)
+            };
         }
 
         // Build a set of lines covered by INITIAL attributions

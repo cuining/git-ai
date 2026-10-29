@@ -96,8 +96,8 @@ pub(crate) fn post_commit_from_working_log_with_recovery_timestamps(
     options: PostCommitOptions,
     recovery_file_timestamps: Option<&FileTimestampsByPath>,
     before_external_recovery: Option<&dyn Fn(&UnknownLinesByFile)>,
-) -> Result<(String, AuthorshipLog), GitAiError> {
-    post_commit_from_working_log_with_transform_context(
+) -> Result<PostCommitDetailedResult, GitAiError> {
+    post_commit_from_working_log_with_transform_context_detailed(
         repo,
         base_commit,
         commit_sha,
@@ -144,6 +144,7 @@ impl PostCommitOptions {
 }
 
 pub(crate) struct PostCommitDetailedResult {
+    pub commit_metric_receipt: Option<String>,
     pub commit_sha: String,
     pub authorship_log: AuthorshipLog,
     pub authorship_note: String,
@@ -480,6 +481,7 @@ where
 
     // Compute stats once (needed for both metrics and terminal output), unless preflight
     // estimate predicts this would be too expensive for the commit hook path.
+    let mut commit_metric_receipt = None;
     let mut stats: Option<crate::authorship::stats::CommitStats> = None;
     let mut skip_reason = None;
 
@@ -542,6 +544,7 @@ where
                 hunks_json.as_deref(),
                 options.commit_source,
             );
+            commit_metric_receipt = receipt.clone();
             if let Some(facts) = enterprise_facts.as_mut()
                 && let Some(receipt) = receipt
             {
@@ -624,6 +627,7 @@ where
         }
     }
     Ok(PostCommitDetailedResult {
+        commit_metric_receipt,
         commit_sha: commit_sha.to_string(),
         authorship_log,
         authorship_note: authorship_note_str,
@@ -705,6 +709,7 @@ pub(crate) struct PostCommitAmendResult {
     pub authorship_log: AuthorshipLog,
     pub authorship_note: String,
     pub parent_sha: String,
+    pub source_history: Option<crate::authorship::enterprise::SourceHistory>,
 }
 
 pub(crate) fn post_commit_amend_with_recovery_timestamps(
@@ -911,14 +916,31 @@ pub(crate) fn post_commit_amend_with_recovery_timestamps_detailed(
         )?;
     }
 
-    // Clean up old working log
-    repo_storage.delete_working_log_for_base_commit(original_commit)?;
+    let mut retain_enterprise_input = false;
+    let source_history = if Config::fresh().feature_flags().enterprise_metrics {
+        match working_log.read_all_checkpoints().and_then(|checkpoints| {
+            crate::authorship::enterprise::SourceHistory::read(&working_log, &checkpoints)
+        }) {
+            Ok(history) => Some(history),
+            Err(error) => {
+                retain_enterprise_input = true;
+                tracing::warn!(%error, "Unable to retain amend source history");
+                None
+            }
+        }
+    } else {
+        None
+    };
+    if !retain_enterprise_input {
+        repo_storage.delete_working_log_for_base_commit(original_commit)?;
+    }
 
     Ok(PostCommitAmendResult {
         commit_sha: amended_commit.to_string(),
         authorship_log,
         authorship_note: authorship_note_str,
         parent_sha,
+        source_history,
     })
 }
 

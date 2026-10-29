@@ -29,6 +29,83 @@ pub struct CommitFacts {
     pub recorded_at: u64,
     pub legacy_event_hashes: Vec<String>,
     pub files: Vec<CommitFileFacts>,
+    #[serde(default)]
+    pub relations: Vec<CommitRelation>,
+    #[serde(default)]
+    pub merge: Option<MergeFacts>,
+}
+
+impl CommitFacts {
+    pub(crate) fn replacement_source_available(&self) -> bool {
+        self.files.iter().all(|file| {
+            file.added.is_empty()
+                || file.binary
+                || file.new_mode.as_deref() == Some("160000")
+                || file.path == ".gitmodules"
+                || file.path.rsplit('/').next() == Some("page.lock")
+                || file.source.is_some()
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommitRelation {
+    pub kind: CommitRelationKind,
+    pub source_commits: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CommitRelationKind {
+    AmendReplacement,
+    RebaseReplacement,
+    Amend,
+    Rebase,
+    CherryPick,
+    CherryPickNoCommit,
+    Revert,
+    SquashMerge,
+    UpdateRef,
+    NonFastForward,
+}
+
+impl CommitRelationKind {
+    pub(crate) fn replaces(self) -> bool {
+        matches!(self, Self::AmendReplacement | Self::RebaseReplacement)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MergeFacts {
+    pub related_additions: u64,
+    pub verified_ai: u64,
+    pub decision: MergeDecision,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MergeDecision {
+    Eligible,
+    NotStrictMajority,
+    MissingSource,
+    ConflictOrManualResolution,
+    Octopus,
+    RepeatedOrAmbiguousImport,
+    UnsupportedMapping,
+}
+
+impl MergeDecision {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Eligible => "eligible",
+            Self::NotStrictMajority => "not_strict_majority",
+            Self::MissingSource => "missing_source",
+            Self::ConflictOrManualResolution => "conflict_or_manual_resolution",
+            Self::Octopus => "octopus",
+            Self::RepeatedOrAmbiguousImport => "repeated_or_ambiguous_import",
+            Self::UnsupportedMapping => "unsupported_mapping",
+        }
+    }
 }
 
 pub(crate) fn event_hash(event: &crate::metrics::MetricEvent) -> Result<String, serde_json::Error> {
@@ -43,6 +120,17 @@ pub(crate) fn event_hash(event: &crate::metrics::MetricEvent) -> Result<String, 
 mod tests {
     use super::*;
     use crate::metrics::{CommittedValues, EventAttributes, MetricEvent, PosEncoded};
+
+    #[test]
+    fn original_local_facts_without_operation_fields_still_deserialize() {
+        let fact: CommitFacts = serde_json::from_value(serde_json::json!({
+            "repository_key":"repo", "repo_url":null, "commit_sha":"old", "parent_shas":[],
+            "committed_at":1, "recorded_at":2, "legacy_event_hashes":[], "files":[]
+        }))
+        .unwrap();
+        assert!(fact.relations.is_empty());
+        assert!(fact.merge.is_none());
+    }
 
     #[test]
     fn enterprise_event_fingerprint_survives_persistence_roundtrip() {

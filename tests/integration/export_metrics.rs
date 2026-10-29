@@ -804,3 +804,5 @@ fn export_metrics_rejects_invalid_config_and_preserves_existing_output() {
         .success()
     );
 }
+
+mod rewrite_operations;

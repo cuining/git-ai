@@ -48,6 +48,26 @@ pub fn read_note(repo: &Repository, commit_sha: &str) -> Option<String> {
     }
 }
 
+pub(crate) fn read_local_notes_batch(
+    repo: &Repository,
+    commit_shas: &[String],
+) -> Result<HashMap<String, String>, GitAiError> {
+    let mut notes = if Config::get().notes_backend_kind() == NotesBackendKind::Http {
+        http_read_notes(commit_shas)
+    } else {
+        HashMap::new()
+    };
+    let missing: Vec<_> = commit_shas
+        .iter()
+        .filter(|sha| !notes.contains_key(*sha))
+        .cloned()
+        .collect();
+    if !missing.is_empty() {
+        notes.extend(crate::git::refs::notes_for_commits(repo, &missing)?);
+    }
+    Ok(notes)
+}
+
 /// Read note contents for multiple commits in O(1) git process calls.
 /// Returns a map of commit_sha → note_content for commits that have notes.
 ///

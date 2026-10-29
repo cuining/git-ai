@@ -348,40 +348,67 @@ impl MetricsDatabase {
         Ok((events, facts))
     }
 
+    pub(crate) fn commit_facts_for_repository(
+        &self,
+        repository_key: &str,
+    ) -> Result<
+        std::collections::HashMap<String, crate::metrics::enterprise::CommitFacts>,
+        GitAiError,
+    > {
+        let mut statement = self.conn.prepare(
+            "SELECT facts_json FROM enterprise_commit_facts WHERE repository_key = ?1 ORDER BY commit_sha",
+        )?;
+        let mut facts = std::collections::HashMap::new();
+        for row in statement.query_map([repository_key], |row| row.get::<_, String>(0))? {
+            let fact: crate::metrics::enterprise::CommitFacts = serde_json::from_str(&row?)?;
+            facts.insert(fact.commit_sha.clone(), fact);
+        }
+        Ok(facts)
+    }
+
     pub(crate) fn insert_commit_facts(
         &mut self,
         facts: &crate::metrics::enterprise::CommitFacts,
     ) -> Result<(), GitAiError> {
+        self.insert_commit_facts_batch(std::slice::from_ref(facts))
+    }
+
+    pub(crate) fn insert_commit_facts_batch(
+        &mut self,
+        batch: &[crate::metrics::enterprise::CommitFacts],
+    ) -> Result<(), GitAiError> {
         let transaction = self.conn.transaction()?;
-        let previous: Option<String> = transaction.query_row(
+        for facts in batch {
+            let previous: Option<String> = transaction.query_row(
             "SELECT facts_json FROM enterprise_commit_facts WHERE repository_key = ?1 AND commit_sha = ?2",
             params![facts.repository_key, facts.commit_sha], |row| row.get(0),
         ).optional()?;
-        let mut stored = facts.clone();
-        if let Some(previous) = previous {
-            let previous: crate::metrics::enterprise::CommitFacts =
-                serde_json::from_str(&previous)?;
-            let mut comparable = previous.clone();
-            comparable.recorded_at = stored.recorded_at;
-            comparable
-                .legacy_event_hashes
-                .clone_from(&stored.legacy_event_hashes);
-            if comparable != stored {
-                return Err(GitAiError::Generic(
-                    "conflicting immutable local commit facts".into(),
-                ));
+            let mut stored = facts.clone();
+            if let Some(previous) = previous {
+                let previous: crate::metrics::enterprise::CommitFacts =
+                    serde_json::from_str(&previous)?;
+                let mut comparable = previous.clone();
+                comparable.recorded_at = stored.recorded_at;
+                comparable
+                    .legacy_event_hashes
+                    .clone_from(&stored.legacy_event_hashes);
+                if comparable != stored {
+                    return Err(GitAiError::Generic(
+                        "conflicting immutable local commit facts".into(),
+                    ));
+                }
+                stored.recorded_at = previous.recorded_at;
+                stored
+                    .legacy_event_hashes
+                    .extend(previous.legacy_event_hashes);
             }
-            stored.recorded_at = previous.recorded_at;
-            stored
-                .legacy_event_hashes
-                .extend(previous.legacy_event_hashes);
-        }
-        stored.legacy_event_hashes.sort();
-        stored.legacy_event_hashes.dedup();
-        transaction.execute(
+            stored.legacy_event_hashes.sort();
+            stored.legacy_event_hashes.dedup();
+            transaction.execute(
             "INSERT INTO enterprise_commit_facts (repository_key, commit_sha, facts_json) VALUES (?1, ?2, ?3) ON CONFLICT(repository_key, commit_sha) DO UPDATE SET facts_json = excluded.facts_json",
             params![stored.repository_key, stored.commit_sha, serde_json::to_string(&stored)?],
         )?;
+        }
         transaction.commit()?;
         Ok(())
     }
@@ -1712,6 +1739,32 @@ mod tests {
     }
 
     #[test]
+    fn enterprise_batch_conflicts_roll_back_all_new_facts() {
+        let (mut db, _directory) = create_test_db();
+        let original = crate::metrics::enterprise::CommitFacts {
+            repository_key: "repo".into(),
+            repo_url: None,
+            commit_sha: "original".into(),
+            parent_shas: Vec::new(),
+            committed_at: 1,
+            recorded_at: 1,
+            legacy_event_hashes: Vec::new(),
+            files: Vec::new(),
+            relations: Vec::new(),
+            merge: None,
+        };
+        db.insert_commit_facts(&original).unwrap();
+        let mut new = original.clone();
+        new.commit_sha = "new".into();
+        let mut conflict = original.clone();
+        conflict.committed_at = 2;
+        assert!(db.insert_commit_facts_batch(&[new, conflict]).is_err());
+        let stored = db.commit_facts_for_repository("repo").unwrap();
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored["original"], original);
+    }
+
+    #[test]
     fn enterprise_commit_facts_retries_are_immutable_and_never_pending_uploads() {
         let (mut db, directory) = create_test_db();
         let facts = crate::metrics::enterprise::CommitFacts {
@@ -1722,6 +1775,8 @@ mod tests {
             committed_at: 1,
             recorded_at: 2,
             legacy_event_hashes: vec!["first-observation".into()],
+            relations: Vec::new(),
+            merge: None,
             files: Vec::new(),
         };
         db.insert_commit_facts(&facts).unwrap();

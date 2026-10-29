@@ -25,10 +25,16 @@ It defaults to `false` in debug and release builds. Set
 `"feature_flags": {"enterprise_metrics": true}` in its configuration. Existing
 snapshots remain readable when collection is disabled.
 
-Collection currently covers traced ordinary `git commit` operations with one
-created commit. Merge, rewrite, fixup, and multi-target capture are unavailable.
-Local commit facts are separate from pending upload events. Enabling collection
-does not add provenance to uploaded events or public authorship Notes.
+Collection covers traced ordinary commits, amend, mapped rebase, cherry-pick,
+deferred cherry-pick, revert, squash provenance, and supported clean two-parent
+merges. Operation capture hydrates immutable Git inputs in batches outside Trace2
+ingestion. Fixups and unrecorded historical operations remain unavailable.
+
+Local commit facts and source-only checkpoint observations are separate from
+pending upload events. Collection works when `rewrite_metrics_events` is false.
+Synthetic merge and additional revert observations remain local even when legacy
+rewrite uploads are enabled. Collection adds no provenance to uploaded schemas
+or public authorship Notes.
 
 ## Classification
 
@@ -69,7 +75,9 @@ excluded. New local facts count additions and deletions against the first parent
 or the empty tree for an initial commit. Attribution recognition ignores do not
 remove vendor, generated, Markdown, text, or other lockfiles from this denominator.
 Binary files contribute zero text lines. Regular-file and gitlink type changes
-count only the regular-file side's text lines.
+count only the regular-file side's text lines. Rename deletions use the previous
+path's production/test and language rules. Additions, source, and acceptance use
+the destination path. The changed-file count remains one.
 
 The local file-count policy counts every eligible changed path once, including
 binary, rename-only, mode-only, and deletion-only changes. Moss's file-count rule
@@ -88,9 +96,12 @@ snapshot format, **not** a drop-in implementation of the Moss protocol.
   identities, and rewrite sources when available. New local facts have an immutable
   repository-storage and commit key. That internal key is not an enterprise
   repository identity. A fact replaces only its exactly bound legacy event.
-  A valid legacy rewrite record supersedes its
-  explicitly recorded sources within the same repository. A parent commit is
-  never used as a rewrite source. Multiple sources remain in `source_commits`.
+  Only validated local amend and rebase replacement evidence suppresses original
+  observations in the same repository storage. Partial targets, conflicting
+  successors, and cycles retain originals. Replacements resolve before the time
+  window. Legacy source links, cherry-pick, revert, squash, update-ref, and unknown
+  non-fast-forward links retain their sources as provenance. Multiple sources
+  remain in `source_commits`; `source_commit` is null unless there is exactly one.
 - Full AI generation counts remain `null`. Optional
   `prod_ai_surviving_source_line_num` and `test_ai_surviving_source_line_num` count
   committed added lines containing verified surviving AI bytes. They are partial
@@ -100,7 +111,12 @@ snapshot format, **not** a drop-in implementation of the Moss protocol.
   `source_evidence` is `partial_verified_surviving_bytes` when such capture is
   available, or `unavailable` for missing evidence. Missing historical capture
   never becomes a complete zero. Whole replacements, ambiguous moves, split or
-  joined lines, and cross-commit ancestry do not establish full generation.
+  joined lines, and incomplete cross-commit ancestry do not establish full
+  generation. Retained companions carry source across verified unchanged spans,
+  supported renames, and INITIAL. Chronological checkpoint replay preserves
+  recorded erasures before retyping. A later proven descendant snapshot replaces
+  earlier source evidence, including an empty snapshot. Missing or unrelated
+  source histories remain unavailable.
   Language and Agent breakdowns retain the same distinction. A line with several
   source Agents counts once globally and once for each contributing Agent.
 - `known_human_line_num` and `unknown_line_num` distinguish known human
@@ -130,8 +146,32 @@ snapshot format, **not** a drop-in implementation of the Moss protocol.
 - `coverage`: explicit limitations and skipped-record diagnostics. The current
   export always sets `moss_compatible: false`. Independent local Token extraction
   currently covers Claude Code and Codex; OpenCode extraction, completed-turn
-  output, independent generation provenance, and Moss's merge eligibility rule
-  remain separate work.
+  output, and complete generation ancestry remain separate work.
+
+## Retained history and merge eligibility
+
+The snapshot reports retained local observations after verified replacements.
+It does not query current branches to reconstruct an employee's complete history.
+Rebase replacement requires retained source companions and uniquely preserved
+added lines. Dropped or changed mappings that cannot prove replacement retain
+original observations. Many-source identities remain intact.
+
+An exported merge has exactly two parents. Its reconstructed automatic merge
+must match the immutable target tree. Imported evidence maps unchanged second-parent
+spans into first-parent additions. `merge_eligibility.related_additions` includes
+all eligible related additions, including human lines, unknown lines, and files
+excluded from attribution recognition. `verified_ai` counts their independent
+surviving source lines once. Eligibility requires positive verified AI and
+`2 * verified_ai > related_additions`. A 49/100 or 50/100 merge is withheld;
+51/100 is eligible. Final acceptance still follows the captured final Notes and
+can differ from source. Commit totals retain the complete first-parent diff.
+
+Byte-identical imported snapshots support repeated literal lines because their
+coordinates are unchanged. Changed mappings with repeated nonempty lines remain
+unsupported. Conflict or manual resolution, octopus, ambiguous import mapping,
+and missing source produce closed diagnostic reasons and withheld merge rows.
+These are unavailable observations, not known zero code output. Unsupported
+mappings do not establish complete source ancestry.
 
 Only explicitly listed metadata and counters are serialized. Prompt text,
 transcript events, tool arguments/results, source content, commit messages,
