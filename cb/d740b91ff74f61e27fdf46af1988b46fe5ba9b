@@ -1,0 +1,46 @@
+src/commands/export_metrics.rs
+  s_c37460ed29e7e5::t_fdbbff1a7ca6ff 7,219-220,702,1412,1805
+  s_c37460ed29e7e5::t_23e41bf6dbf7b4 15,534-536
+tests/integration/export_metrics.rs
+  s_c37460ed29e7e5::t_07cdc5274b9d42 105-143
+  s_c37460ed29e7e5::t_1770011172297f 144-172
+  s_c37460ed29e7e5::t_00222d7dd7a533 173-177,180-201,205-212,217-224
+  s_c37460ed29e7e5::t_3ed096f7948364 71-94,103-104
+  s_c37460ed29e7e5::t_1261bc7e89163e 178-179,202-204,213-216
+  s_c37460ed29e7e5::t_82cbd64b8c3f60 95-102
+src/authorship/enterprise.rs
+  s_c37460ed29e7e5::t_a5fc5cca31315c 115,124,141,267,563,702
+  s_c37460ed29e7e5::t_fdbbff1a7ca6ff 9,929,1378
+src/authorship/post_commit.rs
+  s_c37460ed29e7e5::t_a5fc5cca31315c 461,470,547,1180,1201,1217
+  s_c37460ed29e7e5::t_1261bc7e89163e 1272-1278
+src/metrics/enterprise.rs
+  s_c37460ed29e7e5::t_fdbbff1a7ca6ff 3,7-36,60-61
+  s_c37460ed29e7e5::t_1770011172297f 165
+src/metrics/db.rs
+  s_c37460ed29e7e5::t_fa2881b2259269 1848-1897
+  s_c37460ed29e7e5::t_f96c606d580c76 427-430
+  s_c37460ed29e7e5::t_fdbbff1a7ca6ff 1821
+  s_c37460ed29e7e5::t_a2875835dbd0ef 1840-1847,1898
+docs/enterprise-metrics-export.md
+  s_c37460ed29e7e5::t_38a20de5a07312 17-44
+src/daemon/rewrite_metrics.rs
+  s_c37460ed29e7e5::t_1261bc7e89163e 58-62
+  s_c37460ed29e7e5::t_a5fc5cca31315c 16-18,23,48,132,145,240,244,258,662,717,745
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.6",
+  "base_commit_sha": "cbd740b91ff74f61e27fdf46af1988b46fe5ba9b",
+  "prompts": {},
+  "sessions": {
+    "s_c37460ed29e7e5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1aac2-8af7-7093-a263-b99b3de84bb2",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
