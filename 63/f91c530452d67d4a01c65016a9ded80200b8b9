@@ -1,0 +1,19 @@
+tests/integration/export_metrics.rs
+  s_c37460ed29e7e5::t_c052d78a1eff62 75-92,96,104-113,115-117,251-259,284
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.6",
+  "base_commit_sha": "63f91c530452d67d4a01c65016a9ded80200b8b9",
+  "prompts": {},
+  "sessions": {
+    "s_c37460ed29e7e5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1aac2-8af7-7093-a263-b99b3de84bb2",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
