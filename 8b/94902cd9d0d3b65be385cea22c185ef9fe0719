@@ -1,0 +1,35 @@
+src/daemon.rs
+  s_c37460ed29e7e5::t_2e333ec042a57e 2273,7993
+  s_c37460ed29e7e5::t_3266ea137a591d 862,909,969,998,1018
+tests/integration/export_metrics.rs
+  s_c37460ed29e7e5::t_7adba6c55cfd41 251-258
+  s_c37460ed29e7e5::t_71520ab3cf46c4 248,290-296,301-316
+  s_c37460ed29e7e5::t_ee5d301f0bd6da 367-372,375-388,391-393,401,412-426
+  s_c37460ed29e7e5::t_2e333ec042a57e 12-13
+  s_c37460ed29e7e5::t_38103685ef1b17 287-289
+  s_c37460ed29e7e5::t_3a35f0b33ebf6a 73-105,111-112,117-119,320-326,329-341,344-366
+src/authorship/post_commit.rs
+  s_c37460ed29e7e5::t_2e333ec042a57e 152,647
+  s_c37460ed29e7e5::t_052861418e8d26 727,959
+  s_c37460ed29e7e5::t_3266ea137a591d 110,160,208,234,246,254,270,449-452
+src/daemon/rewrite_metrics.rs
+  s_c37460ed29e7e5::t_052861418e8d26 15,18
+docs/enterprise-metrics-export.md
+  s_c37460ed29e7e5::t_98a0ea491929d5 27-33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.6",
+  "base_commit_sha": "8b94902cd9d0d3b65be385cea22c185ef9fe0719",
+  "prompts": {},
+  "sessions": {
+    "s_c37460ed29e7e5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1aac2-8af7-7093-a263-b99b3de84bb2",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
