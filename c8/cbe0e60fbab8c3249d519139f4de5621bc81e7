@@ -1,0 +1,23 @@
+tests/integration/export_metrics.rs
+  s_c37460ed29e7e5::t_b0325d0c3186f1 362-372,392-394,414
+src/authorship/rewrite.rs
+  s_c37460ed29e7e5::t_f3579733eeaab7 178,187-190,585-589,591,593-597,599,682,685-689,691,700,712-715,722,724,726-735,737,765-771
+docs/enterprise-metrics-export.md
+  s_c37460ed29e7e5::t_0209635cf72a86 29
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.6",
+  "base_commit_sha": "c8cbe0e60fbab8c3249d519139f4de5621bc81e7",
+  "prompts": {},
+  "sessions": {
+    "s_c37460ed29e7e5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1aac2-8af7-7093-a263-b99b3de84bb2",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
