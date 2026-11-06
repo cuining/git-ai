@@ -956,7 +956,7 @@ mod tests {
         let path_str = path.to_string_lossy();
         assert!(
             path.components()
-                .any(|part| part.as_os_str() == "ai-tracking"),
+                .any(|part| part.as_os_str() == ".dcc-ai-tracking"),
             "path should contain .dcc-ai-tracking: {}",
             path_str
         );

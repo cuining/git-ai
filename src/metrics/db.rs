@@ -3278,7 +3278,7 @@ mod tests {
         let path = MetricsDatabase::database_path().unwrap();
         assert!(
             path.components()
-                .any(|part| part.as_os_str() == "ai-tracking")
+                .any(|part| part.as_os_str() == ".dcc-ai-tracking")
         );
         assert!(path.to_string_lossy().contains("internal"));
         assert!(path.to_string_lossy().ends_with("metrics-db"));
