@@ -1,0 +1,22 @@
+tests/integration/commit_metric_metadata.rs
+  s_c37460ed29e7e5::t_8357f88b5a2b0a 115-118
+  s_c37460ed29e7e5::t_09503c7e50c3b6 119
+src/commands/config.rs
+  s_c37460ed29e7e5::t_91a5adf66acf32 934-936,1666-1668
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.6",
+  "base_commit_sha": "c7f758121e6ff7e681df983ae7ee7b4393cfa721",
+  "prompts": {},
+  "sessions": {
+    "s_c37460ed29e7e5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1aac2-8af7-7093-a263-b99b3de84bb2",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
