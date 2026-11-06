@@ -211,10 +211,12 @@ def setup_variant_runtime(
 
     daemon_proc: subprocess.Popen[str] | None = None
     if variant.mode == "daemon":
-        daemon_dir = home_dir / ".git-ai" / "internal" / "daemon"
+        daemon_dir = home_dir / ".dcc-ai-tracking" / "internal" / "daemon"
         control_socket = daemon_dir / "control.sock"
         trace_socket = daemon_dir / "trace2.sock"
         daemon_dir.mkdir(parents=True, exist_ok=True)
+        env["GIT_AI_DAEMON_CONTROL_SOCKET"] = str(control_socket)
+        env["GIT_AI_DAEMON_TRACE_SOCKET"] = str(trace_socket)
         daemon_proc = subprocess.Popen(
             [str(variant.binary), "daemon", "run"],
             cwd=str(runtime_root),
@@ -244,7 +246,6 @@ def setup_variant_runtime(
             "0",
         )
         env["GIT_AI_DAEMON_CHECKPOINT_DELEGATE"] = "true"
-        env["GIT_AI_DAEMON_CONTROL_SOCKET"] = str(control_socket)
 
     git_bin = wrapper_git if variant.mode == "wrapper" else real_git
     return env, git_bin, daemon_proc, home_dir

@@ -55,6 +55,9 @@ jobs:
             ${{ runner.os }}-perf-smoke-
             ${{ runner.os }}-perf-
 
+      - name: Test benchmark daemon socket setup
+        run: python3 -m unittest discover -s scripts/benchmarks/git -p test_daemon_runtime.py -v
+
       - name: Run reduced nasty benchmark gate
         run: |
           python3 scripts/benchmarks/git/benchmark_nasty_modes_vs_main.py \
@@ -111,6 +114,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-perf-nightly-
             ${{ runner.os }}-perf-
+
+      - name: Test benchmark daemon socket setup
+        run: python3 -m unittest discover -s scripts/benchmarks/git -p test_daemon_runtime.py -v
 
       - name: Run heavy benchmark matrix gate
         run: |
