@@ -1,0 +1,214 @@
+tests/integration/repos/test_repo.rs
+  s_0cd24ff909c40f::t_7afa2039bfa031 3653,4151
+  s_0cd24ff909c40f::t_1de689ba246528 3631,3634,3652,3654
+  s_0cd24ff909c40f::t_a30adf802cadc4 1297
+  s_0cd24ff909c40f::t_98badf2cc51d51 195,514,4062
+src/authorship/internal_db.rs
+  s_0cd24ff909c40f::t_1de689ba246528 174
+  s_0cd24ff909c40f::t_193666f6d7f96b 189
+  s_0cd24ff909c40f::t_89db3515951fa6 621-624
+tests/integration/untraced_commit_fixup.rs
+  s_0cd24ff909c40f::t_1de689ba246528 686
+agent-support/intellij/src/main/kotlin/org/jetbrains/plugins/template/services/TelemetryService.kt
+  s_0cd24ff909c40f::t_1de689ba246528 218,231
+mdm/linux/install-login-start.sh
+  s_0cd24ff909c40f::t_1de689ba246528 16,121-122
+agent-support/intellij/src/main/kotlin/org/jetbrains/plugins/template/services/GitAiService.kt
+  s_0cd24ff909c40f::t_1de689ba246528 73,96,101
+src/metrics/model_pricing.rs
+  s_0cd24ff909c40f::t_1de689ba246528 7
+src/metrics/db.rs
+  s_0cd24ff909c40f::t_99d2954f95f961 3279-3282
+  s_0cd24ff909c40f::t_193666f6d7f96b 284
+  s_0cd24ff909c40f::t_1de689ba246528 274
+packaging/README.md
+  s_0cd24ff909c40f::t_1de689ba246528 17,25-26
+scripts/dev.ps1
+  s_0cd24ff909c40f::t_1de689ba246528 10-11,88
+scripts/mdm/test-login-start.ps1
+  s_0cd24ff909c40f::t_1de689ba246528 24-25,145
+scripts/mdm/test-login-start.sh
+  s_0cd24ff909c40f::t_1de689ba246528 29-30
+src/mdm/agents/amp.rs
+  s_0cd24ff909c40f::t_1de689ba246528 218
+  s_0cd24ff909c40f::t_99d2954f95f961 222-224
+agent-support/vscode/src/extension.ts
+  s_0cd24ff909c40f::t_98badf2cc51d51 16,25
+docs/bash-attribution-recovery-plan.md
+  s_0cd24ff909c40f::t_1de689ba246528 32
+install.ps1
+  s_0cd24ff909c40f::t_1de689ba246528 9,352-353
+src/mdm/agents/cursor.rs
+  s_0cd24ff909c40f::t_1de689ba246528 637
+src/utils.rs
+  s_0cd24ff909c40f::t_1de689ba246528 280
+tests/integration/checkpoint_debug_log.rs
+  s_0cd24ff909c40f::t_1de689ba246528 18,50,76
+src/commands/analyze/cube.rs
+  s_0cd24ff909c40f::t_1de689ba246528 46
+src/commands/exchange_nonce.rs
+  s_0cd24ff909c40f::t_1de689ba246528 5
+docs/token-usage-events-spec.md
+  s_0cd24ff909c40f::t_1de689ba246528 55
+agent-support/vscode/src/utils/host-kind.ts
+  s_0cd24ff909c40f::t_98badf2cc51d51 29
+flake.nix
+  s_0cd24ff909c40f::t_7afa2039bfa031 691-695
+  s_0cd24ff909c40f::t_1de689ba246528 86,89,92,108,111,114,696-697,701-704,1016
+src/ci/workflow_templates/github.yaml
+  s_0cd24ff909c40f::t_1de689ba246528 18
+scripts/benchmarks/git/benchmark_modes_vs_main.py
+  s_0cd24ff909c40f::t_1de689ba246528 263
+src/streams/mod.rs
+  s_0cd24ff909c40f::t_a30adf802cadc4 23
+tests/async_mode.rs
+  s_0cd24ff909c40f::t_1de689ba246528 83
+tests/integration/token_usage.rs
+  s_0cd24ff909c40f::t_1de689ba246528 711
+.github/workflows/nightly-upgrade.yml
+  s_0cd24ff909c40f::t_1de689ba246528 174,198,203-205,209
+mdm/macos/install-login-start.sh
+  s_0cd24ff909c40f::t_1de689ba246528 119,134,140
+src/daemon/bash_history_db.rs
+  s_0cd24ff909c40f::t_89db3515951fa6 250
+tests/notes_sync_regression.rs
+  s_0cd24ff909c40f::t_1de689ba246528 478,533,1181,1275
+scripts/benchmarks/git/benchmark_nasty_rebases.sh
+  s_0cd24ff909c40f::t_1de689ba246528 111,114
+src/mdm/agents/github_copilot.rs
+  s_0cd24ff909c40f::t_1de689ba246528 494,507,513,533,540,552,570,586
+docs/telemetry-streams-summary.md
+  s_0cd24ff909c40f::t_a30adf802cadc4 83,86,89,92
+install.sh
+  s_0cd24ff909c40f::t_7afa2039bfa031 218-224
+  s_0cd24ff909c40f::t_1de689ba246528 215-216,297
+src/diagnostics.rs
+  s_0cd24ff909c40f::t_99d2954f95f961 444-445
+docs/telemetry-examples.md
+  s_0cd24ff909c40f::t_1de689ba246528 3,204
+src/mdm/skills_installer.rs
+  s_0cd24ff909c40f::t_1de689ba246528 118,122,155,164,172,182,199,324
+.github/workflows/install-scripts-nightly.yml
+  s_0cd24ff909c40f::t_1de689ba246528 42,93
+CONTRIBUTING.md
+  s_0cd24ff909c40f::t_1de689ba246528 36,42,55
+tests/daemon_mode.rs
+  s_0cd24ff909c40f::t_1de689ba246528 8462,8522,8678,8731
+  s_0cd24ff909c40f::t_8c3b2484a17681 70-78
+scripts/benchmarks/git/benchmark_nasty_modes_vs_main.py
+  s_0cd24ff909c40f::t_1de689ba246528 214
+src/mdm/agents/claude_code.rs
+  s_0cd24ff909c40f::t_1de689ba246528 1182,1207,1214,1219
+tests/windows_install_script.rs
+  s_0cd24ff909c40f::t_1de689ba246528 29,36,57,67,278,394,461,497
+src/commands/analyze/mod.rs
+  s_0cd24ff909c40f::t_1de689ba246528 235
+src/diagnostic_sentinels.rs
+  s_0cd24ff909c40f::t_193666f6d7f96b 19
+src/daemon.rs
+  s_0cd24ff909c40f::t_1de689ba246528 405
+  s_0cd24ff909c40f::t_7afa2039bfa031 399
+tests/integration/config_cli_coverage.rs
+  s_0cd24ff909c40f::t_213cd4f70c1068 29-30
+  s_0cd24ff909c40f::t_1de689ba246528 6
+  s_0cd24ff909c40f::t_99d2954f95f961 363-366
+  s_0cd24ff909c40f::t_fe9f2d33032ce1 19-28
+tests/integration/debug_diagnostics.rs
+  s_0cd24ff909c40f::t_1de689ba246528 53
+tests/config_fresh_test.rs
+  s_0cd24ff909c40f::t_1de689ba246528 90,126,153,199,240,270,300
+README-nix.md
+  s_0cd24ff909c40f::t_1de689ba246528 81
+mdm/windows/install-login-start.ps1
+  s_0cd24ff909c40f::t_1de689ba246528 18,20
+.github/workflows/release.yml
+  s_0cd24ff909c40f::t_1de689ba246528 546-547,616,630
+src/config.rs
+  s_0cd24ff909c40f::t_2b35cf50ad6a20 1536,1547,1550-1557
+  s_0cd24ff909c40f::t_1de689ba246528 1517,1545,1560,1566,1572,1580,1617
+src/mdm/agents/codex.rs
+  s_0cd24ff909c40f::t_1de689ba246528 1028,1072,1558
+  s_0cd24ff909c40f::t_7afa2039bfa031 1001
+src/notes/mod.rs
+  s_0cd24ff909c40f::t_1de689ba246528 3
+src/commands/git_hook_handlers.rs
+  s_0cd24ff909c40f::t_0dafc5b756a922 400-410,431
+tests/integration/streams_e2e.rs
+  s_0cd24ff909c40f::t_1de689ba246528 840
+packaging/windows/git-ai.wxs
+  s_0cd24ff909c40f::t_1de689ba246528 22
+src/auth/credentials.rs
+  s_0cd24ff909c40f::t_193666f6d7f96b 84-86
+  s_0cd24ff909c40f::t_89db3515951fa6 87
+mdm/README.md
+  s_0cd24ff909c40f::t_1de689ba246528 86,99
+AGENTS.md
+  s_0cd24ff909c40f::t_a30adf802cadc4 88
+src/ci/workflow_templates/gitlab.yaml
+  s_0cd24ff909c40f::t_1de689ba246528 25
+src/commands/install_env.rs
+  s_0cd24ff909c40f::t_89db3515951fa6 89-92,945-949,976-979
+  s_0cd24ff909c40f::t_193666f6d7f96b 726
+  s_0cd24ff909c40f::t_1de689ba246528 625,716,964-965,968-969,980,987-988,991-992,1001,1011-1012,1047,1069
+src/commands/install_hooks.rs
+  s_0cd24ff909c40f::t_89db3515951fa6 1367-1373,1378-1384
+  s_0cd24ff909c40f::t_1de689ba246528 1027
+  s_0cd24ff909c40f::t_193666f6d7f96b 1032
+agent-support/visualstudio/src/GitAiVS/Services/BinaryResolver.cs
+  s_0cd24ff909c40f::t_1de689ba246528 11
+  s_0cd24ff909c40f::t_3dfd0bfbf38fbc 81,86
+src/commands/upgrade.rs
+  s_0cd24ff909c40f::t_89db3515951fa6 507
+  s_0cd24ff909c40f::t_193666f6d7f96b 504-506
+  s_0cd24ff909c40f::t_1de689ba246528 540,597
+src/token_usage/db.rs
+  s_0cd24ff909c40f::t_1de689ba246528 3
+tests/integration/install_hooks_comprehensive.rs
+  s_0cd24ff909c40f::t_1de689ba246528 229,263,271
+  s_0cd24ff909c40f::t_99d2954f95f961 295-298
+  s_0cd24ff909c40f::t_7afa2039bfa031 935-974
+packaging/macos/scripts/postinstall
+  s_0cd24ff909c40f::t_3dfd0bfbf38fbc 29-30
+  s_0cd24ff909c40f::t_1de689ba246528 41
+  s_0cd24ff909c40f::t_7afa2039bfa031 34-36
+.github/workflows/install-scripts-local.yml
+  s_0cd24ff909c40f::t_1de689ba246528 95,123,142,148,153,175-176,257,289,321,332,352,394,523
+src/notes/db.rs
+  s_0cd24ff909c40f::t_193666f6d7f96b 134
+  s_0cd24ff909c40f::t_99d2954f95f961 958-959
+  s_0cd24ff909c40f::t_1de689ba246528 1,949,960
+scripts/nightly/start-async-daemon.sh
+  s_0cd24ff909c40f::t_1de689ba246528 7,41,44
+scripts/dev.sh
+  s_0cd24ff909c40f::t_1de689ba246528 46-48,65-66,68-69,73
+src/mdm/agents/opencode.rs
+  s_0cd24ff909c40f::t_99d2954f95f961 388-390
+  s_0cd24ff909c40f::t_1de689ba246528 383
+src/mdm/utils.rs
+  s_0cd24ff909c40f::t_1de689ba246528 689,1247,1250,1278,1282,1300,1317
+tests/git-compat/run-core-tests.py
+  s_0cd24ff909c40f::t_1de689ba246528 73,99,441
+agent-support/visualstudio/DESIGN.md
+  s_0cd24ff909c40f::t_1de689ba246528 163
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.6",
+  "base_commit_sha": "26172428ab99967b5ac407d5b29bf355bd97d491",
+  "prompts": {},
+  "sessions": {
+    "s_0cd24ff909c40f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1b096-a7bd-7c22-a1ed-f8ffd297f9a1",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>",
+      "custom_attributes": {
+        "dcc_ldap": "cmdy",
+        "dcc_version": "1.8.0",
+        "dcc_user_id": "cmdy"
+      }
+    }
+  }
+}
