@@ -1,0 +1,21 @@
+src/commands/config.rs
+  s_c37460ed29e7e5::t_af26a95cf8ec12 205-221,1715,1724-1729
+tests/integration/config_cli_coverage.rs
+  s_c37460ed29e7e5::t_859ea899ed4fe7 457,465-469,474-475
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.6",
+  "base_commit_sha": "6a603d0eb35d420cd4504fedbfdee8a09e80e3a0",
+  "prompts": {},
+  "sessions": {
+    "s_c37460ed29e7e5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1aac2-8af7-7093-a263-b99b3de84bb2",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
