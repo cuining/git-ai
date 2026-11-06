@@ -1,0 +1,30 @@
+scripts/benchmarks/git/test_daemon_runtime.py
+  s_0cd24ff909c40f::t_7e54ada794d59f 1-85
+scripts/benchmarks/git/benchmark_nasty_modes_vs_main.py
+  s_0cd24ff909c40f::t_6da5c68a85be25 218-219
+scripts/benchmarks/git/benchmark_modes_vs_main.py
+  s_0cd24ff909c40f::t_5f867658fba23c 268-271
+.github/workflows/performance-benchmarks.yml
+  s_0cd24ff909c40f::t_619c10debb6911 58-60,118-120
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.6",
+  "base_commit_sha": "684d51695a69adcd42ee5c0ffaaeb94b2c23a937",
+  "prompts": {},
+  "sessions": {
+    "s_0cd24ff909c40f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1b096-a7bd-7c22-a1ed-f8ffd297f9a1",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>",
+      "custom_attributes": {
+        "dcc_user_id": "cmdy",
+        "dcc_version": "1.8.0",
+        "dcc_ldap": "cmdy"
+      }
+    }
+  }
+}
