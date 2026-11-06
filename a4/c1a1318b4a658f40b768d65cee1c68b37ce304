@@ -1,0 +1,31 @@
+tests/integration/config_cli_coverage.rs
+  s_c37460ed29e7e5::t_b22bdb72889ebc 416-418
+  s_c37460ed29e7e5::t_8fd2b86a0c7929 419
+  s_c37460ed29e7e5::t_506827f37b69d0 309-316,326,331,336-341,352-361,371,376-378,383-384,399,404-410,420-421,431-435,444-456,466-468,482-495,505-506,511-515,520-521
+  s_c37460ed29e7e5::t_70f4fcc779fc69 271-281,300-308
+  s_c37460ed29e7e5::t_5f233827686dd7 282-299,317-325,327-330,332-335,342-351,362-370,372-375,379-382,385-398,400-403,411-415,422-430,436-443,457-465,469-481,496-504,507-510,516-519
+src/commands/config.rs
+  s_c37460ed29e7e5::t_86b10259f617a1 695-697,1659-1668,1682-1685,1698-1716,1722-1776
+  s_c37460ed29e7e5::t_5f233827686dd7 166-171,1717-1718
+  s_c37460ed29e7e5::t_2213db83d9ef48 1721
+  s_c37460ed29e7e5::t_0678a6121eaa25 1719-1720
+tests/integration/commit_metric_metadata.rs
+  s_c37460ed29e7e5::t_a5d2d2bef0e4db 118-119
+  s_c37460ed29e7e5::t_9dfb1cedeea11b 115-117
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.6",
+  "base_commit_sha": "a4c1a1318b4a658f40b768d65cee1c68b37ce304",
+  "prompts": {},
+  "sessions": {
+    "s_c37460ed29e7e5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1aac2-8af7-7093-a263-b99b3de84bb2",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
