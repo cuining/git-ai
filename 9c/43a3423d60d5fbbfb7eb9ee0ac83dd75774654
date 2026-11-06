@@ -1,0 +1,28 @@
+src/metrics/db.rs
+  s_0cd24ff909c40f::t_8e5bb5d297d15b 3281
+src/authorship/internal_db.rs
+  s_0cd24ff909c40f::t_8e5bb5d297d15b 623
+src/notes/db.rs
+  s_0cd24ff909c40f::t_8e5bb5d297d15b 959
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.6",
+  "base_commit_sha": "9c43a3423d60d5fbbfb7eb9ee0ac83dd75774654",
+  "prompts": {},
+  "sessions": {
+    "s_0cd24ff909c40f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1b096-a7bd-7c22-a1ed-f8ffd297f9a1",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>",
+      "custom_attributes": {
+        "dcc_user_id": "cmdy",
+        "dcc_ldap": "cmdy",
+        "dcc_version": "1.8.0"
+      }
+    }
+  }
+}
