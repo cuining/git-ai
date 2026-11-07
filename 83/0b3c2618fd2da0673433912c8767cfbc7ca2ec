@@ -1,0 +1,90 @@
+scripts/pack-npm.py
+  s_eb3b60889961ab::t_47d6465599eb17 1-98
+packaging/README.md
+  s_eb3b60889961ab::t_e2e7feda9a6340 40-49
+  s_eb3b60889961ab::t_47d6465599eb17 5-39,50-58
+scripts/test-pack-npm.py
+  s_eb3b60889961ab::t_47d6465599eb17 1-106
+src/mdm/agents/claude_code.rs
+  s_eb3b60889961ab::t_196137041c91b2 6
+  s_eb3b60889961ab::t_c5c58145bad012 93-97
+src/commands/config.rs
+  s_eb3b60889961ab::t_2389e9790e08ad 113,332-336,525,790-795,1211-1216
+src/commands/install_hooks.rs
+  s_eb3b60889961ab::t_ca86538b4bd9f1 863,865-872,874-880,1370-1382
+  s_eb3b60889961ab::t_285859c2a10b22 256-257
+  s_eb3b60889961ab::t_2389e9790e08ad 29,240,250-252,254-255,258-263,270-291,296-298,301,303-308,310,352-359,361-362,365-371,396,420-433,436-445,454-467,469-472,689-693,756,766-777,799-800,864,873,881,902-904,906-911,913,1136-1195,1212-1238
+  s_eb3b60889961ab::t_196137041c91b2 208,242-248
+Cargo.toml
+  s_eb3b60889961ab::t_ef15a1bbd07c3c 3
+src/commands/git_ai_handlers.rs
+  s_eb3b60889961ab::t_2389e9790e08ad 380-382
+src/http.rs
+  s_eb3b60889961ab::t_2389e9790e08ad 63-73,77,89
+src/commands/daemon.rs
+  s_eb3b60889961ab::t_2b744479f4b3d9 640-642
+  s_eb3b60889961ab::t_925de170d409cc 678-683
+tests/integration/install_hooks_comprehensive.rs
+  s_eb3b60889961ab::t_2389e9790e08ad 541-549,551-587
+tests/integration/repos/test_repo.rs
+  s_eb3b60889961ab::t_d00b503097e8b4 1297-1303
+  s_eb3b60889961ab::t_2389e9790e08ad 1304-1310
+src/commands/install_wsl.rs
+  s_eb3b60889961ab::t_2389e9790e08ad 21-27
+tests/config_fresh_test.rs
+  s_eb3b60889961ab::t_2389e9790e08ad 328-427
+  s_eb3b60889961ab::t_7c1221a05e9203 428-466
+src/mdm/agents/github_copilot.rs
+  s_eb3b60889961ab::t_196137041c91b2 6-7,50
+tests/daemon_mode.rs
+  s_eb3b60889961ab::t_285859c2a10b22 6518-6526
+  s_eb3b60889961ab::t_10db88a100d56e 6505-6517,6527-6528
+src/mdm/agents/codex.rs
+  s_eb3b60889961ab::t_2389e9790e08ad 67-88,424-425,432-447,467-469,471,494,496,578-580,582,632-634,643-700,790-794,857-858,2022-2111
+  s_eb3b60889961ab::t_196137041c91b2 5-6
+  s_eb3b60889961ab::t_4c771655bb7e33 2124-2138
+  s_eb3b60889961ab::t_b1f16493d15543 2112-2123,2139-2140
+  s_eb3b60889961ab::t_c5c58145bad012 30-36
+src/config.rs
+  s_eb3b60889961ab::t_000ed79c067411 1663-1665,1673-1675,1681-1688
+  s_eb3b60889961ab::t_2389e9790e08ad 182,261-262,338-339,571-577,1094-1098,1303,1339,1817-1819,1921,2190,2341
+  s_eb3b60889961ab::t_d00b503097e8b4 1227-1235,1888-1890
+src/daemon/telemetry_worker.rs
+  s_eb3b60889961ab::t_2389e9790e08ad 1501-1504
+tests/integration/config_cli_coverage.rs
+  s_eb3b60889961ab::t_fc0abb3f98a67c 595-596,598-600,602-603
+  s_eb3b60889961ab::t_2389e9790e08ad 462,575-594,597,601,604
+  s_eb3b60889961ab::t_74ba97922b6157 605-646
+src/auth/client.rs
+  s_eb3b60889961ab::t_2389e9790e08ad 130
+src/mdm/utils.rs
+  s_eb3b60889961ab::t_196137041c91b2 518-529
+.github/workflows/release.yml
+  s_eb3b60889961ab::t_3b2a27a2e5dd0e 266-268,411
+  s_eb3b60889961ab::t_47d6465599eb17 19-28,65-76,79-91,111-113,121,149-151,159-161,256-261,269-277,333-335,401-406,412-488,492,554,789
+  s_eb3b60889961ab::t_fa767064bfb35a 262-265,407-410
+  s_eb3b60889961ab::t_e2e7feda9a6340 212,218-222,358,364-368
+src/api/client.rs
+  s_eb3b60889961ab::t_2389e9790e08ad 294-297,305-309
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.6",
+  "base_commit_sha": "830b3c2618fd2da0673433912c8767cfbc7ca2ec",
+  "prompts": {},
+  "sessions": {
+    "s_eb3b60889961ab": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1b0ed-2897-7743-b126-3bee0d94bc47",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>",
+      "custom_attributes": {
+        "dcc_ldap": "cmdy",
+        "dcc_user_id": "cmdy",
+        "dcc_version": "1.8.0"
+      }
+    }
+  }
+}
