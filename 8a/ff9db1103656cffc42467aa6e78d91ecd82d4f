@@ -1,0 +1,28 @@
+src/mdm/agents/claude_code.rs
+  s_eb3b60889961ab::t_1026f12e069b1c 16,27,63-65,117-130,132-138,204-212,361,363-450,483-484,695-702,1159
+Cargo.toml
+  s_eb3b60889961ab::t_f4180174d54464 3
+packaging/README.md
+  s_eb3b60889961ab::t_b91d1bcbff9365 38
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.6",
+  "base_commit_sha": "8aff9db1103656cffc42467aa6e78d91ecd82d4f",
+  "prompts": {},
+  "sessions": {
+    "s_eb3b60889961ab": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1b0ed-2897-7743-b126-3bee0d94bc47",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>",
+      "custom_attributes": {
+        "dcc_user_id": "cmdy",
+        "dcc_ldap": "cmdy",
+        "dcc_version": "1.8.0"
+      }
+    }
+  }
+}
