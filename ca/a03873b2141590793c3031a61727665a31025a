@@ -1,0 +1,34 @@
+src/commands/log.rs
+  s_eb3b60889961ab::t_abf4e8e448b849 355-357
+  s_eb3b60889961ab::t_998412c0d84a7d 678
+  s_eb3b60889961ab::t_4efe6d303b6aa4 835,840
+src/commands/diff.rs
+  s_eb3b60889961ab::t_998412c0d84a7d 207-208
+src/main.rs
+  s_eb3b60889961ab::t_4efe6d303b6aa4 56
+src/commands/git_ai_handlers.rs
+  s_eb3b60889961ab::t_abf4e8e448b849 729-732
+src/commands/ci_handlers.rs
+  s_eb3b60889961ab::t_998412c0d84a7d 387,397,417,438,450
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.6",
+  "base_commit_sha": "caa03873b2141590793c3031a61727665a31025a",
+  "prompts": {},
+  "sessions": {
+    "s_eb3b60889961ab": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1b0ed-2897-7743-b126-3bee0d94bc47",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>",
+      "custom_attributes": {
+        "dcc_version": "1.8.0",
+        "dcc_user_id": "cmdy",
+        "dcc_ldap": "cmdy"
+      }
+    }
+  }
+}
