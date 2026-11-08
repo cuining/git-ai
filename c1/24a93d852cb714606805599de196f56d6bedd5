@@ -1,0 +1,29 @@
+scripts/test-pack-npm.py
+  s_eb3b60889961ab::t_611892dbc375b8 67,77-80,90,92
+scripts/pack-npm.py
+  s_eb3b60889961ab::t_5b222e4f09e11a 1,17,55,62,69,79
+.github/workflows/release.yml
+  s_eb3b60889961ab::t_5b222e4f09e11a 69-70,441,479-480
+  s_eb3b60889961ab::t_66a20013b29732 265-268
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.6",
+  "base_commit_sha": "c124a93d852cb714606805599de196f56d6bedd5",
+  "prompts": {},
+  "sessions": {
+    "s_eb3b60889961ab": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1b0ed-2897-7743-b126-3bee0d94bc47",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>",
+      "custom_attributes": {
+        "dcc_ldap": "cmdy",
+        "dcc_user_id": "cmdy",
+        "dcc_version": "1.8.0"
+      }
+    }
+  }
+}
