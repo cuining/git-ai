@@ -1,0 +1,81 @@
+scripts/dev.sh
+  s_eb3b60889961ab::t_15b7db63abbb5d 64,70-74,78
+scripts/nightly/test-synthetic-checkpoint.sh
+  s_eb3b60889961ab::t_bd2c0b62858f39 52-53,70
+mdm/macos/install-login-start.sh
+  s_eb3b60889961ab::t_15b7db63abbb5d 2,33,119,134
+packaging/windows/git-ai.wxs
+  s_eb3b60889961ab::t_15b7db63abbb5d 28
+scripts/nightly/verify-attribution.sh
+  s_eb3b60889961ab::t_bd2c0b62858f39 13,157-158,160,164,166,169,172
+.github/workflows/nightly-agent-integration.yml
+  s_eb3b60889961ab::t_15b7db63abbb5d 218,225,249,325,332,363
+mdm/linux/install-login-start.sh
+  s_eb3b60889961ab::t_15b7db63abbb5d 2,16,32,121-122
+scripts/benchmarks/git/benchmark_nasty_modes_vs_main.py
+  s_eb3b60889961ab::t_26d08a0780793d 90-98,100,106,108
+scripts/benchmarks/checkpoint/benchmark_human_non_ai_checkpoint.py
+  s_eb3b60889961ab::t_26d08a0780793d 59-60,66-68,278
+.github/workflows/install-scripts-nightly.yml
+  s_eb3b60889961ab::t_15b7db63abbb5d 32,52,58,80,105,123
+packaging/windows/build-msi.ps1
+  s_eb3b60889961ab::t_15b7db63abbb5d 18
+install.sh
+  s_eb3b60889961ab::t_15b7db63abbb5d 147,158,194,222,224,230,246,249,253,256,258-259,261,264-265,268-269,274,280,283-284,295,301
+install.ps1
+  s_eb3b60889961ab::t_15b7db63abbb5d 9,11,18,100,124,145,265,337,348,356-357,412,414,418,455,478-479,481
+mdm/windows/install-login-start.ps1
+  s_eb3b60889961ab::t_15b7db63abbb5d 1,20,39
+scripts/mdm/test-login-start.sh
+  s_eb3b60889961ab::t_bd2c0b62858f39 98
+  s_eb3b60889961ab::t_15b7db63abbb5d 29,246,248,252,322-323
+scripts/benchmarks/commit/benchmark_commit_mostly_human_few_ai.py
+  s_eb3b60889961ab::t_26d08a0780793d 98,102-103,370
+.github/workflows/git-core-compat.yml
+  s_eb3b60889961ab::t_15b7db63abbb5d 128,136
+packaging/macos/build-pkg.sh
+  s_eb3b60889961ab::t_15b7db63abbb5d 43
+scripts/test-pack-npm.py
+  s_eb3b60889961ab::t_daf9509333fd76 20,44,57-58
+.github/workflows/install-scripts-local.yml
+  s_eb3b60889961ab::t_15b7db63abbb5d 70,88,96,117-119,136,144,151,175-176,217,240,258,290,322,353,395,524
+scripts/pack-npm.py
+  s_eb3b60889961ab::t_15b7db63abbb5d 1,60,67,77
+.github/workflows/release.yml
+  s_eb3b60889961ab::t_15b7db63abbb5d 67-69,71-75,122,167,169,173,181,186,191,200,205,264-265,339-340,344,352,365-366,391-392,397-398,409-411,426,440,445,460,507,513,521-522,546,568,574,616-618,620,622-624,652,672,678,681,751,753,834,843,854,908-911,916,922,961-971,975-977,987,990,1112,1131
+scripts/nightly/verify-synthetic-attribution.sh
+  s_eb3b60889961ab::t_bd2c0b62858f39 10,12,89,106,108-109,133,135,144-145,147,149,152
+scripts/benchmarks/git/benchmark_modes_vs_main.py
+  s_eb3b60889961ab::t_26d08a0780793d 160-168,170,176,178
+.github/workflows/mdm-login-start.yml
+  s_eb3b60889961ab::t_15b7db63abbb5d 56,79,109,115
+scripts/mdm/test-login-start.ps1
+  s_eb3b60889961ab::t_15b7db63abbb5d 24,83,203,205
+packaging/macos/scripts/postinstall
+  s_eb3b60889961ab::t_15b7db63abbb5d 10,31
+scripts/repro_runaway_memory.py
+  s_eb3b60889961ab::t_26d08a0780793d 367-368,420
+scripts/dev.ps1
+  s_eb3b60889961ab::t_15b7db63abbb5d 12,125,135
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.6",
+  "base_commit_sha": "419edaff067f1fd9f5314897cecfae71136bb90c",
+  "prompts": {},
+  "sessions": {
+    "s_eb3b60889961ab": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1b0ed-2897-7743-b126-3bee0d94bc47",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>",
+      "custom_attributes": {
+        "dcc_version": "1.8.0",
+        "dcc_ldap": "cmdy",
+        "dcc_user_id": "cmdy"
+      }
+    }
+  }
+}
