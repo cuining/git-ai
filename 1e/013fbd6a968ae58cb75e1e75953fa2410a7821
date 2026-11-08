@@ -1,0 +1,24 @@
+.github/workflows/release.yml
+  s_eb3b60889961ab::t_aeffe83fcf09d3 121
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.6",
+  "base_commit_sha": "1e013fbd6a968ae58cb75e1e75953fa2410a7821",
+  "prompts": {},
+  "sessions": {
+    "s_eb3b60889961ab": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1b0ed-2897-7743-b126-3bee0d94bc47",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>",
+      "custom_attributes": {
+        "dcc_version": "1.8.0",
+        "dcc_user_id": "cmdy",
+        "dcc_ldap": "cmdy"
+      }
+    }
+  }
+}
