@@ -1,0 +1,104 @@
+src/mdm/utils.rs
+  s_eb3b60889961ab::t_23fb79d8e12be3 532-533
+  s_eb3b60889961ab::t_9a76ee211d0cfa 898-903
+src/commands/analyze/cube.rs
+  s_eb3b60889961ab::t_23fb79d8e12be3 1,6
+src/commands/debug.rs
+  s_eb3b60889961ab::t_23fb79d8e12be3 54,57-58,107,118
+tests/integration/config_cli_coverage.rs
+  s_eb3b60889961ab::t_9a76ee211d0cfa 32-34
+  s_eb3b60889961ab::t_9950b6d538f2df 8,19-31,35-42
+src/commands/daemon.rs
+  s_eb3b60889961ab::t_23fb79d8e12be3 854,857-862
+  s_eb3b60889961ab::t_9a76ee211d0cfa 528-531,533-535
+src/commands/notes_migrate.rs
+  s_eb3b60889961ab::t_23fb79d8e12be3 50,74,417
+  s_eb3b60889961ab::t_9a76ee211d0cfa 84-86
+tests/integration/install_hooks_comprehensive.rs
+  s_eb3b60889961ab::t_23fb79d8e12be3 233,235
+src/mdm/agents/firebender.rs
+  s_eb3b60889961ab::t_9a76ee211d0cfa 21-22
+src/mdm/agents/cursor.rs
+  s_eb3b60889961ab::t_9a76ee211d0cfa 32-34
+src/commands/status.rs
+  s_eb3b60889961ab::t_23fb79d8e12be3 92
+src/commands/upgrade.rs
+  s_eb3b60889961ab::t_23fb79d8e12be3 159,540,660,723,731,839
+  s_eb3b60889961ab::t_9950b6d538f2df 1333-1334,1340,1344,1355,1360
+src/commands/login.rs
+  s_eb3b60889961ab::t_23fb79d8e12be3 3,11
+src/mdm/agents/github_copilot.rs
+  s_eb3b60889961ab::t_23fb79d8e12be3 36
+src/commands/reingest.rs
+  s_eb3b60889961ab::t_23fb79d8e12be3 84,198-200,297
+src/mdm/agents/codex.rs
+  s_eb3b60889961ab::t_9a76ee211d0cfa 1109-1114
+  s_eb3b60889961ab::t_9950b6d538f2df 1102-1108,1115-1118
+  s_eb3b60889961ab::t_23fb79d8e12be3 113-119
+src/commands/git_ai_handlers.rs
+  s_eb3b60889961ab::t_23fb79d8e12be3 320,322,1131
+  s_eb3b60889961ab::t_9a76ee211d0cfa 470-472
+src/main.rs
+  s_eb3b60889961ab::t_23fb79d8e12be3 6,49,71-74
+src/utils.rs
+  s_eb3b60889961ab::t_e01754e4083de6 572,574,589,613,615,628
+  s_eb3b60889961ab::t_23fb79d8e12be3 19,21
+src/commands/logout.rs
+  s_eb3b60889961ab::t_23fb79d8e12be3 3
+Cargo.toml
+  s_eb3b60889961ab::t_23fb79d8e12be3 3,5-9
+src/commands/usage.rs
+  s_eb3b60889961ab::t_23fb79d8e12be3 1,53,63,74,144,146
+src/commands/whoami.rs
+  s_eb3b60889961ab::t_23fb79d8e12be3 67,271,274-275
+tests/integration/commit_post_stats_benchmark.rs
+  s_eb3b60889961ab::t_9a76ee211d0cfa 201-206
+src/commands/await.rs
+  s_eb3b60889961ab::t_23fb79d8e12be3 23,139
+src/commands/analyze/mod.rs
+  s_eb3b60889961ab::t_23fb79d8e12be3 1,39,122,207,231,244,250,274,289-291,293,301
+tests/integration/bash_tool_benchmark.rs
+  s_eb3b60889961ab::t_23fb79d8e12be3 53-54
+tests/windows_install_script.rs
+  s_eb3b60889961ab::t_3e4a872bb0514c 437
+  s_eb3b60889961ab::t_9a76ee211d0cfa 396-397
+  s_eb3b60889961ab::t_23fb79d8e12be3 31,342,458
+tests/integration/repos/test_repo.rs
+  s_eb3b60889961ab::t_23fb79d8e12be3 537,4054,4056
+  s_eb3b60889961ab::t_9a76ee211d0cfa 543-544,550-551,3711-3712,3717-3718,3723-3724,4027-4033
+src/commands/install_hooks.rs
+  s_eb3b60889961ab::t_9a76ee211d0cfa 815-817
+  s_eb3b60889961ab::t_23fb79d8e12be3 1050,1129,1134,1190
+src/commands/analyze/sessions.rs
+  s_eb3b60889961ab::t_9a76ee211d0cfa 422-423
+  s_eb3b60889961ab::t_23fb79d8e12be3 1,192,589,607,812,1328,1367,1389,1392,1406,1409,1461,1483,1485,1498,1507-1509,1514,1516,1521,1523
+src/commands/exchange_nonce.rs
+  s_eb3b60889961ab::t_23fb79d8e12be3 8,15
+src/commands/config.rs
+  s_eb3b60889961ab::t_9a76ee211d0cfa 96-98,158-160
+  s_eb3b60889961ab::t_23fb79d8e12be3 89,92-95,99,153-157,161-171,199-200,208,223,229,238,243,246
+src/config.rs
+  s_eb3b60889961ab::t_23fb79d8e12be3 1732-1737,1751-1765
+  s_eb3b60889961ab::t_e01754e4083de6 2710,2726,2729,2738
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.6",
+  "base_commit_sha": "b8172fdfd74aed75925ac590603c49f465fa94a7",
+  "prompts": {},
+  "sessions": {
+    "s_eb3b60889961ab": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1b0ed-2897-7743-b126-3bee0d94bc47",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>",
+      "custom_attributes": {
+        "dcc_user_id": "cmdy",
+        "dcc_version": "1.8.0",
+        "dcc_ldap": "cmdy"
+      }
+    }
+  }
+}
