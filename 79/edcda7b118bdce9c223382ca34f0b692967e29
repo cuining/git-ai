@@ -1,0 +1,24 @@
+src/commands/install_hooks.rs
+  s_e2e3a0f0d33a48::t_7e0886b0acbe73 482-485,1172,1401,1423
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.6",
+  "base_commit_sha": "79edcda7b118bdce9c223382ca34f0b692967e29",
+  "prompts": {},
+  "sessions": {
+    "s_e2e3a0f0d33a48": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1be2a-ff9b-7681-8ec2-95ed32aecd14",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>",
+      "custom_attributes": {
+        "dcc_version": "1.8.0",
+        "dcc_user_id": "cmdy",
+        "dcc_ldap": "cmdy"
+      }
+    }
+  }
+}
