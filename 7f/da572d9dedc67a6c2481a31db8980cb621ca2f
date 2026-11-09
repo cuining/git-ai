@@ -1,0 +1,34 @@
+src/mdm/agents/deepseek_harness.rs
+  s_e2e3a0f0d33a48::t_da838d73ba3d6f 41-42,371-372
+  s_e2e3a0f0d33a48::t_f8f4a28ef3883f 40,43,334-354,359-365,367-370,373-382,384-398,587
+agent-support/deepseek-harness/README.md
+  s_e2e3a0f0d33a48::t_10d6b6d36fc748 20
+tests/integration/deepseek_harness_install.rs
+  s_e2e3a0f0d33a48::t_c3ec45f9a54bfe 269,271-288,291-305
+  s_e2e3a0f0d33a48::t_c5eca3441e6f21 237-244,246-251,256-266
+  s_e2e3a0f0d33a48::t_da838d73ba3d6f 306-308
+  s_e2e3a0f0d33a48::t_10d6b6d36fc748 270
+agent-support/deepseek-harness/package.json
+  s_e2e3a0f0d33a48::t_10d6b6d36fc748 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.6",
+  "base_commit_sha": "7fda572d9dedc67a6c2481a31db8980cb621ca2f",
+  "prompts": {},
+  "sessions": {
+    "s_e2e3a0f0d33a48": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1be2a-ff9b-7681-8ec2-95ed32aecd14",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>",
+      "custom_attributes": {
+        "dcc_version": "1.8.0",
+        "dcc_user_id": "cmdy",
+        "dcc_ldap": "cmdy"
+      }
+    }
+  }
+}
