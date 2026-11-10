@@ -1,0 +1,41 @@
+tests/integration/install_hooks_comprehensive.rs
+  s_1b205b5f909ed0::t_e2a38338a2baef 709-757,831-839,841-882,884-886,888
+src/commands/daemon.rs
+  s_3081612ea472a8::t_19b2dbb2d9063f 565,725-732
+src/commands/install_hooks.rs
+  s_3081612ea472a8::t_1af3bda570ae8d 9,31,298-299,302-305,358-399,416-423,447-451,471,520-526
+src/config.rs
+  s_5d7ef448aa693e::t_d50acdbb704d81 10,1552,1556,1648-1651,1657,1667-1670,2699-2700,2711-2712
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.7-dcc.4",
+  "base_commit_sha": "f7b114dbd79a749386eb106953619429455cc7e3",
+  "prompts": {},
+  "sessions": {
+    "s_1b205b5f909ed0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c48b-6666-7811-b285-5f052e9bc711",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    },
+    "s_3081612ea472a8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c48b-91cb-7592-a44d-b7c3037c1c1a",
+        "model": "unknown"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    },
+    "s_5d7ef448aa693e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c49b-c115-73a0-98ad-ca76f97a1962",
+        "model": "unknown"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
