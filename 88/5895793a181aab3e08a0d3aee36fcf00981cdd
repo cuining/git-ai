@@ -1,0 +1,21 @@
+src/commands/daemon.rs
+  s_3c91e9f1320b8d::t_1fbc5def0712de 925-931,937
+src/commands/install_hooks.rs
+  s_3c91e9f1320b8d::t_01e32844c0a60e 5,400-450,468,475-477,904-909
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.7-dcc.4",
+  "base_commit_sha": "885895793a181aab3e08a0d3aee36fcf00981cdd",
+  "prompts": {},
+  "sessions": {
+    "s_3c91e9f1320b8d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1bfb6-b0cd-70c3-88cc-132b071904bd",
+        "model": "unknown"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
