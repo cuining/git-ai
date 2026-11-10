@@ -1,0 +1,23 @@
+docs/deepseek-harness-attribution-research.md
+  s_986c397660164e::t_92f8bbf62225f8 13,22
+  s_986c397660164e::t_0ba42ff6a367f1 1-4,6-11,14,16,18-20,23-24,26-42,46-47
+  s_986c397660164e::t_1b13d56bdadb07 5,12,17,21,25,44-45
+  s_986c397660164e::t_98b1dce1dab782 15
+  s_986c397660164e::t_ef0d77969ac04d 43
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.7-dcc.4",
+  "base_commit_sha": "d15442676c5b8a862c962dc4993e7f9d9ddc9038",
+  "prompts": {},
+  "sessions": {
+    "s_986c397660164e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1be33-73d9-76c1-b5be-5707287a16b1",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
