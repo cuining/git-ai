@@ -1,0 +1,40 @@
+src/authorship/post_commit.rs
+  h_e26e3d7eeaef56 1118
+src/authorship/rewrite.rs
+  h_e26e3d7eeaef56 492-494
+src/commands/usage.rs
+  h_e26e3d7eeaef56 37-38,49-60,84-88,154-178,195-200,204
+src/daemon.rs
+  h_e26e3d7eeaef56 862,909,951,959-966,984-986,999,1001,1027,1687,1692-1723,7107-7114,7168-7169,7171-7175,7177-7186,7825,7827,7830,7833-7838,7996,8007-8010
+src/daemon/rewrite_metrics.rs
+  h_e26e3d7eeaef56 6-7,11,13-38,43-58,63,68,71,78,133,137-144,147-156,161-166,185-348,419,427,472,486,497-516,592
+src/metrics/attrs.rs
+  h_e26e3d7eeaef56 5-6,27,50,73-110,152-156,391-395,420,654-699
+src/metrics/db.rs
+  h_e26e3d7eeaef56 18,93-96,998-1017,1021,1762,1799,1859,1898,1941,2010,2017,2070,3147-3162
+src/metrics/events.rs
+  h_e26e3d7eeaef56 402,423,558-562,629-633,658
+src/metrics/mod.rs
+  h_e26e3d7eeaef56 13
+src/metrics/personal_usage.rs
+  h_e26e3d7eeaef56 1-355
+tests/integration/main.rs
+  h_e26e3d7eeaef56 130
+tests/integration/metrics_retry_idle.rs
+  h_e26e3d7eeaef56 84,89
+tests/integration/rewrite_results.rs
+  h_e26e3d7eeaef56 1-382
+tests/integration/usage_period.rs
+  h_e26e3d7eeaef56 4-11,140-399
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.7-dcc.4",
+  "base_commit_sha": "ba4719815d406cb37725a74d455bc1bbe11f5f6d",
+  "prompts": {},
+  "humans": {
+    "h_e26e3d7eeaef56": {
+      "author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
