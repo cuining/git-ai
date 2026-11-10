@@ -1,0 +1,18 @@
+src/daemon/rewrite_metrics.rs
+  h_e26e3d7eeaef56 159-165,217-220,276-279,382,387-400
+src/metrics/personal_usage.rs
+  h_e26e3d7eeaef56 98,154-155
+tests/integration/rewrite_results.rs
+  h_e26e3d7eeaef56 160-164,336-341,376,439-464
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.7-dcc.4",
+  "base_commit_sha": "afd7efe10ce8899251d9c9d53368f7227c95608c",
+  "prompts": {},
+  "humans": {
+    "h_e26e3d7eeaef56": {
+      "author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
