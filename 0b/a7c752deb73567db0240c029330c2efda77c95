@@ -1,0 +1,25 @@
+src/commands/git_ai_handlers.rs
+  s_1b205b5f909ed0::t_b1045c5dcd4292 53,161
+src/commands/install_managed.rs
+  s_1b205b5f909ed0::t_c901fabed1874d 1-510
+src/commands/mod.rs
+  s_1b205b5f909ed0::t_68e4aa604c0d73 18
+tests/integration/main.rs
+  s_1b205b5f909ed0::t_6e498313c73406 96
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.7-dcc.4",
+  "base_commit_sha": "0ba7c752deb73567db0240c029330c2efda77c95",
+  "prompts": {},
+  "sessions": {
+    "s_1b205b5f909ed0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c48b-6666-7811-b285-5f052e9bc711",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
