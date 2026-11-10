@@ -1,0 +1,23 @@
+tests/integration/rewrite_results.rs
+  s_d2d5aa8ea6cc3c::t_08ee2e2a39b745 252-254,258-261,268-271
+  s_d2d5aa8ea6cc3c::t_bdec9786fbbff4 244-251,255-257,262-267,272-293
+src/daemon/rewrite_metrics.rs
+  s_d2d5aa8ea6cc3c::t_14eda6cc6f726f 2,11-12,380-383,386-388,393,404-442,448-466
+  s_d2d5aa8ea6cc3c::t_08ee2e2a39b745 279-280,443-447,467-470
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.7-dcc.4",
+  "base_commit_sha": "88197504a06abcaf1be057064c405d479f103873",
+  "prompts": {},
+  "sessions": {
+    "s_d2d5aa8ea6cc3c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c55b-9efc-7c33-b1ad-25374e688201",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
