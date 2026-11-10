@@ -1,0 +1,19 @@
+tests/integration/managed_install.rs
+  s_955714a520031c::t_da6a2ab926b6b9 284-370
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.7-dcc.4",
+  "base_commit_sha": "4ca1a351a50d4e09c92ab0f3ab1dd4262f04bd6d",
+  "prompts": {},
+  "sessions": {
+    "s_955714a520031c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c41a-e8df-7a33-ba0f-ae13d1db72e4",
+        "model": "unknown"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
