@@ -1,0 +1,35 @@
+src/commands/install_hooks.rs
+  s_4b85c4ed67d298::t_c4983b90e4e140 296,303-305,381,1244-1245
+tests/integration/install_hooks_comprehensive.rs
+  s_955714a520031c::t_791e9e04168b0f 709-823
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.7-dcc.4",
+  "base_commit_sha": "0503cbc37c0c5a40992321ae41aadfae660db109",
+  "prompts": {},
+  "sessions": {
+    "s_4b85c4ed67d298": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c376-6724-7a83-8b71-fa2d3e157c97",
+        "model": "unknown"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>",
+      "custom_attributes": {
+        "dcc_user_id": "871538"
+      }
+    },
+    "s_955714a520031c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c41a-e8df-7a33-ba0f-ae13d1db72e4",
+        "model": "unknown"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>",
+      "custom_attributes": {
+        "dcc_user_id": "871538"
+      }
+    }
+  }
+}
