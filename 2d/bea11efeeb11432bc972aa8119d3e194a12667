@@ -1,0 +1,29 @@
+docs/token-usage-events-spec.md
+  s_d9c53a4bdb259d::t_2af26230c672a4 45
+tests/daemon_mode.rs
+  s_d9c53a4bdb259d::t_2af26230c672a4 8645,8706,8769,8864,8918
+tests/integration/token_usage.rs
+  s_d9c53a4bdb259d::t_2af26230c672a4 24-30,149,259,335,420,530,615,727,797,894,949,1014,1100,1161,1192
+src/feature_flags.rs
+  s_d9c53a4bdb259d::t_2af26230c672a4 84,89-90,145,151,160,165-166
+AGENTS.md
+  s_d9c53a4bdb259d::t_1e2c748094c88a 90
+tests/integration/config_cli_coverage.rs
+  s_d9c53a4bdb259d::t_497b82a1a4bfda 111-120
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.7-dcc.4",
+  "base_commit_sha": "2dbea11efeeb11432bc972aa8119d3e194a12667",
+  "prompts": {},
+  "sessions": {
+    "s_d9c53a4bdb259d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c48b-b568-7f81-8cfd-d6e77a34652f",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
