@@ -1,0 +1,26 @@
+tests/integration/usage_period.rs
+  s_d61d509046732f::t_4b1923002a0c9d 244,311-314,318-332,368,417-420
+Cargo.toml
+  s_d61d509046732f::t_ffcc54ee341149 3
+src/metrics/personal_usage.rs
+  s_d61d509046732f::t_ffcc54ee341149 62-67,72,308,348,362,372-374
+  s_d61d509046732f::t_33921e9584e3d1 61,375
+Cargo.lock
+  s_d61d509046732f::t_5e024c04935e8f 1069
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.7-dcc.4",
+  "base_commit_sha": "7a3b92c242be4ff687041ed6744663ddbffa7ad9",
+  "prompts": {},
+  "sessions": {
+    "s_d61d509046732f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c5a4-1b18-78d2-a32b-5a8c54727ccf",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
