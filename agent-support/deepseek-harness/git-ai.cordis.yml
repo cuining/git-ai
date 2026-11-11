@@ -1,0 +1,3 @@
+- insert:
+    - id: git-ai-attribution
+      name: './git-ai.mjs'

@@ -3,6 +3,8 @@ mod claude_code;
 mod cline;
 mod codex;
 mod cursor;
+#[cfg(any(target_os = "macos", windows))]
+mod deepseek_harness;
 mod droid;
 mod firebender;
 mod gemini;
@@ -54,6 +56,9 @@ pub fn get_all_installers() -> Vec<Box<dyn HookInstaller>> {
 
     #[cfg(windows)]
     installers.push(Box::new(VisualStudioInstaller));
+
+    #[cfg(any(target_os = "macos", windows))]
+    installers.push(Box::new(deepseek_harness::DeepSeekHarnessInstaller));
 
     installers.push(Box::new(WindsurfInstaller));
     installers
