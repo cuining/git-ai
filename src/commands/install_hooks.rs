@@ -479,10 +479,16 @@ fn parse_agents(value: &str) -> Result<HashSet<String>, GitAiError> {
 }
 
 fn should_include_installer(id: &str, options: &InstallOptions) -> bool {
-    options.agents.as_ref().map_or_else(
-        || options.include_visual_studio_extension || id != VISUAL_STUDIO_INSTALLER_ID,
-        |agents| agents.contains(id),
-    )
+    if let Some(agents) = &options.agents {
+        return agents.contains(id);
+    }
+
+    match id {
+        VISUAL_STUDIO_INSTALLER_ID => options.include_visual_studio_extension,
+        "amp" | "cline" | "droid" | "firebender" | "gemini" | "github-copilot" | "jetbrains"
+        | "vscode" | "windsurf" => false,
+        _ => true,
+    }
 }
 
 #[derive(Default)]
@@ -1163,6 +1169,7 @@ mod tests {
         assert!(should_include_installer("opencode", &options));
         assert!(!should_include_installer("vscode", &options));
         assert!(!should_include_installer("cursor", &options));
+        assert!(!should_include_installer("deepseek-harness", &options));
     }
 
     #[test]
@@ -1258,7 +1265,28 @@ mod tests {
             VISUAL_STUDIO_INSTALLER_ID,
             &options
         ));
-        assert!(should_include_installer("vscode", &options));
+        assert!(should_include_installer("codex", &options));
+    }
+
+    #[test]
+    fn install_options_skip_excluded_agents() {
+        let default = parse_install_options(&[]).unwrap();
+        let with_visual_studio =
+            parse_install_options(&["--visual-studio-extension".into()]).unwrap();
+        for id in [
+            "vscode",
+            "github-copilot",
+            "droid",
+            "firebender",
+            "jetbrains",
+            "windsurf",
+            "gemini",
+            "cline",
+            "amp",
+        ] {
+            assert!(!should_include_installer(id, &default), "{id}");
+            assert!(!should_include_installer(id, &with_visual_studio), "{id}");
+        }
     }
 
     #[test]
@@ -1370,7 +1398,7 @@ mod tests {
     #[test]
     #[cfg(not(windows))]
     #[serial]
-    fn install_reports_cline_hook_check_errors_as_failed() {
+    fn default_install_skips_cline_with_broken_hooks() {
         let temp = tempdir().unwrap();
         let storage = temp.path().join("cline-storage");
         fs::create_dir_all(&storage).unwrap();
@@ -1392,7 +1420,7 @@ mod tests {
             .expect("Cline check should report the unreadable Documents path");
         assert!(detail.to_string().contains("Unable to access Cline hooks"));
         let statuses = run(&["--dry-run".to_string()]).unwrap();
-        assert_eq!(statuses.get("cline").map(String::as_str), Some("failed"));
+        assert!(!statuses.contains_key("cline"));
     }
 
     #[test]

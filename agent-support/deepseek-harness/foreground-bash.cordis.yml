@@ -1,0 +1,11 @@
+# Overlay for the shipped headless profile. Keep each Bash call foreground.
+- id: tool-bash
+  config:
+    enableRunInBackground: false
+    promoteOnTimeout: false
+
+- insert:
+    - id: git-ai-attribution
+      name: './git-ai.mjs'
+      config:
+        captureBash: true

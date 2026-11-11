@@ -11,6 +11,29 @@ use std::collections::HashMap;
 use std::fs;
 use std::process::Command;
 
+#[cfg(unix)]
+pub(super) fn stub_cursor(repo: &TestRepo, command: &mut Command) -> std::path::PathBuf {
+    use std::{env, os::unix::fs::PermissionsExt};
+
+    let bin = repo.test_home_path().join("test-bin");
+    fs::create_dir_all(&bin).unwrap();
+    let cursor = bin.join("cursor");
+    let calls = bin.join("cursor-calls");
+    fs::write(
+        &cursor,
+        "#!/bin/sh\nprintf '%s\\n' \"$1\" >> \"$GIT_AI_TEST_CURSOR_CALLS\"\nif [ \"$1\" = --version ]; then printf '1.99.0\\n'; fi\n",
+    )
+    .unwrap();
+    fs::set_permissions(&cursor, fs::Permissions::from_mode(0o755)).unwrap();
+    let inherited_path = env::var_os("PATH").unwrap_or_default();
+    let path =
+        env::join_paths(std::iter::once(bin).chain(env::split_paths(&inherited_path))).unwrap();
+    command
+        .env("PATH", path)
+        .env("GIT_AI_TEST_CURSOR_CALLS", &calls);
+    calls
+}
+
 // ==============================================================================
 // InstallStatus Tests
 // ==============================================================================
@@ -379,8 +402,31 @@ fn install_hooks_wsl_dry_run_does_not_invoke_wsl() {
 }
 
 #[test]
+#[cfg(unix)]
+fn install_hooks_configures_cursor_without_installing_an_extension() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let mut command = repo.git_ai_command_without_pre_sync_for_test(&["install-hooks"], &[]);
+    command.env("DSH_HOME", repo.test_home_path().join(".dsh"));
+    let calls = stub_cursor(&repo, &mut command);
+    let output = command.output().unwrap();
+    assert!(output.status.success(), "{output:?}");
+
+    let hooks_path = repo.test_home_path().join(".cursor/hooks.json");
+    let hooks: serde_json::Value = serde_json::from_slice(&fs::read(hooks_path).unwrap()).unwrap();
+    for event in ["preToolUse", "postToolUse"] {
+        let checkpoint = hooks["hooks"][event][0]["command"].as_str().unwrap();
+        assert!(checkpoint.ends_with("checkpoint cursor --hook-input stdin"));
+    }
+    let calls = fs::read_to_string(calls).unwrap();
+    assert!(
+        !calls.is_empty() && calls.lines().all(|call| call == "--version"),
+        "unexpected Cursor CLI calls:\n{calls}"
+    );
+}
+
+#[test]
 #[cfg(not(windows))]
-fn install_hooks_detects_cline_from_vscode_server_extension_manifest() {
+fn install_hooks_skips_configured_cline_and_gemini() {
     let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
     let home = repo.test_home_path();
     let manifest_path = home.join(".vscode-server/extensions/extensions.json");
@@ -399,10 +445,20 @@ fn install_hooks_detects_cline_from_vscode_server_extension_manifest() {
     )
     .unwrap();
 
-    let output = repo
-        .git_ai_command_without_pre_sync_for_test(&["install-hooks", "--dry-run"], &[])
-        .output()
-        .expect("run git-ai install-hooks --dry-run");
+    let gemini_home = home.join(".gemini");
+    let gemini_settings = gemini_home.join("settings.json");
+    let original = r#"{"hooks":{"BeforeTool":[{"matcher":"*","hooks":[{"type":"command","command":"git-ai checkpoint gemini --hook-input stdin"}]}]}}"#;
+    fs::create_dir_all(&gemini_home).unwrap();
+    fs::write(&gemini_settings, original).unwrap();
+
+    let run = |args: &[&str]| {
+        let mut command = repo.git_ai_command_without_pre_sync_for_test(args, &[]);
+        command.env("GEMINI_CLI_HOME", home);
+        #[cfg(target_os = "macos")]
+        stub_cursor(&repo, &mut command);
+        command.output().unwrap()
+    };
+    let output = run(&["install-hooks", "--dry-run"]);
     assert!(
         output.status.success(),
         "install-hooks failed:\nstdout: {}\nstderr: {}",
@@ -412,13 +468,20 @@ fn install_hooks_detects_cline_from_vscode_server_extension_manifest() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("Cline: Pending updates"),
-        "Cline was not detected from the VS Code server extension manifest:\n{stdout}"
+        !stdout.contains("Cline:") && !stdout.contains("Gemini:"),
+        "excluded agents were checked during installation:\n{stdout}"
     );
     assert!(
         !home.join("Documents/Cline/Hooks").exists(),
         "dry-run must not create the Cline hooks directory"
     );
+    assert_eq!(fs::read_to_string(&gemini_settings).unwrap(), original);
+
+    let output = run(&["uninstall-hooks", "--dry-run"]);
+    assert!(output.status.success(), "{output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Gemini: Pending removal"), "{stdout}");
+    assert_eq!(fs::read_to_string(gemini_settings).unwrap(), original);
 }
 
 #[test]

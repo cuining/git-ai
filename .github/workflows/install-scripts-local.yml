@@ -49,8 +49,6 @@ jobs:
             npm_pkg: "@anthropic-ai/claude-code"
           - name: codex
             npm_pkg: "@openai/codex"
-          - name: gemini
-            npm_pkg: "@google/gemini-cli"
           - name: opencode
             npm_pkg: "opencode-ai"
 
@@ -120,9 +118,6 @@ jobs:
               # The feature flag is [features].hooks = true.
               grep -F 'hooks = true' "$HOME/.codex/config.toml"
               grep -F "checkpoint codex" "$HOME/.codex/config.toml"
-              ;;
-            gemini)
-              grep -F "checkpoint gemini" "$HOME/.gemini/settings.json"
               ;;
             opencode)
               test -f "$HOME/.config/opencode/plugins/git-ai.ts"
@@ -210,8 +205,6 @@ jobs:
             npm_pkg: "@anthropic-ai/claude-code"
           - name: codex
             npm_pkg: "@openai/codex"
-          - name: gemini
-            npm_pkg: "@google/gemini-cli"
           - name: opencode
             npm_pkg: "opencode-ai"
 
@@ -281,10 +274,6 @@ jobs:
               $config = Join-Path $env:USERPROFILE ".codex\config.toml"
               if (-not (Select-String -Path $config -Pattern "hooks = true")) { throw "Codex hooks feature flag not set in config.toml" }
               if (-not (Select-String -Path $config -Pattern "checkpoint codex")) { throw "Codex hooks not configured in config.toml" }
-            }
-            "gemini" {
-              $settings = Join-Path $env:USERPROFILE ".gemini\settings.json"
-              if (-not (Select-String -Path $settings -Pattern "checkpoint gemini")) { throw "Gemini hooks not configured" }
             }
             "opencode" {
               $plugin = Join-Path $env:USERPROFILE ".config\opencode\plugins\git-ai.ts"
