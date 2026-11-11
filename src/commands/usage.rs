@@ -34,6 +34,8 @@ fn resolve_period(token: &str) -> Result<(u64, String, BucketGranularity), Strin
 pub fn handle_usage(args: &[String]) {
     let mut json = false;
     let mut period = DEFAULT_PERIOD.to_string();
+    let mut start_date = None;
+    let mut end_date = None;
 
     let mut i = 0;
     while i < args.len() {
@@ -43,6 +45,18 @@ pub fn handle_usage(args: &[String]) {
             "--help" | "-h" => {
                 print_help();
                 return;
+            }
+            "--start-date" | "--end-date" => {
+                let flag = args[i].as_str();
+                i += 1;
+                let Some(value) = args.get(i).filter(|value| !value.starts_with("--")) else {
+                    eprintln!("Missing value for {flag}.");
+                    std::process::exit(1);
+                };
+                match flag {
+                    "--start-date" => start_date = Some(value.as_str()),
+                    _ => end_date = Some(value.as_str()),
+                }
             }
             "--period" => {
                 i += 1;
@@ -65,6 +79,11 @@ pub fn handle_usage(args: &[String]) {
             }
         }
         i += 1;
+    }
+
+    if start_date.is_some() || end_date.is_some() {
+        print_dated_usage(start_date, end_date);
+        return;
     }
 
     let (days, period_label, granularity) = match resolve_period(&period) {
@@ -132,6 +151,31 @@ pub fn handle_usage(args: &[String]) {
     }
 }
 
+fn print_dated_usage(start: Option<&str>, end: Option<&str>) {
+    let parse_date = |value: Option<&str>| {
+        let value = value?;
+        let date = NaiveDate::parse_from_str(value, "%Y-%m-%d").ok()?;
+        (date.to_string() == value).then_some(date)
+    };
+    let (Some(start), Some(end)) = (parse_date(start), parse_date(end)) else {
+        eprintln!("Dated usage requires --start-date and --end-date (YYYY-MM-DD).");
+        std::process::exit(1);
+    };
+    if start > end {
+        eprintln!("--start-date must not be later than --end-date.");
+        std::process::exit(1);
+    }
+    match crate::metrics::personal_usage::query(start, end)
+        .and_then(|stats| serde_json::to_string(&stats).map_err(Into::into))
+    {
+        Ok(json) => println!("{json}"),
+        Err(error) => {
+            eprintln!("Dated usage failed: {error}");
+            std::process::exit(1);
+        }
+    }
+}
+
 fn days_ago(days: u64) -> u32 {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -148,9 +192,16 @@ fn print_help() {
     eprintln!("Options:");
     eprintln!("  --period <1d|3d|7d|30d>           Time window (default: 30d)");
     eprintln!("  --json                            Output as JSON");
+    eprintln!(
+        "  --start-date <YYYY-MM-DD>          Inclusive first date for committed contributions"
+    );
+    eprintln!(
+        "  --end-date <YYYY-MM-DD>            Inclusive last date for committed contributions"
+    );
     eprintln!("  --help                            Show this help");
     eprintln!();
     eprintln!("Shows activity over the selected window from locally recorded metric events.");
+    eprintln!("Date bounds show deduplicated local committed output as JSON.");
     eprintln!("Metric rows older than approximately 365 days are pruned locally.");
 }
 

@@ -1,8 +1,14 @@
 use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::TestRepo;
 use crate::test_utils::{extract_json_object, isolated_metrics_db_path};
-use chrono::NaiveDate;
-use serde_json::Value;
+use chrono::{Days, NaiveDate, Utc};
+use git_ai::metrics::PosEncoded;
+use git_ai::metrics::attrs::EventAttributes;
+use git_ai::metrics::db::MetricsDatabase;
+use git_ai::metrics::events::CommittedValues;
+use git_ai::metrics::types::MetricEvent;
+use serde_json::{Value, json};
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 fn seed_ai_commit(repo: &TestRepo) {
@@ -129,5 +135,290 @@ fn usage_period_missing_value_exits_nonzero_with_message() {
     assert!(
         err.contains("Missing value for --period."),
         "unexpected error output: {err}"
+    );
+}
+
+fn usage_date_json(
+    repo: &TestRepo,
+    metrics_db_path: &str,
+    start: NaiveDate,
+    end: NaiveDate,
+) -> Value {
+    let start = start.to_string();
+    let end = end.to_string();
+    let args = [
+        "usage",
+        "--start-date",
+        &start,
+        "--end-date",
+        &end,
+        "--json",
+    ];
+    let output = repo
+        .git_ai_with_env(
+            &args,
+            &[
+                ("GIT_AI_TEST_METRICS_DB_PATH", metrics_db_path),
+                ("TZ", "UTC"),
+            ],
+        )
+        .expect("personal usage should be available from the local metrics DB");
+    serde_json::from_str(&extract_json_object(&output)).expect("valid personal usage JSON")
+}
+
+fn personal_usage_date() -> NaiveDate {
+    Utc::now()
+        .date_naive()
+        .checked_sub_days(Days::new(3))
+        .unwrap()
+}
+
+fn event_timestamp(date: NaiveDate) -> u32 {
+    date.and_hms_opt(9, 0, 0).unwrap().and_utc().timestamp() as u32
+}
+
+fn usage_commit_row(
+    date: NaiveDate,
+    repo_url: &str,
+    sha: &str,
+    person: Option<&str>,
+    lines: [u32; 3],
+) -> String {
+    let [added, ai, human] = lines;
+    let attrs = EventAttributes::with_version("test")
+        .repo_url(repo_url)
+        .branch("main")
+        .commit_sha(sha);
+    let attrs = match person {
+        Some(person) => attrs.custom_attributes(json!({"dcc_user_id":person}).to_string()),
+        None => attrs,
+    };
+    let values = CommittedValues::new()
+        .git_diff_added_lines(added)
+        .human_additions(human)
+        .tool_model_pairs(vec!["all".to_string()])
+        .ai_additions(vec![ai])
+        .ai_accepted(vec![ai]);
+    let event = MetricEvent::with_timestamp(event_timestamp(date), &values, attrs.to_sparse());
+    serde_json::to_string(&event).unwrap()
+}
+
+fn usage_rewrite_row(date: NaiveDate, repo_url: &str, scope: Value) -> String {
+    json!({
+        "e": 7, "t": event_timestamp(date),
+        "a": {"1": repo_url, "3": scope["after_sha"], "5": "main"},
+        "v": {"17": scope.to_string()},
+    })
+    .to_string()
+}
+
+fn insert_personal_rows(path: &str, rows: &[String]) {
+    MetricsDatabase::open_at_path(Path::new(path))
+        .unwrap()
+        .insert_events(rows)
+        .unwrap();
+}
+
+#[test]
+fn usage_machine_reports_local_id1_lines_and_the_inclusive_day() {
+    let (_metrics_db_dir, metrics_db_path) = isolated_metrics_db_path();
+    let repo = TestRepo::new();
+    let date = personal_usage_date();
+    insert_personal_rows(
+        &metrics_db_path,
+        &[usage_commit_row(
+            date,
+            "https://example.invalid/company/usage",
+            &"1".repeat(40),
+            None,
+            [5, 2, 1],
+        )],
+    );
+
+    let actual = usage_date_json(&repo, &metrics_db_path, date, date);
+    assert_eq!(
+        actual,
+        json!({
+            "totals": {"commit_count": 1, "added_lines": 5, "ai_lines": 2, "human_lines": 1, "unknown_lines": 2},
+            "daily": [{"date": date.to_string(), "commit_count": 1, "added_lines": 5, "ai_lines": 2, "human_lines": 1, "unknown_lines": 2}],
+            "repos": [{"repo": "https://example.invalid/company/usage", "commit_count": 1, "added_lines": 5, "ai_lines": 2, "human_lines": 1, "unknown_lines": 2}],
+            "pending_events": 0,
+        })
+    );
+}
+
+#[test]
+fn usage_machine_scopes_duplicate_and_rewrite_evidence_without_moving_original_dates() {
+    let (_metrics_db_dir, metrics_db_path) = isolated_metrics_db_path();
+    let repo = TestRepo::new();
+    let first = personal_usage_date();
+    let second = first.succ_opt().unwrap();
+    let later = second.succ_opt().unwrap();
+    let repo_a = "https://example.invalid/company/usage-a";
+    let repo_b = "https://example.invalid/company/usage-b";
+    let a = "a".repeat(40);
+    let b = "b".repeat(40);
+    let rebased = "c".repeat(40);
+    let squashed = "d".repeat(40);
+    let main = "e".repeat(40);
+    let excluded = "f".repeat(40);
+    let rebase = usage_rewrite_row(
+        later,
+        repo_a,
+        json!({
+            "v": 1, "kind": "rebase", "ref": "refs/heads/main", "before_sha": a,
+            "after_sha": rebased, "complete": true, "replaced_shas": [a],
+            "targets": [{"sha": rebased, "sources": [a], "stats": {"added_lines": 5, "deleted_lines": 0, "ai_lines": 2, "human_lines": 1}}],
+        }),
+    );
+    let squash = usage_rewrite_row(
+        later,
+        repo_a,
+        json!({
+            "v": 1, "kind": "squash_merge", "ref": "refs/heads/main", "before_sha": main,
+            "after_sha": squashed, "complete": true, "replaced_shas": [],
+            "targets": [{"sha": squashed, "sources": [rebased, b], "stats": {"added_lines": 12, "deleted_lines": 0, "ai_lines": 6, "human_lines": 2}}],
+        }),
+    );
+    insert_personal_rows(
+        &metrics_db_path,
+        &[
+            usage_commit_row(first, repo_a, &a, None, [5, 2, 1]),
+            usage_commit_row(second, repo_a, &b, None, [7, 4, 1]),
+            // Same commit reported again the next day must not move or duplicate it.
+            usage_commit_row(second, repo_a, &a, None, [5, 2, 1]),
+            usage_commit_row(second, repo_a, &rebased, None, [5, 2, 1]),
+            usage_commit_row(second, repo_a, &squashed, None, [12, 6, 2]),
+            // A target SHA observed in another repository is an independent event.
+            usage_commit_row(second, repo_b, &rebased, None, [3, 1, 1]),
+            usage_commit_row(later, repo_a, &excluded, None, [100, 90, 9]),
+            // Scope evidence may be observed after both the ID 1s and the query window.
+            squash.clone(),
+            rebase,
+            squash,
+        ],
+    );
+
+    let actual = usage_date_json(&repo, &metrics_db_path, first, second);
+    assert_eq!(
+        actual,
+        json!({
+            "totals": {"commit_count": 3, "added_lines": 15, "ai_lines": 7, "human_lines": 3, "unknown_lines": 5},
+            "daily": [
+                {"date": first.to_string(), "commit_count": 1, "added_lines": 5, "ai_lines": 2, "human_lines": 1, "unknown_lines": 2},
+                {"date": second.to_string(), "commit_count": 2, "added_lines": 10, "ai_lines": 5, "human_lines": 2, "unknown_lines": 3},
+            ],
+            "repos": [
+                {"repo": repo_a, "commit_count": 2, "added_lines": 12, "ai_lines": 6, "human_lines": 2, "unknown_lines": 4},
+                {"repo": repo_b, "commit_count": 1, "added_lines": 3, "ai_lines": 1, "human_lines": 1, "unknown_lines": 1},
+            ],
+            "pending_events": 0,
+        })
+    );
+    for field in [
+        "commit_count",
+        "added_lines",
+        "ai_lines",
+        "human_lines",
+        "unknown_lines",
+    ] {
+        let repo_total: u64 = actual["repos"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|repo| repo[field].as_u64().unwrap())
+            .sum();
+        assert_eq!(repo_total, actual["totals"][field].as_u64().unwrap());
+    }
+}
+
+#[test]
+fn usage_machine_reports_relevant_conflicts_and_unresolved_derivatives() {
+    let (_metrics_db_dir, metrics_db_path) = isolated_metrics_db_path();
+    let repo = TestRepo::new();
+    let first = personal_usage_date();
+    let second = first.succ_opt().unwrap();
+    let remote = "https://example.invalid/company/pending";
+    let conflicted = "a".repeat(40);
+    let missing_source = "b".repeat(40);
+    let target = "c".repeat(40);
+    let rewrite = usage_rewrite_row(
+        first,
+        remote,
+        json!({
+            "v": 1, "kind": "rebase", "ref": "refs/heads/main",
+            "before_sha": missing_source, "after_sha": target,
+            "complete": true, "replaced_shas": [missing_source],
+            "targets": [{"sha": target, "sources": [missing_source], "stats": null}],
+        }),
+    );
+    insert_personal_rows(
+        &metrics_db_path,
+        &[
+            usage_commit_row(first, remote, &conflicted, None, [1, 1, 0]),
+            usage_commit_row(first, remote, &conflicted, None, [2, 1, 0]),
+            usage_commit_row(second, remote, &conflicted, None, [1, 1, 0]),
+            rewrite,
+            usage_commit_row(second, remote, &target, None, [1, 1, 0]),
+        ],
+    );
+    let actual = usage_date_json(&repo, &metrics_db_path, second, second);
+    assert_eq!(actual["totals"]["commit_count"], 0);
+    assert_eq!(actual["daily"], json!([]));
+    assert_eq!(actual["repos"], json!([]));
+    assert_eq!(actual["pending_events"], 2);
+}
+
+#[test]
+fn usage_machine_counts_dated_local_commits_without_owner_filtering() {
+    let (_metrics_db_dir, metrics_db_path) = isolated_metrics_db_path();
+    let repo = TestRepo::new();
+    let first = personal_usage_date();
+    let second = first.succ_opt().unwrap();
+    let remote = "https://example.invalid/company/usage";
+    let other_remote = "https://example.invalid/company/other";
+    let a = "a".repeat(40);
+    let b = "b".repeat(40);
+    let conflict = "c".repeat(40);
+    let rows = [
+        usage_commit_row(first, remote, &a, Some("employee-123"), [5, 2, 1]),
+        usage_commit_row(second, remote, &a, Some("employee-456"), [5, 2, 1]),
+        usage_commit_row(second, remote, &a, None, [5, 2, 1]),
+        usage_commit_row(second, other_remote, &a, Some("employee-456"), [3, 1, 1]),
+        usage_commit_row(first, remote, &b, None, [4, 1, 1]),
+        usage_commit_row(second, remote, &conflict, None, [2, 1, 0]),
+        usage_commit_row(second, remote, &conflict, Some("employee-123"), [3, 1, 0]),
+        usage_commit_row(
+            first.pred_opt().unwrap(),
+            remote,
+            &"d".repeat(40),
+            None,
+            [20, 10, 0],
+        ),
+        usage_commit_row(
+            second.succ_opt().unwrap(),
+            remote,
+            &"e".repeat(40),
+            None,
+            [20, 10, 0],
+        ),
+    ];
+    insert_personal_rows(&metrics_db_path, &rows);
+
+    let actual = usage_date_json(&repo, &metrics_db_path, first, second);
+    assert_eq!(
+        actual,
+        json!({
+            "totals": {"commit_count": 3, "added_lines": 12, "ai_lines": 4, "human_lines": 3, "unknown_lines": 5},
+            "daily": [
+                {"date": first.to_string(), "commit_count": 2, "added_lines": 9, "ai_lines": 3, "human_lines": 2, "unknown_lines": 4},
+                {"date": second.to_string(), "commit_count": 1, "added_lines": 3, "ai_lines": 1, "human_lines": 1, "unknown_lines": 1},
+            ],
+            "repos": [
+                {"repo": other_remote, "commit_count": 1, "added_lines": 3, "ai_lines": 1, "human_lines": 1, "unknown_lines": 1},
+                {"repo": remote, "commit_count": 2, "added_lines": 9, "ai_lines": 3, "human_lines": 2, "unknown_lines": 4},
+            ],
+            "pending_events": 1,
+        })
     );
 }
