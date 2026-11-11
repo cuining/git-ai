@@ -1,17 +1,65 @@
 use std::collections::{HashMap, HashSet};
+use std::ffi::OsStr;
 
 use crate::authorship::authorship_log_serialization::AuthorshipLog;
 use crate::authorship::ignore::effective_ignore_patterns;
 use crate::authorship::post_commit::metric_tool_model_breakdown;
-use crate::authorship::rewrite::{DiffTreeResult, RewriteMetricCommit};
+use crate::authorship::rewrite::{DiffTreeResult, RewriteMetricCommit, RewriteMetricOperation};
+use crate::authorship::stats::CommitStats;
 use crate::config::Config;
 use crate::error::GitAiError;
-use crate::git::repository::Repository;
+use crate::git::repo_state::is_valid_git_oid;
+use crate::git::repository::{Repository, exec_git_allow_nonzero_with_env};
+use crate::metrics::attrs::{MetricRepositoryIdentity, attr_pos};
+use crate::metrics::events::rewrite_committed_pos;
+use crate::metrics::pos_encoded::{sparse_get_string, sparse_get_u32, sparse_get_vec_u32};
 use crate::metrics::{EventAttributes, MetricEvent, PosEncoded, RewriteCommittedValues};
+use serde::Serialize;
+
+const MAX_OPERATION_COMMITS: usize = 128;
+
+pub(crate) enum RewriteRange {
+    Amend,
+    Rebase { onto: Option<String> },
+    Squash { source_head: String },
+}
+
+pub(crate) struct RewriteScope {
+    pub reference: String,
+    pub before: String,
+    pub after: String,
+    pub range: RewriteRange,
+}
+
+impl RewriteScope {
+    fn operation(&self) -> RewriteMetricOperation {
+        match self.range {
+            RewriteRange::Amend => RewriteMetricOperation::Amend,
+            RewriteRange::Rebase { .. } => RewriteMetricOperation::Rebase,
+            RewriteRange::Squash { .. } => RewriteMetricOperation::SquashMerge,
+        }
+    }
+}
 
 pub(crate) fn spawn_rewrite_commit_metrics(
     repo: &Repository,
     metric_commits: Vec<RewriteMetricCommit>,
+) {
+    spawn_metrics(repo, metric_commits, None);
+}
+
+pub(crate) fn spawn_scoped_rewrite_metrics(
+    repo: &Repository,
+    metric_commits: Vec<RewriteMetricCommit>,
+    scope: RewriteScope,
+) {
+    spawn_metrics(repo, metric_commits, Some(scope));
+}
+
+fn spawn_metrics(
+    repo: &Repository,
+    metric_commits: Vec<RewriteMetricCommit>,
+    scope: Option<RewriteScope>,
 ) {
     if !crate::authorship::rewrite::rewrite_metrics_enabled() {
         return;
@@ -21,21 +69,17 @@ pub(crate) fn spawn_rewrite_commit_metrics(
     }
 
     let repo = repo.clone();
+    let build = move || build_rewrite_metrics(&repo, &metric_commits, scope.as_ref());
     if let Ok(runtime) = tokio::runtime::Handle::try_current() {
         runtime.spawn(async move {
-            let result = tokio::task::spawn_blocking(move || {
-                build_rewrite_metric_events(&repo, &metric_commits)
-            })
-            .await;
+            let result = tokio::task::spawn_blocking(build).await;
             match result {
                 Ok(events) => submit_events(events),
                 Err(err) => tracing::warn!(%err, "rewrite metrics worker panicked"),
             }
         });
     } else {
-        std::thread::spawn(move || {
-            submit_events(build_rewrite_metric_events(&repo, &metric_commits));
-        });
+        std::thread::spawn(move || submit_events(build()));
     }
 }
 
@@ -90,11 +134,37 @@ fn merge_metric_commit_context(target: &mut RewriteMetricCommit, source: Rewrite
     }
 }
 
+#[cfg(test)]
 fn build_rewrite_metric_events(
     repo: &Repository,
     metric_commits: &[RewriteMetricCommit],
 ) -> Vec<MetricEvent> {
+    build_rewrite_metrics(repo, metric_commits, None)
+}
+
+fn build_rewrite_metrics(
+    repo: &Repository,
+    metric_commits: &[RewriteMetricCommit],
+    scope: Option<&RewriteScope>,
+) -> Vec<MetricEvent> {
     let mut metric_commits = dedupe_metric_commits(metric_commits.to_vec());
+    let oversized = scope.is_some()
+        && (metric_commits.len() > MAX_OPERATION_COMMITS
+            || metric_commits
+                .iter()
+                .map(|commit| commit.original_shas.len())
+                .sum::<usize>()
+                > MAX_OPERATION_COMMITS);
+    if metric_commits.is_empty() {
+        return Vec::new();
+    }
+    if let Some(branch) =
+        scope.and_then(|scope| crate::authorship::rewrite::branch_name_from_ref(&scope.reference))
+    {
+        for commit in &mut metric_commits {
+            commit.branch = Some(branch.clone());
+        }
+    }
     hydrate_missing_parent_shas(repo, &mut metric_commits);
     hydrate_missing_parent_diffs(repo, &mut metric_commits);
     let batch_context = RewriteMetricBatchContext::new(repo);
@@ -114,7 +184,291 @@ fn build_rewrite_metric_events(
             }
         }
     }
+    // Only attach evidence to a commit produced by this operation. An empty
+    // rebase can move HEAD to a destination that was already recorded as ID 1.
+    if let Some(scope) = scope.filter(|scope| {
+        !oversized
+            && metric_commits
+                .iter()
+                .any(|commit| commit.new_sha == scope.after)
+    }) && let Some(scoped_event) =
+        build_scoped_result(repo, &metric_commits, scope, &batch_context, &events)
+    {
+        if let Some(tip) = events.iter_mut().find(|event| {
+            sparse_get_string(&event.attrs, attr_pos::COMMIT_SHA)
+                .flatten()
+                .as_deref()
+                == Some(scope.after.as_str())
+        }) {
+            tip.values.extend(scoped_event.values);
+        } else {
+            events.push(scoped_event);
+        }
+    }
     events
+}
+
+#[derive(Serialize)]
+struct RewriteResult<'a> {
+    v: u8,
+    kind: &'static str,
+    r#ref: &'a str,
+    before_sha: &'a str,
+    after_sha: &'a str,
+    complete: bool,
+    // Dated usage can reuse the original contribution only if the amend
+    // changed metadata without changing the tree.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    amend_same_tree: Option<bool>,
+    replaced_shas: Vec<String>,
+    targets: Vec<RewriteTarget<'a>>,
+}
+
+#[derive(Serialize)]
+struct RewriteTarget<'a> {
+    sha: &'a str,
+    sources: &'a [String],
+    stats: Option<RewriteTargetStats>,
+}
+
+#[derive(Clone, Copy, Serialize)]
+struct RewriteTargetStats {
+    added_lines: u32,
+    deleted_lines: u32,
+    ai_lines: u32,
+    human_lines: u32,
+}
+
+impl RewriteTargetStats {
+    fn from_event(event: &MetricEvent) -> Option<Self> {
+        let count = |pos| sparse_get_u32(&event.values, pos).flatten();
+        Some(Self {
+            added_lines: count(rewrite_committed_pos::GIT_DIFF_ADDED_LINES)?,
+            deleted_lines: count(rewrite_committed_pos::GIT_DIFF_DELETED_LINES)?,
+            ai_lines: *sparse_get_vec_u32(&event.values, rewrite_committed_pos::AI_ADDITIONS)
+                .flatten()?
+                .first()?,
+            human_lines: count(rewrite_committed_pos::HUMAN_ADDITIONS)?,
+        })
+    }
+}
+
+fn build_scoped_result(
+    repo: &Repository,
+    commits: &[RewriteMetricCommit],
+    scope: &RewriteScope,
+    batch: &RewriteMetricBatchContext,
+    events: &[MetricEvent],
+) -> Option<MetricEvent> {
+    let stats_by_sha: HashMap<_, _> = events
+        .iter()
+        .filter_map(|event| {
+            let sha = sparse_get_string(&event.attrs, attr_pos::COMMIT_SHA).flatten()?;
+            Some((sha, RewriteTargetStats::from_event(event)?))
+        })
+        .collect();
+    let replaced = verified_replacements(repo, commits, scope);
+    let result = RewriteResult {
+        v: 1,
+        kind: scope.operation().as_str(),
+        r#ref: &scope.reference,
+        before_sha: &scope.before,
+        after_sha: &scope.after,
+        complete: replaced.is_some(),
+        amend_same_tree: match scope.range {
+            RewriteRange::Amend => commit_trees(repo, &scope.before, &scope.after)
+                .map(|(before, after)| before == after),
+            _ => None,
+        },
+        replaced_shas: replaced.unwrap_or_default(),
+        targets: commits
+            .iter()
+            .map(|commit| RewriteTarget {
+                sha: &commit.new_sha,
+                sources: &commit.original_shas,
+                stats: stats_by_sha.get(&commit.new_sha).copied(),
+            })
+            .collect(),
+    };
+    let payload = serde_json::to_string(&result).ok()?;
+    let branch = crate::authorship::rewrite::branch_name_from_ref(&scope.reference)?;
+    let tip =
+        RewriteMetricCommit::new(&scope.after, Vec::new(), scope.operation()).with_branch(branch);
+    let mut attrs = rewrite_metric_attrs(&tip, batch);
+    if let Some(parent) = commits
+        .iter()
+        .find(|commit| commit.new_sha == scope.after)
+        .and_then(|commit| commit.parent_sha.as_deref())
+    {
+        attrs = attrs.base_commit_sha(parent);
+    }
+    Some(MetricEvent::from_values(
+        RewriteCommittedValues::new()
+            .operation_kind(scope.operation().as_str())
+            .rewrite_result(payload),
+        attrs.to_sparse(),
+    ))
+}
+
+fn verified_replacements(
+    repo: &Repository,
+    commits: &[RewriteMetricCommit],
+    scope: &RewriteScope,
+) -> Option<Vec<String>> {
+    if !commits.iter().any(|commit| commit.new_sha == scope.after) {
+        return None;
+    }
+    match &scope.range {
+        RewriteRange::Amend => (commits.len() == 1
+            && commits[0].original_shas == [scope.before.as_str()])
+        .then(|| vec![scope.before.clone()]),
+        RewriteRange::Rebase { onto: Some(onto) } => {
+            // Independently check range membership. range-diff may guess how a
+            // dropped commit maps to another target. Only complete one-to-one
+            // mappings are used as replacement evidence here.
+            if commits.iter().any(|commit| commit.original_shas.len() != 1) {
+                return None;
+            }
+            let mut args = repo.global_args_for_exec();
+            args.extend([
+                "rev-list".to_string(),
+                "--left-right".to_string(),
+                format!("--max-count={}", 2 * MAX_OPERATION_COMMITS + 1),
+                format!("{}...{}", scope.before, scope.after),
+                format!("^{onto}"),
+            ]);
+            let output = crate::git::repository::exec_git(&args).ok()?;
+            let stdout = std::str::from_utf8(&output.stdout).ok()?;
+            let mut left = Vec::new();
+            let mut right = HashSet::new();
+            for line in stdout.lines() {
+                if let Some(sha) = line.strip_prefix('<') {
+                    left.push(sha.to_string());
+                } else if let Some(sha) = line.strip_prefix('>') {
+                    right.insert(sha);
+                } else {
+                    return None;
+                }
+            }
+            let sources: HashSet<&str> = commits
+                .iter()
+                .map(|commit| commit.original_shas[0].as_str())
+                .collect();
+            let targets: HashSet<&str> = commits
+                .iter()
+                .map(|commit| commit.new_sha.as_str())
+                .collect();
+            if left.len() != commits.len()
+                || sources.len() != commits.len()
+                || targets.len() != commits.len()
+                || !left.iter().all(|sha| sources.contains(sha.as_str()))
+                || right != targets
+            {
+                return None;
+            }
+            left.sort_unstable();
+            Some(left)
+        }
+        RewriteRange::Rebase { onto: None } => None,
+        RewriteRange::Squash { source_head } => {
+            let [target] = commits else { return None };
+            if target.parent_sha.as_deref() != Some(scope.before.as_str())
+                || !target.original_shas.contains(source_head)
+            {
+                return None;
+            }
+            // A pending squash is matched to a later commit. Verify its tree
+            // to distinguish the expected merge from an abandoned squash or
+            // a commit with additional changes.
+            let (source_tree, after_tree) = commit_trees(repo, source_head, &scope.after)?;
+            // A squash merge copies source commits into the destination. It
+            // never establishes that the source ref stopped counting them.
+            (source_tree == after_tree
+                || squash_matches_merge_tree(repo, &scope.before, source_head, &after_tree)?)
+            .then(Vec::new)
+        }
+    }
+}
+
+fn commit_trees(repo: &Repository, first: &str, second: &str) -> Option<(String, String)> {
+    let mut args = repo.global_args_for_exec();
+    args.extend([
+        "rev-parse".to_string(),
+        format!("{first}^{{tree}}"),
+        format!("{second}^{{tree}}"),
+    ]);
+    let output = crate::git::repository::exec_git(&args).ok()?;
+    let mut trees = std::str::from_utf8(&output.stdout).ok()?.lines();
+    let first_tree = trees.next()?;
+    let second_tree = trees.next()?;
+    (trees.next().is_none()).then(|| (first_tree.to_owned(), second_tree.to_owned()))
+}
+
+fn squash_matches_merge_tree(
+    repo: &Repository,
+    before: &str,
+    source: &str,
+    after_tree: &str,
+) -> Option<bool> {
+    if !is_valid_git_oid(before) || !is_valid_git_oid(source) || before.len() != source.len() {
+        return None;
+    }
+    let object_format = if before.len() == 64 { "sha256" } else { "sha1" };
+    let objects = repo.common_dir().join("objects");
+    let objects = objects.to_str()?;
+    if objects.contains(['\n', '\r']) {
+        return None;
+    }
+
+    // merge-tree can write objects and run configured merge drivers. Isolate
+    // both the output objects and Git config from the original repository.
+    let scratch = tempfile::tempdir().ok()?;
+    let scratch_path = scratch.path().to_str()?;
+    let empty_config = scratch.path().join("no-user-config");
+    let env = [
+        ("GIT_CONFIG_NOSYSTEM", OsStr::new("1")),
+        ("GIT_CONFIG_GLOBAL", empty_config.as_os_str()),
+        ("GIT_CONFIG_COUNT", OsStr::new("0")),
+        ("GIT_CONFIG_PARAMETERS", OsStr::new("")),
+        ("GIT_ATTR_NOSYSTEM", OsStr::new("1")),
+        ("GIT_ATTR_SOURCE", OsStr::new(before)),
+    ];
+    let init_args = [
+        "init".to_owned(),
+        "--bare".to_owned(),
+        "--quiet".to_owned(),
+        "--template=".to_owned(),
+        format!("--object-format={object_format}"),
+        scratch_path.to_owned(),
+    ];
+    if !exec_git_allow_nonzero_with_env(&init_args, &env)
+        .ok()?
+        .status
+        .success()
+    {
+        return None;
+    }
+    std::fs::write(
+        scratch.path().join("objects/info/alternates"),
+        format!("{objects}\n"),
+    )
+    .ok()?;
+
+    let merge_args = [
+        format!("--git-dir={scratch_path}"),
+        "-c".to_owned(),
+        format!("core.attributesFile={}", empty_config.to_str()?),
+        "merge-tree".to_owned(),
+        "--write-tree".to_owned(),
+        "--no-messages".to_owned(),
+        before.to_owned(),
+        source.to_owned(),
+    ];
+    let output = exec_git_allow_nonzero_with_env(&merge_args, &env).ok()?;
+    Some(
+        output.status.success()
+            && std::str::from_utf8(&output.stdout).ok()?.trim_end() == after_tree,
+    )
 }
 
 fn hydrate_missing_parent_shas(repo: &Repository, metric_commits: &mut [RewriteMetricCommit]) {
@@ -187,7 +541,7 @@ fn parent_shas_for_commits(
 
 struct RewriteMetricBatchContext {
     ignore_patterns: Vec<String>,
-    repo_url: Option<String>,
+    repository: MetricRepositoryIdentity,
     custom_attributes_json: Option<String>,
 }
 
@@ -195,19 +549,10 @@ impl RewriteMetricBatchContext {
     fn new(repo: &Repository) -> Self {
         Self {
             ignore_patterns: effective_ignore_patterns(repo, &[], &[]),
-            repo_url: rewrite_metric_repo_url(repo),
+            repository: MetricRepositoryIdentity::from_repo(repo),
             custom_attributes_json: rewrite_metric_custom_attributes_json(),
         }
     }
-}
-
-fn rewrite_metric_repo_url(repo: &Repository) -> Option<String> {
-    let remotes = repo.remotes_with_urls().ok()?;
-    let (_, url) = remotes
-        .iter()
-        .find(|(name, _)| name == "origin")
-        .or_else(|| remotes.first())?;
-    crate::repo_url::normalize_repo_url(url).ok()
 }
 
 fn rewrite_metric_custom_attributes_json() -> Option<String> {
@@ -249,28 +594,9 @@ fn build_rewrite_committed_metric_event(
     metric_commit: &RewriteMetricCommit,
     batch_context: &RewriteMetricBatchContext,
 ) -> Result<Option<MetricEvent>, GitAiError> {
-    let Some(raw_note) = metric_commit.authorship_note.as_ref() else {
+    let Some(stats) = rewrite_commit_stats(metric_commit, batch_context) else {
         return Ok(None);
     };
-    let authorship_log = match AuthorshipLog::deserialize_from_string(raw_note) {
-        Ok(log) => log,
-        Err(_) => return Ok(None),
-    };
-
-    let Some(parent_diff) = metric_commit.parent_diff.as_ref() else {
-        return Ok(None);
-    };
-
-    let diff_hunks = diff_hunks_from_diff_tree_result(parent_diff);
-    if should_skip_rewrite_metric_stats(&diff_hunks, &batch_context.ignore_patterns) {
-        return Ok(None);
-    }
-    let stats = crate::authorship::stats::stats_for_commit_stats_from_hunks_with_merge_flag(
-        &batch_context.ignore_patterns,
-        &diff_hunks,
-        Some(&authorship_log),
-        false,
-    );
     let Some(breakdown) = metric_tool_model_breakdown(&stats) else {
         return Ok(None);
     };
@@ -282,7 +608,7 @@ fn build_rewrite_committed_metric_event(
         .tool_model_pairs(breakdown.tool_model_pairs)
         .ai_additions(breakdown.ai_additions)
         .ai_accepted(breakdown.ai_accepted)
-        .authorship_note(raw_note.clone())
+        .authorship_note(metric_commit.authorship_note.clone().unwrap_or_default())
         .operation_kind(metric_commit.operation.as_str())
         .original_commit_shas(metric_commit.original_shas.clone());
 
@@ -291,6 +617,26 @@ fn build_rewrite_committed_metric_event(
     let attrs = rewrite_metric_attrs(metric_commit, batch_context);
 
     Ok(Some(MetricEvent::from_values(values, attrs.to_sparse())))
+}
+
+fn rewrite_commit_stats(
+    metric_commit: &RewriteMetricCommit,
+    batch: &RewriteMetricBatchContext,
+) -> Option<CommitStats> {
+    let raw_note = metric_commit.authorship_note.as_deref()?;
+    let authorship_log = AuthorshipLog::deserialize_from_string(raw_note).ok()?;
+    let diff_hunks = diff_hunks_from_diff_tree_result(metric_commit.parent_diff.as_ref()?);
+    if should_skip_rewrite_metric_stats(&diff_hunks, &batch.ignore_patterns) {
+        return None;
+    }
+    Some(
+        crate::authorship::stats::stats_for_commit_stats_from_hunks_with_merge_flag(
+            &batch.ignore_patterns,
+            &diff_hunks,
+            Some(&authorship_log),
+            false,
+        ),
+    )
 }
 
 fn diff_hunks_from_diff_tree_result(
@@ -368,9 +714,7 @@ fn rewrite_metric_attrs(
 
     attrs = apply_rewrite_metric_branch(attrs, metric_commit);
 
-    if let Some(repo_url) = batch_context.repo_url.as_deref() {
-        attrs = attrs.repo_url(repo_url);
-    }
+    attrs = batch_context.repository.apply_to(attrs);
 
     attrs = apply_rewrite_metric_custom_attributes(
         attrs,
@@ -412,7 +756,6 @@ mod tests {
     use crate::authorship::rewrite::RewriteMetricOperation;
     use crate::authorship::working_log::AgentId;
     use crate::metrics::EventValues;
-    use crate::metrics::events::rewrite_committed_pos;
     use std::collections::HashMap;
 
     fn metric_commit(
@@ -425,6 +768,23 @@ mod tests {
             originals.iter().map(|s| s.to_string()).collect(),
             operation,
         )
+    }
+
+    #[test]
+    fn empty_rebase_mapping_emits_no_evidence_for_existing_destination() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path();
+        std::fs::create_dir(dir.join(".git")).unwrap();
+        std::fs::write(dir.join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
+        let repo = crate::git::repository::discover_repository_in_path_no_git_exec(dir).unwrap();
+        let after = "a".repeat(40);
+        let scope = RewriteScope {
+            reference: "refs/heads/main".into(),
+            before: "b".repeat(40),
+            after: after.clone(),
+            range: RewriteRange::Rebase { onto: Some(after) },
+        };
+        assert!(build_rewrite_metrics(&repo, &[], Some(&scope)).is_empty());
     }
 
     fn note_for_ai_line(file_path: &str, line: u32) -> String {

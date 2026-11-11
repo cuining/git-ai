@@ -489,13 +489,9 @@ fn handle_squash_merge(
         .and_then(|raw| AuthorshipLog::deserialize_from_string(raw).ok())
         .filter(|log| !log.attestations.is_empty());
 
-    let base = find_merge_base(repo, source_head, onto).unwrap_or_else(|| onto.to_string());
-    let source_commits = list_commits_in_range(repo, &base, source_head);
-    let sources = if source_commits.is_empty() {
-        vec![source_head.to_string()]
-    } else {
-        source_commits
-    };
+    // Include only commits unavailable from the destination before the squash.
+    // A merge-base range can include already-integrated commits in a DAG.
+    let sources = list_commits_in_range(repo, onto, source_head);
 
     crate::git::sync_authorship::fetch_missing_notes_for_commits_best_effort(repo, &sources);
 

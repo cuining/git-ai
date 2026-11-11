@@ -128,7 +128,13 @@ pub struct MetricsBatch {
 }
 
 impl MetricsBatch {
-    pub fn new(events: Vec<MetricEvent>) -> Self {
+    pub fn new(mut events: Vec<MetricEvent>) -> Self {
+        // These keys correlate local SQLite rows. Do not expose the checkout
+        // identity to the metrics receiver, even on manual flush and retries.
+        let local_repo_id = crate::metrics::attrs::attr_pos::LOCAL_REPO_ID.to_string();
+        for event in &mut events {
+            event.attrs.remove(&local_repo_id);
+        }
         Self {
             version: METRICS_API_VERSION,
             events,
@@ -139,6 +145,34 @@ impl MetricsBatch {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn metrics_upload_batch_excludes_local_repository_identity() {
+        let event = MetricEvent {
+            timestamp: 1,
+            event_id: 1,
+            values: SparseArray::new(),
+            attrs: SparseArray::from([
+                (
+                    crate::metrics::attrs::attr_pos::LOCAL_REPO_ID.to_string(),
+                    serde_json::json!("local"),
+                ),
+                (
+                    "1".into(),
+                    serde_json::json!("https://example.invalid/team/project"),
+                ),
+            ]),
+        };
+        let batch = MetricsBatch::new(vec![event.clone()]);
+        let wire = serde_json::to_value(batch).unwrap();
+        let local_key = crate::metrics::attrs::attr_pos::LOCAL_REPO_ID.to_string();
+        assert!(wire["events"][0]["a"].get(&local_key).is_none());
+        assert_eq!(
+            wire["events"][0]["a"]["1"],
+            "https://example.invalid/team/project"
+        );
+        assert!(event.attrs.contains_key(&local_key));
+    }
 
     #[test]
     fn test_metrics_batch_serialization() {

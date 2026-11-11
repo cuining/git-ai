@@ -399,6 +399,7 @@ pub mod rewrite_committed_pos {
     pub const HUNKS: usize = 14;
     pub const OPERATION_KIND: usize = 15;
     pub const ORIGINAL_COMMIT_SHAS: usize = 16;
+    pub const REWRITE_RESULT: usize = 17;
 }
 
 /// Values for Event ID 7: rewrite_committed.
@@ -419,6 +420,7 @@ pub struct RewriteCommittedValues {
     pub hunks: PosField<String>,
     pub operation_kind: PosField<String>,
     pub original_commit_shas: PosField<Vec<String>>,
+    pub rewrite_result: PosField<String>,
 }
 
 impl RewriteCommittedValues {
@@ -553,6 +555,11 @@ impl RewriteCommittedValues {
         self.original_commit_shas = Some(None);
         self
     }
+
+    pub(crate) fn rewrite_result(mut self, value: String) -> Self {
+        self.rewrite_result = Some(Some(value));
+        self
+    }
 }
 
 impl PosEncoded for RewriteCommittedValues {
@@ -619,6 +626,11 @@ impl PosEncoded for RewriteCommittedValues {
             rewrite_committed_pos::ORIGINAL_COMMIT_SHAS,
             vec_string_to_json(&self.original_commit_shas),
         );
+        sparse_set(
+            &mut map,
+            rewrite_committed_pos::REWRITE_RESULT,
+            string_to_json(&self.rewrite_result),
+        );
 
         map
     }
@@ -643,6 +655,7 @@ impl PosEncoded for RewriteCommittedValues {
                 arr,
                 rewrite_committed_pos::ORIGINAL_COMMIT_SHAS,
             ),
+            rewrite_result: sparse_get_string(arr, rewrite_committed_pos::REWRITE_RESULT),
         }
     }
 }

@@ -1115,13 +1115,7 @@ pub(crate) fn commit_metric_attrs(
         .commit_sha(commit_sha)
         .base_commit_sha(parent_sha);
 
-    if let Ok(Some(remote_name)) = repo.get_default_remote()
-        && let Ok(remotes) = repo.remotes_with_urls()
-        && let Some((_, url)) = remotes.into_iter().find(|(n, _)| n == &remote_name)
-        && let Ok(normalized) = crate::repo_url::normalize_repo_url(&url)
-    {
-        attrs = attrs.repo_url(normalized);
-    }
+    attrs = crate::metrics::attrs::MetricRepositoryIdentity::from_repo(repo).apply_to(attrs);
 
     if let Ok(head_ref) = repo.head()
         && let Ok(short_branch) = head_ref.shorthand()
