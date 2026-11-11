@@ -1,0 +1,21 @@
+src/commands/install_managed.rs
+  s_c9044ad8be93d0::t_75300e24367f35 489-493,495,501-510,512,518-563
+Cargo.toml
+  s_c9044ad8be93d0::t_75300e24367f35 56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-dcc.11",
+  "base_commit_sha": "2cc7eea8afcc2e045f64dbe01aa982680ff9b9ba",
+  "prompts": {},
+  "sessions": {
+    "s_c9044ad8be93d0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c973-e7a1-7ea2-8472-f0321c82f5e2",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
