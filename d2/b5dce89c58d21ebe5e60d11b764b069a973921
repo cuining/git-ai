@@ -1,0 +1,19 @@
+tests/integration/config_cli_coverage.rs
+  s_d4dbfca73d81be::t_278dd0e60f4bb7 44,46-47,49-50,52-54,56,61
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-dcc.11",
+  "base_commit_sha": "d2b5dce89c58d21ebe5e60d11b764b069a973921",
+  "prompts": {},
+  "sessions": {
+    "s_d4dbfca73d81be": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c948-f0e7-7191-aa23-bf2ebb24de21",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
