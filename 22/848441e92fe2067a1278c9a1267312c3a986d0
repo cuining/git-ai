@@ -1,0 +1,21 @@
+src/commands/install_hooks.rs
+  s_85655b3e3c188d::t_6a2f7d2887239a 381-393,399-415,418,425,436-438
+tests/integration/install_hooks_comprehensive.rs
+  s_85655b3e3c188d::t_2ab1989939cfdf 888,890-901,903,905-910
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-dcc.11",
+  "base_commit_sha": "22848441e92fe2067a1278c9a1267312c3a986d0",
+  "prompts": {},
+  "sessions": {
+    "s_85655b3e3c188d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1caa0-3eaf-7e32-abd3-1c5dacb03dd8",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
