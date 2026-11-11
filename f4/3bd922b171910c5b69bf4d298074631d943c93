@@ -1,0 +1,23 @@
+src/daemon/claude_trace2_relay.rs
+  s_ef242ed0811377::t_17c20f620ebf0a 215-218,225,240,247-258,303,306-309
+  s_ef242ed0811377::t_ee3a49292d453d 8,24,89-92,94-99,143,153,196-206,208-209,325,339
+tests/integration/claude_trace2_relay.rs
+  s_ef242ed0811377::t_17c20f620ebf0a 86-87,92,112-113,121-177,223-234,239
+  s_ef242ed0811377::t_eb737fbd921bba 3,35,235-238,240-252,254-271
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-dcc.11",
+  "base_commit_sha": "f43bd922b171910c5b69bf4d298074631d943c93",
+  "prompts": {},
+  "sessions": {
+    "s_ef242ed0811377": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c911-7b73-7790-b6e7-d3454e35e56f",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
