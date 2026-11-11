@@ -1,0 +1,19 @@
+tests/integration/claude_trace2_relay.rs
+  s_ef242ed0811377::t_133c39ca7ecb93 170-172
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-dcc.11",
+  "base_commit_sha": "db1d7086615933c287d448d06f7814e51c3db3e5",
+  "prompts": {},
+  "sessions": {
+    "s_ef242ed0811377": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c911-7b73-7790-b6e7-d3454e35e56f",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
