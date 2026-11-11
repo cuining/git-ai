@@ -21,7 +21,8 @@ use git_ai::daemon::{
 use git_ai::git::repository::find_repository_in_path;
 use git_ai::metrics::db::MetricsDatabase;
 use git_ai::metrics::{
-    EventAttributes, MetricEvent, PosEncoded, SessionEventValues, TokenUsageValues,
+    CommittedValues, EventAttributes, MetricEvent, OtelTraceValues, PosEncoded,
+    RewriteCommittedValues, SessionEventValues, TokenUsageValues,
 };
 use repos::test_file::ExpectedLineExt;
 #[cfg(not(windows))]
@@ -8527,6 +8528,111 @@ fn daemon_debug_logging_does_not_reupload_ureq_logs() {
 }
 
 #[test]
+fn daemon_respects_disabled_metric_upload_flags() {
+    let mut mock_api = MockApiServer::start();
+    let metrics_db_dir = tempfile::tempdir().unwrap();
+    let metrics_db_path = metrics_db_dir.path().join("metrics.db");
+    let repo = TestRepo::new_with_daemon_env(&[
+        ("GIT_AI_API_BASE_URL", mock_api.base_url()),
+        ("GIT_AI_API_KEY", "test-api-key"),
+        (
+            "GIT_AI_TEST_METRICS_DB_PATH",
+            metrics_db_path.to_str().unwrap(),
+        ),
+    ]);
+    fs::write(
+        repo.test_home_path().join(".dcc-ai-tracking/config.json"),
+        r#"{"feature_flags":{"transcript_streaming":true,"transcript_upload":false,"token_usage_metrics":false}}"#,
+    )
+    .unwrap();
+    seed_metric_upload_test_batch(&metrics_db_path);
+
+    repo.git_ai(&["await", "--timeout", "30"]).unwrap();
+    assert_disabled_metrics_stay_local(&mut mock_api, &metrics_db_path);
+
+    repo.git_ai(&["reingest", "--all"]).unwrap();
+    repo.git_ai(&["await", "--timeout", "30"]).unwrap();
+    assert_disabled_metrics_stay_local(&mut mock_api, &metrics_db_path);
+}
+
+#[test]
+fn manual_flush_respects_disabled_metric_upload_flags() {
+    let mut mock_api = MockApiServer::start();
+    let metrics_db_dir = tempfile::tempdir().unwrap();
+    let metrics_db_path = metrics_db_dir.path().join("metrics.db");
+    let repo = TestRepo::new();
+    seed_metric_upload_test_batch(&metrics_db_path);
+
+    repo.git_ai_with_env(
+        &["flush-metrics-db"],
+        &[
+            ("GIT_AI_API_BASE_URL", mock_api.base_url()),
+            ("GIT_AI_API_KEY", "test-api-key"),
+            (
+                "GIT_AI_TEST_METRICS_DB_PATH",
+                metrics_db_path.to_str().unwrap(),
+            ),
+            ("GIT_AI_TRANSCRIPT_UPLOAD", "false"),
+            ("GIT_AI_TOKEN_USAGE_METRICS", "false"),
+        ],
+    )
+    .unwrap();
+    assert_disabled_metrics_stay_local(&mut mock_api, &metrics_db_path);
+}
+
+fn seed_metric_upload_test_batch(metrics_db_path: &Path) {
+    let attrs = EventAttributes::with_version("test")
+        .session_id("local-transcript-session")
+        .tool("codex")
+        .repo_url("https://github.com/acme/public")
+        .to_sparse();
+    let events = [
+        MetricEvent::from_values(CommittedValues::new(), attrs.clone()),
+        MetricEvent::from_values(
+            SessionEventValues::new(json!({"type": "assistant"})),
+            attrs.clone(),
+        ),
+        MetricEvent::from_values(OtelTraceValues::new(json!({"name": "tool"})), attrs.clone()),
+        MetricEvent::from_values(RewriteCommittedValues::new(), attrs.clone()),
+        MetricEvent::from_values(
+            TokenUsageValues::new().input_tokens(10).total_tokens(10),
+            attrs,
+        ),
+    ];
+    let serialized_events = events
+        .iter()
+        .map(serde_json::to_string)
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    MetricsDatabase::open_at_path(metrics_db_path)
+        .unwrap()
+        .insert_events(&serialized_events)
+        .unwrap();
+}
+
+fn assert_disabled_metrics_stay_local(mock_api: &mut MockApiServer, metrics_db_path: &Path) {
+    let mut uploaded_ids: Vec<_> = mock_api
+        .collect_requests()
+        .iter()
+        .filter(|request| request["path"] == "/worker/metrics/upload")
+        .flat_map(|request| request["body"]["events"].as_array().unwrap())
+        .map(|event| event["e"].as_u64().unwrap())
+        .collect();
+    uploaded_ids.sort_unstable();
+    assert_eq!(uploaded_ids, [1, 7]);
+
+    let metrics_db = MetricsDatabase::open_at_path(metrics_db_path).unwrap();
+    let local_events = metrics_db.get_metric_history(0, None, &[5, 6, 9]).unwrap();
+    assert_eq!(
+        local_events
+            .iter()
+            .map(|row| row.event_id)
+            .collect::<Vec<_>>(),
+        [5, 6, 9]
+    );
+}
+
+#[test]
 fn daemon_marks_repository_filtered_session_events_delivered_without_uploading_them() {
     let mut mock_api = MockApiServer::start();
     let metrics_db_path = std::env::temp_dir().join(format!(
@@ -8536,6 +8642,7 @@ fn daemon_marks_repository_filtered_session_events_delivered_without_uploading_t
     let repo = TestRepo::new_with_daemon_env(&[
         ("GIT_AI_API_BASE_URL", mock_api.base_url()),
         ("GIT_AI_API_KEY", "test-api-key"),
+        ("GIT_AI_TRANSCRIPT_UPLOAD", "true"),
         (
             "GIT_AI_TEST_METRICS_DB_PATH",
             metrics_db_path.to_str().unwrap(),
@@ -8596,6 +8703,7 @@ fn daemon_marks_repository_filtered_token_usage_events_delivered_without_uploadi
     let repo = TestRepo::new_with_daemon_env(&[
         ("GIT_AI_API_BASE_URL", mock_api.base_url()),
         ("GIT_AI_API_KEY", "test-api-key"),
+        ("GIT_AI_TOKEN_USAGE_METRICS", "true"),
         (
             "GIT_AI_TEST_METRICS_DB_PATH",
             metrics_db_path.to_str().unwrap(),
@@ -8603,7 +8711,7 @@ fn daemon_marks_repository_filtered_token_usage_events_delivered_without_uploadi
     ]);
     fs::write(
         repo.test_home_path().join(".dcc-ai-tracking/config.json"),
-        r#"{"allow_repositories":["https://github.com/acme/*"],"exclude_repositories":["git@github.com:acme/private"]}"#,
+        r#"{"feature_flags":{"transcript_upload":false},"allow_repositories":["https://github.com/acme/*"],"exclude_repositories":["git@github.com:acme/private"]}"#,
     )
     .unwrap();
 
@@ -8658,6 +8766,7 @@ fn reingest_command_redelivers_bounded_and_all_metrics_through_daemon() {
     let repo = TestRepo::new_with_daemon_env(&[
         ("GIT_AI_API_BASE_URL", mock_api.base_url()),
         ("GIT_AI_API_KEY", "test-api-key"),
+        ("GIT_AI_TRANSCRIPT_UPLOAD", "true"),
         (
             "GIT_AI_TEST_METRICS_DB_PATH",
             metrics_db_path.to_str().unwrap(),
@@ -8752,6 +8861,7 @@ fn token_usage_without_repo_url_passes_an_exclude_only_gate() {
     let repo = TestRepo::new_with_daemon_env(&[
         ("GIT_AI_API_BASE_URL", mock_api.base_url()),
         ("GIT_AI_API_KEY", "test-api-key"),
+        ("GIT_AI_TOKEN_USAGE_METRICS", "true"),
         (
             "GIT_AI_TEST_METRICS_DB_PATH",
             metrics_db_path.to_str().unwrap(),
@@ -8805,6 +8915,7 @@ fn excluded_repo_token_usage_never_uploads_via_the_real_pipeline() {
     let repo = TestRepo::new_with_daemon_env(&[
         ("GIT_AI_API_BASE_URL", mock_api.base_url()),
         ("GIT_AI_API_KEY", "test-api-key"),
+        ("GIT_AI_TOKEN_USAGE_METRICS", "true"),
         (
             "GIT_AI_TEST_METRICS_DB_PATH",
             metrics_db_path.to_str().unwrap(),

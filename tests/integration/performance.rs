@@ -18,6 +18,7 @@ fn setup() {
         lite_mode: false,
         auth_keyring: false,
         transcript_streaming: true,
+        transcript_upload: true,
         transcript_sweep: true,
         checkpoint_debug_log: false,
         bash_checkpoints_v2: false,

@@ -54,6 +54,13 @@ pub struct MetricEvent {
 }
 
 impl MetricEvent {
+    pub(crate) fn is_local_only(&self, transcript_upload: bool, token_usage_metrics: bool) -> bool {
+        (!transcript_upload
+            && (self.event_id == MetricEventId::SessionEvent as u16
+                || self.event_id == MetricEventId::OtelTrace as u16))
+            || (!token_usage_metrics && self.event_id == MetricEventId::TokenUsage as u16)
+    }
+
     /// Create a new metric event with current timestamp.
     pub fn new<V: EventValues>(values: &V, attrs: SparseArray) -> Self {
         Self {

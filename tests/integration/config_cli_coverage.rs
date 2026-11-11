@@ -157,6 +157,16 @@ fn test_config_set_and_get_normal_output_uses_stdout() {
     }
 }
 
+#[test]
+fn test_config_tracking_feature_defaults() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let flags = get_json(&repo, "feature_flags");
+
+    assert_eq!(flags["rewrite_metrics_events"], true);
+    assert_eq!(flags["transcript_upload"], false);
+    assert_eq!(flags["token_usage_metrics"], false);
+}
+
 /// Parse the JSON emitted by `git-ai config <key>` into a serde value.
 fn get_json(repo: &TestRepo, key: &str) -> Value {
     let out = repo
