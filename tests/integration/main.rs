@@ -93,6 +93,7 @@ mod jetbrains_download;
 mod jetbrains_ide_types;
 mod lite_mode;
 mod log;
+mod managed_install;
 mod merge_rebase;
 mod metrics_retry_idle;
 mod multi_repo_workspace;

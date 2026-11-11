@@ -50,6 +50,7 @@ pub fn handle_git_ai(args: &[String]) {
             | "debug"
             | "upgrade"
             | "install-hooks"
+            | "install-managed"
             | "install"
             | "uninstall"
             | "uninstall-hooks"
@@ -157,6 +158,7 @@ pub fn handle_git_ai(args: &[String]) {
             println!("{}", config.git_cmd());
             std::process::exit(0);
         }
+        "install-managed" => commands::install_managed::run(&args[1..]),
         "install-hooks" | "install" => match commands::install_hooks::run(&args[1..]) {
             Ok(statuses) => {
                 if let Ok(statuses_value) = serde_json::to_value(&statuses) {

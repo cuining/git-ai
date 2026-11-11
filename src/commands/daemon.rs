@@ -44,6 +44,17 @@ pub fn handle_daemon(args: &[String]) {
                 std::process::exit(1);
             }
         }
+        "health" => {
+            if let Err(e) = daemon_config_from_env_or_default_paths().and_then(|config| {
+                if args.len() != 1 {
+                    return Err("health takes no arguments".to_string());
+                }
+                check_daemon_health(&config)
+            }) {
+                eprintln!("Background service is unhealthy: {}", e);
+                std::process::exit(1);
+            }
+        }
         "shutdown" => {
             if let Err(e) = handle_shutdown(&args[1..]) {
                 eprintln!("Failed to shut down: {}", e);
@@ -341,7 +352,6 @@ fn wait_for_daemon_up(config: &DaemonConfig, timeout: Duration) -> bool {
     }
 }
 
-#[cfg(any(not(windows), not(any(test, feature = "test-support"))))]
 fn start_daemon_detached_with_config(
     config: DaemonConfig,
     timeout: Duration,
@@ -552,6 +562,30 @@ fn attach_daemon_health(config: &DaemonConfig, output: &mut serde_json::Value) {
     }
 }
 
+pub(crate) fn check_daemon_health(config: &DaemonConfig) -> Result<(), String> {
+    local_socket_connects_with_timeout(&config.trace_socket_path, Duration::from_millis(100))
+        .map_err(|error| format!("Trace2 socket is unavailable: {error}"))?;
+    let response = send_control_request(&config.control_socket_path, &ControlRequest::StatusDaemon)
+        .map_err(|error| error.to_string())?;
+    if !response.ok {
+        return Err(response
+            .error
+            .unwrap_or_else(|| "daemon rejected the health query".to_string()));
+    }
+    let status = response.data.unwrap_or_default();
+    match (
+        status["sequencer_stalled"].as_bool(),
+        status["side_effect_error_families"].as_u64(),
+    ) {
+        (Some(false), Some(0)) => Ok(()),
+        (Some(true), _) => Err("attribution sequencer stalled".to_string()),
+        (Some(false), Some(count)) => {
+            Err(format!("attribution writes failed for {count} families"))
+        }
+        _ => Err("daemon returned an invalid health snapshot".to_string()),
+    }
+}
+
 fn handle_tail(args: &[String]) -> Result<(), String> {
     let config = daemon_config_from_env_or_default_paths()?;
     if !daemon_is_up(&config) {
@@ -651,14 +685,63 @@ const GRACEFUL_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 
 fn handle_shutdown(args: &[String]) -> Result<(), String> {
     let config = daemon_config_from_env_or_default_paths()?;
-    if !daemon_is_up(&config) && !daemon_startup_is_blocked(&config) {
-        return Err("background service is not running".to_string());
-    }
-    if has_flag(args, "--hard") {
-        hard_kill_daemon(&config)
+    if has_flag(args, "--if-running") {
+        if has_flag(args, "--hard") {
+            return Err("--if-running cannot be combined with --hard".to_string());
+        }
+        shutdown_daemon_if_running(&config)?;
     } else {
-        soft_shutdown_daemon(&config)
+        if !daemon_is_up(&config) && !daemon_startup_is_blocked(&config) {
+            return Err("background service is not running".to_string());
+        }
+        if has_flag(args, "--hard") {
+            return hard_kill_daemon(&config);
+        }
+        soft_shutdown_daemon(&config, read_daemon_pid(&config).ok())?;
     }
+    let response = crate::daemon::ControlResponse::ok(None, None);
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&response).map_err(|e| e.to_string())?
+    );
+    Ok(())
+}
+
+fn shutdown_daemon_if_running(config: &DaemonConfig) -> Result<(), String> {
+    let pid = read_daemon_pid(config).ok();
+    if daemon_confirmed_stopped(config)? {
+        return Ok(());
+    }
+    soft_shutdown_daemon(config, pid).or_else(|error| {
+        // Another caller may have completed shutdown during our request.
+        if !pid.is_some_and(process_alive) && daemon_confirmed_stopped(config).unwrap_or(false) {
+            Ok(())
+        } else {
+            Err(error)
+        }
+    })
+}
+
+pub(crate) fn with_stopped_daemon<T>(action: impl FnOnce() -> T) -> Result<T, String> {
+    let config = daemon_config_from_env_or_default_paths()?;
+    shutdown_daemon_if_running(&config)?;
+    let _lock = LockFile::try_acquire(&config.lock_path)
+        .ok_or_else(|| "background service started during managed installation".to_string())?;
+    Ok(action())
+}
+
+fn daemon_confirmed_stopped(config: &DaemonConfig) -> Result<bool, String> {
+    config
+        .ensure_parent_dirs()
+        .map_err(|error| error.to_string())?;
+    let Some(_lock) = LockFile::try_acquire(&config.lock_path) else {
+        return Ok(false);
+    };
+    let timeout = Duration::from_millis(100);
+    Ok(
+        local_socket_connects_with_timeout(&config.control_socket_path, timeout).is_err()
+            && local_socket_connects_with_timeout(&config.trace_socket_path, timeout).is_err(),
+    )
 }
 
 fn handle_restart(args: &[String]) -> Result<(), String> {
@@ -688,8 +771,7 @@ fn handle_restart(args: &[String]) -> Result<(), String> {
     ensure_daemon_running_attached(daemon_startup_timeout()).map(|_| ())
 }
 
-fn soft_shutdown_daemon(config: &DaemonConfig) -> Result<(), String> {
-    let pid = read_daemon_pid(config).ok();
+fn soft_shutdown_daemon(config: &DaemonConfig, pid: Option<u32>) -> Result<(), String> {
     // The response follows checkpoint draining. The daemon then owns the
     // teardown deadline and the final opportunity to persist loss metrics.
     let response = send_control_request(&config.control_socket_path, &ControlRequest::Shutdown)
@@ -702,11 +784,6 @@ fn soft_shutdown_daemon(config: &DaemonConfig) -> Result<(), String> {
     if !wait_for_daemon_dead(config, shutdown_wait_timeout(&response), pid) {
         return Err("timed out waiting for background service to exit".to_string());
     }
-    let response = crate::daemon::ControlResponse::ok(None, None);
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&response).map_err(|e| e.to_string())?
-    );
     Ok(())
 }
 
@@ -844,6 +921,23 @@ pub(crate) fn restart_daemon(config: &DaemonConfig) -> Result<(), String> {
     ensure_daemon_running(Duration::from_secs(5)).map(|_| ())
 }
 
+pub(crate) fn repair_daemon(restart: bool) -> Result<(), String> {
+    repair_daemon_with_exe(restart, None)
+}
+
+pub(super) fn repair_daemon_with_exe(
+    restart: bool,
+    installed_exe: Option<&Path>,
+) -> Result<(), String> {
+    let config = daemon_config_from_env_or_default_paths()?;
+    if !restart && check_daemon_health(&config).is_ok() {
+        return Ok(());
+    }
+    shutdown_daemon_if_running(&config)?;
+    let config = start_daemon_detached_with_config(config, Duration::from_secs(5), installed_exe)?;
+    check_daemon_health(&config)
+}
+
 #[cfg(not(windows))]
 pub(crate) fn restart_daemon_after_install(
     config: &DaemonConfig,
@@ -887,7 +981,8 @@ fn print_help() {
     eprintln!("  dcc-ai-tracking bg start [--retry-secs <n>]");
     eprintln!("  dcc-ai-tracking bg run");
     eprintln!("  dcc-ai-tracking bg status [--repo <path>]");
-    eprintln!("  dcc-ai-tracking bg shutdown [--hard]");
+    eprintln!("  dcc-ai-tracking bg health");
+    eprintln!("  dcc-ai-tracking bg shutdown [--hard | --if-running]");
     eprintln!("  dcc-ai-tracking bg restart [--hard]");
     eprintln!("  dcc-ai-tracking bg tail [-n <lines>] [--full] [-f | --follow]");
 }

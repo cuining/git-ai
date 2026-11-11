@@ -706,6 +706,214 @@ fn npm_managed_agent_install_cli_isolated() {
     );
 }
 
+#[test]
+fn managed_local_profile_applies_policy_and_preserves_other_config() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let codex_home = repo.test_home_path().join("codex-managed");
+    fs::create_dir_all(&codex_home).unwrap();
+    let config_dir = repo.test_home_path().join(".dcc-ai-tracking");
+    fs::create_dir_all(&config_dir).unwrap();
+    let config_path = config_dir.join("config.json");
+    fs::write(
+        &config_path,
+        r#"{"remote_api_enabled":true,"prompt_storage":"notes","custom_attributes":{"team":"test"},"future_setting":{"value":123}}"#,
+    )
+    .unwrap();
+
+    let output = repo
+        .git_ai_command_without_pre_sync_for_test(
+            &["install-hooks", "--agents=codex", "--profile=managed-local"],
+            &[("CODEX_HOME", codex_home.to_str().unwrap())],
+        )
+        .env_remove("GIT_AI_TEST_CONFIG_PATCH")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+
+    let output = repo
+        .git_ai_command_without_pre_sync_for_test(&["config"], &[])
+        .env_remove("GIT_AI_TEST_CONFIG_PATCH")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let effective: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(effective["remote_api_enabled"], false);
+    assert_eq!(effective["disable_auto_updates"], true);
+    assert_eq!(effective["disable_version_checks"], true);
+    assert_eq!(effective["telemetry_oss_disabled"], true);
+    assert_eq!(effective["prompt_storage"], "local");
+    assert_eq!(effective["codex_hooks_format"], "hooks_json");
+    let written: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&config_path).unwrap()).unwrap();
+    assert_eq!(written["custom_attributes"]["team"], "test");
+    assert_eq!(written["future_setting"]["value"], 123);
+    assert!(codex_home.join("hooks.json").is_file());
+    assert!(
+        fs::read_to_string(codex_home.join("config.toml"))
+            .unwrap()
+            .contains("trusted_hash")
+    );
+}
+
+#[test]
+fn managed_daemon_health_is_global() {
+    let repo = TestRepo::new_dedicated_daemon();
+    let health = |cwd: &std::path::Path| {
+        repo.git_ai_command_without_pre_sync_for_test(&["daemon", "health"], &[])
+            .current_dir(cwd)
+            .output()
+            .unwrap()
+    };
+
+    for cwd in [repo.path().as_path(), repo.test_home_path()] {
+        let output = health(cwd);
+        assert!(output.status.success(), "{output:?}");
+    }
+
+    let stopped = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let output = stopped
+        .git_ai_command_without_pre_sync_for_test(&["daemon", "health"], &[])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+}
+
+#[test]
+fn managed_daemon_shutdown_is_idempotent() {
+    let repo = TestRepo::new_dedicated_daemon();
+    let stop = |args: &[&str]| {
+        repo.git_ai_command_without_pre_sync_for_test(args, &[])
+            .output()
+            .unwrap()
+    };
+
+    let config = git_ai::daemon::DaemonConfig::from_home(&repo.daemon_home_path());
+    assert!(git_ai::daemon::read_daemon_pid(&config).is_ok());
+    for _ in 0..2 {
+        let output = stop(&["daemon", "shutdown", "--if-running"]);
+        assert!(output.status.success(), "{output:?}");
+        assert!(git_ai::daemon::read_daemon_pid(&config).is_err());
+    }
+
+    let output = stop(&["daemon", "shutdown"]);
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+}
+
+#[cfg(unix)]
+#[test]
+fn managed_daemon_shutdown_does_not_ignore_an_unreachable_daemon() {
+    let repo = TestRepo::new_dedicated_daemon();
+    fs::remove_file(repo.daemon_control_socket_path()).unwrap();
+    let output = repo
+        .git_ai_command_without_pre_sync_for_test(&["daemon", "shutdown", "--if-running"], &[])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+}
+
+#[cfg(unix)]
+#[test]
+fn managed_daemon_shutdown_does_not_ignore_a_trace_only_listener() {
+    use std::os::unix::net::UnixListener;
+
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let trace_path = repo.daemon_trace_socket_path();
+    fs::create_dir_all(trace_path.parent().unwrap()).unwrap();
+    let _listener = UnixListener::bind(trace_path).unwrap();
+    let output = repo
+        .git_ai_command_without_pre_sync_for_test(&["daemon", "shutdown", "--if-running"], &[])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+}
+
+#[cfg(unix)]
+struct StopDedicatedDaemon<'a>(&'a TestRepo);
+
+#[cfg(unix)]
+impl Drop for StopDedicatedDaemon<'_> {
+    fn drop(&mut self) {
+        let _ = self
+            .0
+            .git_ai_command_without_pre_sync_for_test(&["daemon", "shutdown", "--hard"], &[])
+            .output();
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn managed_local_profile_restarts_only_when_policy_changes_and_shutdown_succeeds() {
+    let repo = TestRepo::new_dedicated_daemon();
+    let _stop = StopDedicatedDaemon(&repo);
+    let codex_home = repo.test_home_path().join("codex-managed");
+    fs::create_dir_all(&codex_home).unwrap();
+    let daemon_config = git_ai::daemon::DaemonConfig::from_home(&repo.daemon_home_path());
+    let pid = || git_ai::daemon::read_daemon_pid(&daemon_config).unwrap();
+    let install = || {
+        repo.git_ai_command_without_pre_sync_for_test(
+            &["install-hooks", "--agents=codex", "--profile=managed-local"],
+            &[("CODEX_HOME", codex_home.to_str().unwrap())],
+        )
+        .env_remove("GIT_AI_TEST_CONFIG_PATCH")
+        .env_remove("GIT_AI_TEST_DB_PATH")
+        .env_remove("GITAI_TEST_DB_PATH")
+        .output()
+        .unwrap()
+    };
+
+    let old_pid = pid();
+    let output = install();
+    assert!(output.status.success(), "{output:?}");
+    let local_pid = pid();
+    assert_ne!(local_pid, old_pid);
+
+    let output = install();
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(pid(), local_pid);
+
+    let config_path = repo.test_home_path().join(".dcc-ai-tracking/config.json");
+    let existing = r#"{"remote_api_enabled":true}"#;
+    fs::write(&config_path, existing).unwrap();
+    fs::remove_file(repo.daemon_control_socket_path()).unwrap();
+    let output = install();
+    assert!(!output.status.success(), "{output:?}");
+    assert_eq!(pid(), local_pid);
+    assert_eq!(fs::read_to_string(config_path).unwrap(), existing);
+}
+
+#[cfg(unix)]
+#[test]
+fn managed_daemon_repair_restarts_only_when_unhealthy() {
+    let repo = TestRepo::new_dedicated_daemon();
+    let _stop = StopDedicatedDaemon(&repo);
+    let codex_home = repo.test_home_path().join("codex-managed");
+    fs::create_dir_all(&codex_home).unwrap();
+    let config = git_ai::daemon::DaemonConfig::from_home(&repo.daemon_home_path());
+    let pid = || git_ai::daemon::read_daemon_pid(&config).unwrap();
+    let install = || {
+        repo.git_ai_command_without_pre_sync_for_test(
+            &["install-hooks", "--agents=codex"],
+            &[("CODEX_HOME", codex_home.to_str().unwrap())],
+        )
+        .env_remove("GIT_AI_TEST_DB_PATH")
+        .env_remove("GITAI_TEST_DB_PATH")
+        .output()
+        .unwrap()
+    };
+
+    let original_pid = pid();
+    let output = install();
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(pid(), original_pid);
+
+    fs::remove_file(repo.daemon_trace_socket_path()).unwrap();
+    assert_eq!(repo.daemon_status()["sequencer_stalled"], false);
+    let output = install();
+    assert!(output.status.success(), "{output:?}");
+    assert_ne!(pid(), original_pid);
+    assert!(repo.daemon_trace_socket_path().exists());
+}
+
 // ==============================================================================
 // Uninstall Tests
 // ==============================================================================

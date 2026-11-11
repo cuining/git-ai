@@ -2,10 +2,11 @@ use crate::config;
 use crate::daemon::DaemonConfig;
 use crate::error::GitAiError;
 use crate::mdm::agents::get_all_installers;
-use crate::mdm::hook_installer::HookInstallerParams;
+use crate::mdm::hook_installer::{HookInstaller, HookInstallerParams};
 use crate::mdm::skills_installer;
 use crate::mdm::spinner::{Spinner, print_diff};
 use crate::mdm::utils::get_current_binary_path;
+use serde_json::{Map, Value, json};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -27,6 +28,7 @@ struct InstallOptions {
     api_base: Option<String>,
     api_key: Option<String>,
     agents: Option<HashSet<String>>,
+    managed_local: bool,
 }
 
 /// Installation status for a tool
@@ -293,14 +295,19 @@ fn configure_daemon_trace2(dry_run: bool) -> Result<(), GitAiError> {
     Ok(())
 }
 
-fn ensure_daemon(dry_run: bool, restart: bool) -> Result<(), GitAiError> {
-    if dry_run
+fn skip_install_daemon(dry_run: bool) -> bool {
+    dry_run
         || std::env::var_os("GIT_AI_TEST_DB_PATH").is_some()
         || std::env::var_os("GITAI_TEST_DB_PATH").is_some()
-    {
+}
+
+fn ensure_daemon(dry_run: bool, restart: bool, managed: bool) -> Result<(), GitAiError> {
+    if skip_install_daemon(dry_run) {
         return Ok(());
     }
-    if restart {
+    if managed {
+        crate::commands::daemon::repair_daemon(restart)
+    } else if restart {
         let daemon_config = DaemonConfig::from_env_or_default_paths()?;
         crate::commands::daemon::restart_daemon(&daemon_config)
     } else {
@@ -348,6 +355,99 @@ pub fn run(args: &[String]) -> Result<HashMap<String, String>, GitAiError> {
     result
 }
 
+fn apply_managed_local_profile() -> Result<(), String> {
+    let fields = [
+        ("remote_api_enabled", json!(false)),
+        ("disable_auto_updates", json!(true)),
+        ("disable_version_checks", json!(true)),
+        ("telemetry_oss", json!("off")),
+        ("prompt_storage", json!("local")),
+        ("codex_hooks_format", json!("hooks_json")),
+    ];
+    let load = || {
+        let document = config::load_config_document::<Map<String, Value>>()?;
+        // Keep unrecognized fields intact, but fail closed on malformed known config.
+        serde_json::from_value::<config::FileConfig>(Value::Object(document.clone()))
+            .map_err(|error| format!("Failed to parse config file: {error}"))?;
+        Ok::<_, String>(document)
+    };
+    let current = load()?;
+    if fields
+        .iter()
+        .any(|(key, value)| current.get(*key) != Some(value))
+    {
+        crate::commands::daemon::with_stopped_daemon(|| {
+            // Re-read after a potentially slow shutdown to preserve intervening edits.
+            let mut document = load()?;
+            document.extend(fields.map(|(key, value)| (key.to_string(), value)));
+            config::save_config_document(&document)
+        })??;
+    }
+
+    let effective = config::Config::fresh();
+    if effective.remote_api_enabled()
+        || !effective.auto_updates_disabled()
+        || !effective.version_checks_disabled()
+        || !effective.is_telemetry_oss_disabled()
+        || effective.prompt_storage() != "local"
+        || effective.codex_hooks_format() != config::CodexHooksFormat::HooksJson
+    {
+        return Err("managed-local policy is not effective".into());
+    }
+    Ok(())
+}
+
+fn prepare_managed_local(dry_run: bool) -> Result<(), GitAiError> {
+    if !dry_run {
+        apply_managed_local_profile().map_err(GitAiError::Generic)?;
+    }
+    configure_daemon_trace2(dry_run)
+}
+
+pub(super) fn initialize_managed_local(
+    binary_path: &Path,
+    agent: &str,
+    restart: bool,
+) -> Result<(), GitAiError> {
+    let installer_id = match agent {
+        "claude" => "claude-code",
+        "codex" | "opencode" => agent,
+        _ => return Err(GitAiError::Generic("unsupported managed agent".into())),
+    };
+    let installer = get_all_installers()
+        .into_iter()
+        .find(|installer| installer.id() == installer_id)
+        .ok_or_else(|| GitAiError::Generic("managed installer is unavailable".into()))?;
+
+    check_git_version(config::Config::fresh().git_cmd())?;
+    prepare_managed_local(false)?;
+
+    let params = HookInstallerParams {
+        binary_path: binary_path.to_path_buf(),
+    };
+    if !installer.check_hooks(&params)?.tool_installed {
+        return Err(GitAiError::Generic("managed agent was not detected".into()));
+    }
+    installer.install_hooks(&params, false)?;
+    if !verify_installed_hooks(installer.as_ref(), &params) {
+        return Err(GitAiError::Generic(
+            "managed hook verification failed".into(),
+        ));
+    }
+    if !skip_install_daemon(false) {
+        crate::commands::daemon::repair_daemon_with_exe(restart, Some(binary_path))
+            .map_err(GitAiError::Generic)?;
+    }
+    cleanup_legacy_envelope_logs();
+    Ok(())
+}
+
+fn verify_installed_hooks(installer: &dyn HookInstaller, params: &HookInstallerParams) -> bool {
+    installer
+        .check_hooks(params)
+        .is_ok_and(|check| check.tool_installed && check.hooks_installed && check.hooks_up_to_date)
+}
+
 fn run_hooks_install(options: &InstallOptions) -> Result<HashMap<String, String>, GitAiError> {
     check_git_version(config::Config::fresh().git_cmd())?;
     // Package installer environment is only inherited by the standalone installer.
@@ -364,11 +464,17 @@ fn run_hooks_install(options: &InstallOptions) -> Result<HashMap<String, String>
 
     // Persist configuration before any daemon can start and observe it.
     let binary_path = get_current_binary_path()?;
-    let config_changed =
-        persist_install_config_with_values(&binary_path, options.dry_run, &install_config)?;
+    let config_changed = if options.managed_local {
+        prepare_managed_local(options.dry_run)?;
+        false
+    } else {
+        persist_install_config_with_values(&binary_path, options.dry_run, &install_config)?
+    };
     let params = HookInstallerParams { binary_path };
     let managed = options.agents.is_some();
-    if let Err(error) = configure_daemon_trace2(options.dry_run) {
+    if !options.managed_local
+        && let Err(error) = configure_daemon_trace2(options.dry_run)
+    {
         if managed {
             return Err(error);
         }
@@ -376,7 +482,7 @@ fn run_hooks_install(options: &InstallOptions) -> Result<HashMap<String, String>
     }
     // The package installers pass --env after installing a new executable.
     let restart_daemon = config_changed || options.configure_env;
-    if let Err(error) = ensure_daemon(options.dry_run, restart_daemon) {
+    if let Err(error) = ensure_daemon(options.dry_run, restart_daemon, managed) {
         if managed {
             return Err(error);
         }
@@ -389,6 +495,11 @@ fn run_hooks_install(options: &InstallOptions) -> Result<HashMap<String, String>
 
     // Run async operations and convert result.
     let statuses = crate::tokio_runtime::block_on(async_run_install(&params, options))?;
+    if options.managed_local && !skip_install_daemon(options.dry_run) {
+        let daemon_config = DaemonConfig::from_env_or_default_paths()?;
+        crate::commands::daemon::check_daemon_health(&daemon_config)
+            .map_err(GitAiError::Generic)?;
+    }
 
     // Clean up legacy envelope logs directory and related artifacts.
     // These are no longer used — all telemetry now routes through the daemon.
@@ -408,6 +519,7 @@ fn parse_install_options(args: &[String]) -> Result<InstallOptions, GitAiError> 
             "--dry-run" | "--dry-run=true" => options.dry_run = true,
             "--dry-run=false" => options.dry_run = false,
             "--verbose" | "-v" => options.verbose = true,
+            "--profile=managed-local" => options.managed_local = true,
             "--skills" => options.install_skills = true,
             "--visual-studio-extension" => options.include_visual_studio_extension = true,
             "--env" | "--env=true" => options.configure_env = true,
@@ -454,6 +566,13 @@ fn parse_install_options(args: &[String]) -> Result<InstallOptions, GitAiError> 
     {
         return Err(GitAiError::Generic(
             "--agents cannot be combined with environment, skills, WSL or IDE setup".into(),
+        ));
+    }
+    if options.managed_local
+        && (options.agents.is_none() || options.api_base.is_some() || options.api_key.is_some())
+    {
+        return Err(GitAiError::Generic(
+            "--profile=managed-local requires --agents and does not accept API credentials".into(),
         ));
     }
     Ok(options)
@@ -782,17 +901,12 @@ async fn async_run_install(
                         }
                     }
                 }
-                if !options.dry_run && installer.uses_config_hooks() {
-                    match installer.check_hooks(params) {
-                        Ok(check)
-                            if check.tool_installed
-                                && check.hooks_installed
-                                && check.hooks_up_to_date => {}
-                        _ => {
-                            eprintln!("  Hook verification failed for {name}");
-                            statuses.insert(id.to_string(), InstallStatus::Failed);
-                        }
-                    }
+                if !options.dry_run
+                    && installer.uses_config_hooks()
+                    && !verify_installed_hooks(installer.as_ref(), params)
+                {
+                    eprintln!("  Hook verification failed for {name}");
+                    statuses.insert(id.to_string(), InstallStatus::Failed);
                 }
             }
             Err(check_error) => {
@@ -1239,8 +1353,8 @@ mod tests {
         let _legacy_db = EnvVarGuard::remove("GITAI_TEST_DB_PATH");
         let _control = EnvVarGuard::remove("GIT_AI_DAEMON_CONTROL_SOCKET");
         let _trace = EnvVarGuard::remove("GIT_AI_DAEMON_TRACE_SOCKET");
-        assert!(ensure_daemon(false, false).is_err());
-        assert!(ensure_daemon(true, false).is_ok());
+        assert!(ensure_daemon(false, false, true).is_err());
+        assert!(ensure_daemon(true, false, true).is_ok());
     }
 
     #[test]
