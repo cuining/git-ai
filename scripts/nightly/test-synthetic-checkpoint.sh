@@ -49,8 +49,8 @@ CHECKPOINT_JSON=$(printf '{
   "conversation_id": "synthetic-%s-%s"
 }' "$REPO_DIR" "$TEST_FILE" "$TEST_FILE" "$AGENT" "$AGENT" "$(date +%s)")
 
-echo "$CHECKPOINT_JSON" | git-ai checkpoint agent-v1 --hook-input stdin \
-  || fail "git-ai checkpoint agent-v1 command failed"
+echo "$CHECKPOINT_JSON" | dcc-ai-tracking checkpoint agent-v1 --hook-input stdin \
+  || fail "dcc-ai-tracking checkpoint agent-v1 command failed"
 pass "Synthetic checkpoint accepted by git-ai"
 
 # Commit the staged file
@@ -67,7 +67,7 @@ else
 fi
 
 # Verify the blame output mentions AI attribution (non-fatal)
-if git-ai blame "$TEST_FILE" 2>/dev/null | grep -qiE "$AGENT|ai|attribution"; then
+if dcc-ai-tracking blame "$TEST_FILE" 2>/dev/null | grep -qiE "$AGENT|ai|attribution"; then
   pass "AI attribution visible in blame output"
 else
   warn "AI attribution not found in blame output for $AGENT (non-fatal)"

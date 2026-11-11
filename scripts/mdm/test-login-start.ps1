@@ -21,7 +21,7 @@ $ErrorActionPreference = 'Stop'
 $BinarySource = if ($env:BINARY_SOURCE) { $env:BINARY_SOURCE } else { 'local' }
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $LogOut = if ($env:MDM_TEST_LOG_DIR) { $env:MDM_TEST_LOG_DIR } else { Join-Path ($env:RUNNER_TEMP, $env:TEMP | Where-Object { $_ } | Select-Object -First 1) 'mdm-logs' }
-$Bin = Join-Path $HOME '.dcc-ai-tracking\bin\git-ai.exe'
+$Bin = Join-Path $HOME '.dcc-ai-tracking\bin\dcc-ai-tracking.exe'
 $DaemonDir = Join-Path $HOME '.dcc-ai-tracking\internal\daemon'
 $TaskPath = '\GitAI\'
 $TaskName = 'Start bg at logon'
@@ -80,7 +80,7 @@ function Test-DaemonUp {
 }
 
 function Get-DaemonProcesses {
-    Get-CimInstance Win32_Process -Filter "Name = 'git-ai.exe'" |
+    Get-CimInstance Win32_Process -Filter "Name = 'dcc-ai-tracking.exe'" |
         Where-Object { $_.CommandLine -match 'bg run' -and $_.ExecutablePath -like "$HOME\*" }
 }
 
@@ -200,9 +200,9 @@ function Invoke-LifecycleScenario {
 function Invoke-UnusualBinaryPathScenario {
     $dir = Join-Path $HOME "mdm test (weird) 100% 'quoted' ünïcode"
     New-Item -ItemType Directory -Path $dir -Force | Out-Null
-    Copy-Item $Bin (Join-Path $dir 'git-ai.exe') -Force
+    Copy-Item $Bin (Join-Path $dir 'dcc-ai-tracking.exe') -Force
 
-    Invoke-MdmScript --bin (Join-Path $dir 'git-ai.exe')
+    Invoke-MdmScript --bin (Join-Path $dir 'dcc-ai-tracking.exe')
     if (-not (Test-Registered)) { Fail 'login start not registered with unusual --bin' }
     Wait-For 45 'daemon up from unusual binary path' { Test-DaemonUp }
     $running = @(Get-DaemonProcesses | Where-Object { $_.ExecutablePath -like "$dir\*" })

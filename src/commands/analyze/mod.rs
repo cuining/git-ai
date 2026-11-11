@@ -1,4 +1,4 @@
-//! `git-ai analyze` — query Git AI's backend analytics (Cube semantic layer)
+//! `dcc-ai-tracking analyze` — query Git AI's backend analytics (Cube semantic layer)
 //! and pull/grade coding sessions at scale.
 //!
 //! This command is the agent-facing replacement for the old local `prompts.db`
@@ -36,7 +36,7 @@ pub fn handle_analyze(args: &[String]) {
             return;
         }
         other => Err(format!(
-            "unknown analyze subcommand: {}\nRun `git-ai analyze` for help.",
+            "unknown analyze subcommand: {}\nRun `dcc-ai-tracking analyze` for help.",
             other
         )),
     };
@@ -119,7 +119,7 @@ fn cmd_query(args: &[String]) -> Result<(), String> {
     if q.measures.is_empty() && q.dimensions.is_empty() && q.time_dimension.is_none() {
         return Err(
             "nothing to query: pass at least --measures, --dimensions, or --time-dimension \
-             (try `git-ai analyze docs` to discover members)"
+             (try `dcc-ai-tracking analyze docs` to discover members)"
                 .to_string(),
         );
     }
@@ -204,7 +204,7 @@ pub(super) fn take_value(args: &[String], i: &mut usize, flag: &str) -> Result<S
 }
 
 fn print_help() {
-    let help = r#"git-ai analyze - research AI coding activity and analyze prompts at scale
+    let help = r#"dcc-ai-tracking analyze - research AI coding activity and analyze prompts at scale
 
 You are an analyst. Your job is to answer questions about how AI is used to write
 code in this org — prompting patterns, acceptance/productivity, model and agent
@@ -228,7 +228,7 @@ Two modes, and you'll usually use both:
 Typical loop: docs (discover members) → query (find the signal) → sessions pull
 (grab that slice) → fan out subagents over `sessions next` (grade/categorize each
 transcript) → exec a synthesis query over the columns you added. See
-`git-ai analyze sessions --help` for the full pull/next/iterate workflow.
+`dcc-ai-tracking analyze sessions --help` for the full pull/next/iterate workflow.
 
 Data lives in a shared Cube.js semantic layer behind https://usegitai.com/api/cube.
 Auth uses an org API key (organization:admin:read) sent as the x-api-key header;
@@ -241,13 +241,13 @@ Scoping to a specific person ("my sessions", "the work I did", "what Jane wrote"
   read their git email and look it up via public_v1_user_status (user_id +
   author_email):
     EMAIL=$(git config user.email)
-    git-ai analyze query -d public_v1_user_status.user_id,public_v1_user_status.author_email \
+    dcc-ai-tracking analyze query -d public_v1_user_status.user_id,public_v1_user_status.author_email \
       -f '[{"member":"public_v1_user_status.author_email","operator":"equals","values":["'"$EMAIL"'"]}]'
   Take the user_id from that row and carry it everywhere: as a -d/-f on `query`, or
   as `sessions pull --user <user_id>`. For someone else, swap in their email. If the
   email returns no row, say so rather than guessing a user_id.
 
-Usage: git-ai analyze <command> [flags]
+Usage: dcc-ai-tracking analyze <command> [flags]
 
 Commands:
   query [flags]      Run a Cube query and print rows (the curl replacement)
@@ -271,7 +271,7 @@ Gotchas:
   - Member names are fully qualified: public_v1_pull_requests.pull_requests (no bare names).
   - There is no .count on public_v1_pull_requests — use .pull_requests.
   - Numeric measures come back as strings in JSON; cast as needed.
-  - Run `git-ai analyze docs` to discover every cube/measure/dimension.
+  - Run `dcc-ai-tracking analyze docs` to discover every cube/measure/dimension.
   - Don't assume a dimension's MEANING or value distribution from its name. A
     `pr_state` dimension does not imply the cube holds non-merged rows; a cube may
     be scoped to one slice (e.g. public_v1_production_hunks is production-only by
@@ -286,11 +286,11 @@ Gotchas:
     precomputes the gap columns; see `analyze sessions --help`.
 
 Examples:
-  git-ai analyze docs
-  git-ai analyze query -m public_v1_sessions.total_sessions
-  git-ai analyze query -m public_v1_pull_requests.ai_assisted_pull_requests \
+  dcc-ai-tracking analyze docs
+  dcc-ai-tracking analyze query -m public_v1_sessions.total_sessions
+  dcc-ai-tracking analyze query -m public_v1_pull_requests.ai_assisted_pull_requests \
       --time-dimension public_v1_pull_requests.opened_time -g month --since "last 6 months" --tsv
-  git-ai analyze query -m public_v1_sessions.total_generated_lines \
+  dcc-ai-tracking analyze query -m public_v1_sessions.total_generated_lines \
       -d public_v1_sessions.agent -o public_v1_sessions.total_generated_lines:desc -l 10
 
 Common cubes: public_v1_pull_requests, public_v1_sessions, public_v1_session_models,
@@ -298,7 +298,7 @@ Common cubes: public_v1_pull_requests, public_v1_sessions, public_v1_session_mod
   public_v1_ai_checkpoint_events, public_v1_repos, public_v1_user_status (+ more via docs).
 
 Pull + analyze specific sessions/prompts (read the transcripts, grade at scale):
-  `git-ai analyze sessions --help`.
+  `dcc-ai-tracking analyze sessions --help`.
 "#;
     eprint!("{help}");
 }

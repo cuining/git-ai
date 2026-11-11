@@ -255,18 +255,18 @@ pub(crate) fn handle_notes_subcommand(args: &[String]) {
             handle_notes_serve(&args[1..]);
         }
         "--help" | "-h" | "help" => {
-            eprintln!("git ai notes - Notes backend management commands");
+            eprintln!("dcc-ai-tracking notes - Notes backend management commands");
             eprintln!();
-            eprintln!("Usage: git ai notes <subcommand> [options]");
+            eprintln!("Usage: dcc-ai-tracking notes <subcommand> [options]");
             eprintln!();
             eprintln!("Subcommands:");
             eprintln!("  migrate    Bulk-upload existing git notes to the HTTP backend");
             eprintln!();
-            eprintln!("Run 'git ai notes <subcommand> --help' for details.");
+            eprintln!("Run 'dcc-ai-tracking notes <subcommand> --help' for details.");
         }
         other => {
             eprintln!("Unknown git-ai notes subcommand: {}", other);
-            eprintln!("Run 'git ai notes --help' for usage.");
+            eprintln!("Run 'dcc-ai-tracking notes --help' for usage.");
             std::process::exit(1);
         }
     }
@@ -292,9 +292,9 @@ fn handle_notes_serve(args: &[String]) {
             }
             "--help" | "-h" => {
                 eprintln!(
-                    "git ai notes serve - Run the in-memory notes backend reference server\n\
+                    "dcc-ai-tracking notes serve - Run the in-memory notes backend reference server\n\
                      \n\
-                     Usage: git ai notes serve [--bind <addr:port>] [--port <port>]\n\
+                     Usage: dcc-ai-tracking notes serve [--bind <addr:port>] [--port <port>]\n\
                      \n\
                      This is a reference implementation. All notes are stored in process\n\
                      memory; auth headers are accepted but not validated. It exists to\n\
@@ -304,7 +304,10 @@ fn handle_notes_serve(args: &[String]) {
                 return;
             }
             other => {
-                eprintln!("Unknown argument to `git ai notes serve`: {}", other);
+                eprintln!(
+                    "Unknown argument to `dcc-ai-tracking notes serve`: {}",
+                    other
+                );
                 std::process::exit(1);
             }
         }
@@ -317,9 +320,9 @@ fn handle_notes_serve(args: &[String]) {
 }
 
 fn print_help() {
-    eprintln!("git-ai - git proxy with AI authorship tracking");
+    eprintln!("dcc-ai-tracking - git proxy with AI authorship tracking");
     eprintln!();
-    eprintln!("Usage: git-ai <command> [args...]");
+    eprintln!("Usage: dcc-ai-tracking <command> [args...]");
     eprintln!();
     eprintln!("Commands:");
     eprintln!("  checkpoint         Checkpoint working changes and attribute author");
@@ -372,10 +375,13 @@ fn print_help() {
     eprintln!("  bg                 Run and control git-ai background service");
     eprintln!("  install, install-hooks  Install hooks for AI authorship tracking");
     eprintln!(
-        "    --env                  Also add git-ai to shell PATH configs (used by the install scripts)"
+        "    --env                  Also add dcc-ai-tracking to shell PATH configs (used by the install scripts)"
     );
     eprintln!(
-        "    --wsl                  Also install git-ai in eligible WSL distributions (Windows only)"
+        "    --wsl                  Install the matching DCC Linux npm package in eligible WSL distributions"
+    );
+    eprintln!(
+        "    --agents <list>        Only install claude,codex,opencode hooks (no IDE extras)"
     );
     eprintln!("    --skills               Also install agent skill files");
     eprintln!("    --visual-studio-extension");
@@ -399,7 +405,7 @@ fn print_help() {
     eprintln!("  login              Authenticate with Git AI");
     eprintln!("  logout             Clear stored credentials");
     eprintln!("  whoami             Show auth state and login identity");
-    eprintln!("  version, -v, --version     Print the git-ai version");
+    eprintln!("  version, -v, --version     Print the dcc-ai-tracking version");
     eprintln!("  help, -h, --help           Show this help message");
     eprintln!();
     std::process::exit(0);
@@ -464,7 +470,9 @@ fn handle_checkpoint(args: &[String]) {
         ("human", &args[1..])
     } else if crate::commands::checkpoint_agent::presets::resolve_preset(args[0].as_str()).is_err()
     {
-        eprintln!("Usage: git-ai checkpoint <preset> [--hook-input <json|stdin>] [files...]");
+        eprintln!(
+            "Usage: dcc-ai-tracking checkpoint <preset> [--hook-input <json|stdin>] [files...]"
+        );
         std::process::exit(0);
     } else {
         (args[0].as_str(), &args[1..])
@@ -721,7 +729,10 @@ struct PushAuthorshipNotesResponse {
 
 fn parse_machine_json_arg(args: &[String], command: &str) -> Result<String, String> {
     if args.len() != 2 || args[0] != "--json" {
-        return Err(format!("Usage: git-ai {} --json '<json-payload>'", command));
+        return Err(format!(
+            "Usage: dcc-ai-tracking {} --json '<json-payload>'",
+            command
+        ));
     }
 
     let payload = strip_utf8_bom(args[1].clone());
@@ -1123,7 +1134,7 @@ fn handle_git_hooks(args: &[String]) {
         }
         _ => {
             eprintln!("The git core hooks feature has been sunset.");
-            eprintln!("Usage: git-ai git-hooks remove");
+            eprintln!("Usage: dcc-ai-tracking git-hooks remove");
             std::process::exit(1);
         }
     }

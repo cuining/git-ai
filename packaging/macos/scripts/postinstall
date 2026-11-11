@@ -7,7 +7,7 @@ fail() {
 }
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname "$0")" && pwd)"
-SOURCE_BINARY="$SCRIPT_DIR/git-ai"
+SOURCE_BINARY="$SCRIPT_DIR/dcc-ai-tracking"
 CONSOLE_USER="$(/usr/bin/stat -f%Su /dev/console)"
 
 case "$CONSOLE_USER" in
@@ -16,7 +16,7 @@ case "$CONSOLE_USER" in
     ;;
 esac
 
-[ -x "$SOURCE_BINARY" ] || fail "bundled git-ai binary is missing"
+[ -x "$SOURCE_BINARY" ] || fail "bundled dcc-ai-tracking binary is missing"
 /usr/bin/id "$CONSOLE_USER" >/dev/null 2>&1 || fail "console user $CONSOLE_USER does not exist"
 
 USER_HOME="$(/usr/bin/dscl . -read "/Users/$CONSOLE_USER" NFSHomeDirectory | /usr/bin/awk 'NR == 1 { print $2 }')"
@@ -28,7 +28,7 @@ esac
 USER_GROUP="$(/usr/bin/id -gn "$CONSOLE_USER")"
 GIT_AI_HOME="$USER_HOME/.dcc-ai-tracking"
 GIT_AI_BIN_DIR="$GIT_AI_HOME/bin"
-GIT_AI_BIN="$GIT_AI_BIN_DIR/git-ai"
+GIT_AI_BIN="$GIT_AI_BIN_DIR/dcc-ai-tracking"
 
 /usr/bin/install -d -o "$CONSOLE_USER" -g "$USER_GROUP" -m 0755 "$GIT_AI_HOME"
 /usr/bin/install -d -o "$CONSOLE_USER" -g "$USER_GROUP" -m 0755 "$GIT_AI_BIN_DIR"

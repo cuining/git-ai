@@ -325,3 +325,142 @@ fn test_api_context_picks_up_api_key_changes() {
     let ctx3 = ApiContext::new(None);
     assert!(ctx3.api_key.is_none());
 }
+
+/// Local mode must block read APIs as well as uploads, even with explicit auth.
+#[test]
+#[serial]
+fn test_remote_api_disabled_blocks_get_post_and_oauth_before_connecting() {
+    let temp_dir = TempDir::new().unwrap();
+    let _home_guard = HomeEnvGuard::set(temp_dir.path());
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let base_url = format!("http://{}", listener.local_addr().unwrap());
+    let path = temp_dir.path().join(".dcc-ai-tracking");
+    std::fs::create_dir_all(&path).unwrap();
+    std::fs::write(
+        path.join("config.json"),
+        serde_json::json!({
+            "remote_api_enabled": false,
+            "api_base_url": base_url,
+            "api_key": "fixture-api-key"
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let context =
+        ApiContext::with_auth(Some(base_url.clone()), "fixture-token".to_string()).with_timeout(1);
+    let client = git_ai::api::client::ApiClient::new(context);
+    for error in [
+        client.read_notes(&["abcdef"]).unwrap_err().to_string(),
+        client
+            .read_ca_prompt_store(&["abcdef"])
+            .unwrap_err()
+            .to_string(),
+        client
+            .context()
+            .post_json("/worker/metrics", &serde_json::json!({}))
+            .err()
+            .unwrap()
+            .to_string(),
+        OAuthClient::with_base_url("http://127.0.0.1:9")
+            .unwrap()
+            .start_device_flow()
+            .unwrap_err(),
+    ] {
+        assert!(
+            error.contains("remote_api_enabled=false"),
+            "unexpected error: {error}"
+        );
+    }
+    assert_eq!(
+        listener.accept().unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+}
+
+#[test]
+#[serial]
+fn test_remote_api_disabled_does_not_load_credentials_or_env_key() {
+    use git_ai::auth::{CredentialStore, types::StoredCredentials};
+    let temp_dir = TempDir::new().unwrap();
+    let _home_guard = HomeEnvGuard::set(temp_dir.path());
+    let path = temp_dir.path().join(".dcc-ai-tracking");
+    std::fs::create_dir_all(&path).unwrap();
+    std::fs::write(
+        path.join("config.json"),
+        serde_json::json!({
+            "remote_api_enabled": false,
+            "api_base_url": "https://api.example.invalid",
+            "feature_flags": { "auth_keyring": false }
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let credentials = StoredCredentials {
+        access_token: "fixture-access".to_string(),
+        refresh_token: "fixture-refresh".to_string(),
+        access_token_expires_at: chrono::Utc::now().timestamp() + 3600,
+        refresh_token_expires_at: chrono::Utc::now().timestamp() + 86400,
+    };
+    CredentialStore::new().store(&credentials).unwrap();
+    let previous_key = env::var_os("GIT_AI_API_KEY");
+    unsafe {
+        env::set_var("GIT_AI_API_KEY", "fixture-environment-key");
+    }
+    let context = ApiContext::new(None);
+    unsafe {
+        match previous_key {
+            Some(value) => env::set_var("GIT_AI_API_KEY", value),
+            None => env::remove_var("GIT_AI_API_KEY"),
+        }
+    }
+    assert!(
+        context.auth_token.is_none(),
+        "local mode must not load OAuth credentials"
+    );
+    assert!(
+        context.api_key.is_none(),
+        "environment API key must not enable uploads"
+    );
+    assert!(context.author_identity.is_none());
+}
+
+#[test]
+#[serial]
+#[cfg(unix)]
+fn test_config_save_atomically_preserves_disabled_remote_and_private_permissions() {
+    use std::io::Read;
+    use std::os::unix::fs::PermissionsExt;
+    let temp_dir = TempDir::new().unwrap();
+    let _home_guard = HomeEnvGuard::set(temp_dir.path());
+    let mut config = git_ai::config::FileConfig {
+        remote_api_enabled: Some(false),
+        ..Default::default()
+    };
+    save_file_config(&config).unwrap();
+    let path = temp_dir.path().join(".dcc-ai-tracking/config.json");
+    let original = std::fs::read(&path).unwrap();
+    let mut previous_file = std::fs::File::open(&path).unwrap();
+    config.prompt_storage = Some("local".to_string());
+    save_file_config(&config).unwrap();
+    let mut observed = Vec::new();
+    previous_file.read_to_end(&mut observed).unwrap();
+    assert_eq!(
+        observed, original,
+        "open readers must retain the complete prior config"
+    );
+    assert!(!Config::fresh().remote_api_enabled());
+    assert_eq!(
+        std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    assert_eq!(
+        std::fs::metadata(path.parent().unwrap())
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o700
+    );
+}

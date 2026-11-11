@@ -64,7 +64,7 @@ fn render_whoami(
 ) -> String {
     let mut out = String::new();
 
-    writeln!(out, "git-ai status").unwrap();
+    writeln!(out, "dcc-ai-tracking status").unwrap();
     writeln!(out).unwrap();
 
     writeln!(out, "API").unwrap();
@@ -268,11 +268,11 @@ fn mask_api_key(key: &str) -> String {
 }
 
 fn print_help() {
-    eprintln!("git-ai whoami - Show current auth, identity, and telemetry status");
+    eprintln!("dcc-ai-tracking whoami - Show current auth, identity, and telemetry status");
     eprintln!();
     eprintln!("Usage:");
-    eprintln!("  git-ai whoami");
-    eprintln!("  git-ai whoami --help");
+    eprintln!("  dcc-ai-tracking whoami");
+    eprintln!("  dcc-ai-tracking whoami --help");
 }
 
 #[cfg(test)]

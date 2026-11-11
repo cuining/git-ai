@@ -1,9 +1,9 @@
-//! Minimal Cube API client for `git-ai analyze`.
+//! Minimal Cube API client for `dcc-ai-tracking analyze`.
 //!
 //! Talks to the Next.js cube proxy at `<api_base_url>/api/cube/*` using the
 //! org API key in the `x-api-key` header. We build requests directly over
 //! [`crate::http`] rather than going through `ApiContext::post_json` so that we
-//! send ONLY the API key to the cube proxy — never a `git-ai login` OAuth
+//! send ONLY the API key to the cube proxy — never a `dcc-ai-tracking login` OAuth
 //! bearer, which the proxy does not expect on this route.
 
 use crate::config;

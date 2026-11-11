@@ -15,7 +15,7 @@ if (-not (Test-Path -LiteralPath $BinaryPath)) {
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot '..\..')
 $wxsPath = Join-Path $PSScriptRoot 'git-ai.wxs'
 $stageDir = Join-Path $repoRoot "target\package\msi-$Architecture"
-$stagedExe = Join-Path $stageDir 'git-ai.exe'
+$stagedExe = Join-Path $stageDir 'dcc-ai-tracking.exe'
 $outputFullPath = [System.IO.Path]::GetFullPath($OutputPath)
 $outputDir = [System.IO.Path]::GetDirectoryName($outputFullPath)
 $upgradeCode = '4B6D731B-CB6B-48F2-8A0A-A4344C91E1E0'

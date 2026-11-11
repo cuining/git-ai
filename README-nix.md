@@ -6,12 +6,12 @@ This project provides a Nix flake for easy installation on NixOS, nix-darwin, or
 
 Try without installing:
 ```bash
-nix run github:acunniffe/git-ai -- --version
+nix run github:cuining/git-ai -- --version
 ```
 
 Install to user profile:
 ```bash
-nix profile install github:acunniffe/git-ai
+nix profile install github:cuining/git-ai
 ```
 
 ## What's Included
@@ -21,7 +21,7 @@ The package provides three commands:
 | Command | Description |
 |---------|-------------|
 | `git` | Routes through git-ai (tracks AI authorship) |
-| `git-ai` | Direct git-ai commands |
+| `dcc-ai-tracking` | Direct tracking commands |
 | `git-og` | Bypasses git-ai, calls real git |
 
 ## Flake Outputs
@@ -48,7 +48,7 @@ Add the input to your flake:
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     home-manager.url = "github:nix-community/home-manager";
-    git-ai.url = "github:acunniffe/git-ai";
+    git-ai.url = "github:cuining/git-ai";
   };
 }
 ```
@@ -70,7 +70,7 @@ In your Home Manager configuration:
   # Enable git-ai hooks for IDE/agent integration
   programs.git-ai = {
     enable = true;
-    installHooks = true;  # Runs git-ai install-hooks on activation
+    installHooks = true;  # Runs dcc-ai-tracking install-hooks on activation
   };
 }
 ```
@@ -88,7 +88,7 @@ This approach:
   inputs = {
     darwin.url = "github:lnl7/nix-darwin";
     home-manager.url = "github:nix-community/home-manager";
-    git-ai.url = "github:acunniffe/git-ai";
+    git-ai.url = "github:cuining/git-ai";
   };
 
   outputs = { darwin, home-manager, git-ai, nixpkgs, ... }: {
@@ -123,7 +123,7 @@ This approach:
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    git-ai.url = "github:acunniffe/git-ai";
+    git-ai.url = "github:cuining/git-ai";
   };
 
   outputs = { nixpkgs, git-ai, ... }: {
@@ -182,7 +182,7 @@ home.packages = [
 
 Enter a development shell with Rust toolchain:
 ```bash
-nix develop github:acunniffe/git-ai
+nix develop github:cuining/git-ai
 ```
 
 Or clone and develop locally:
@@ -215,7 +215,7 @@ The Home Manager module handles hooks and configuration only (not package instal
 |--------|------|---------|-------------|
 | `enable` | bool | `false` | Enable git-ai hooks and config |
 | `package` | package | flake default | The git-ai package (for hooks) |
-| `installHooks` | bool | `true` | Run `git-ai install-hooks` on activation |
+| `installHooks` | bool | `true` | Run `dcc-ai-tracking install-hooks` on activation |
 
 ### nixosModules.default
 
@@ -223,7 +223,7 @@ The Home Manager module handles hooks and configuration only (not package instal
 |--------|------|---------|-------------|
 | `enable` | bool | `false` | Enable git-ai |
 | `package` | package | flake default | The git-ai package to use |
-| `installHooks` | bool | `true` | Run `git-ai install-hooks` on activation |
+| `installHooks` | bool | `true` | Run `dcc-ai-tracking install-hooks` on activation |
 | `setGitAlias` | bool | `true` | Add git-ai to system PATH |
 
 ## Platforms

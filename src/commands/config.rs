@@ -86,15 +86,17 @@ fn resolve_path_to_remotes(path: &str) -> Result<Vec<String>, String> {
 }
 
 fn print_config_help() {
-    println!("git-ai config - View and manage git-ai configuration");
+    println!("dcc-ai-tracking config - View and manage git-ai configuration");
     println!();
     println!("Usage:");
-    println!("  git-ai config                Show all config as formatted JSON");
-    println!("  git-ai config <key>          Show specific config value");
-    println!("  git-ai config set <key> <value>          Set a config value");
-    println!("  git-ai config set <key> <value> --add    Add to array (extends existing)");
-    println!("  git-ai config --add <key> <value>        Add to array or upsert into object");
-    println!("  git-ai config unset <key>    Remove config value (reverts to default)");
+    println!("  dcc-ai-tracking config                Show all config as formatted JSON");
+    println!("  dcc-ai-tracking config <key>          Show specific config value");
+    println!("  dcc-ai-tracking config set <key> <value>          Set a config value");
+    println!("  dcc-ai-tracking config set <key> <value> --add    Add to array (extends existing)");
+    println!(
+        "  dcc-ai-tracking config --add <key> <value>        Add to array or upsert into object"
+    );
+    println!("  dcc-ai-tracking config unset <key>    Remove config value (reverts to default)");
     println!();
     println!("Configuration Keys:");
     println!("  git_path                     Path to git binary");
@@ -110,6 +112,7 @@ fn print_config_help() {
     println!("  disable_auto_updates         Disable auto updates (bool)");
     println!("  update_channel               Update channel (latest/next)");
     println!("  feature_flags                Feature flags (object)");
+    println!("  remote_api_enabled           Allow remote services (bool, default: true)");
     println!("  api_base_url                 API base URL (default: https://usegitai.com)");
     println!("  api_key                      API key for X-API-Key header");
     println!("  author.name                  git-ai author display name override");
@@ -147,23 +150,25 @@ fn print_config_help() {
     println!("    - A file path: \".\" or \"/path/to/repo\" (resolves to repo's remotes)");
     println!();
     println!("Examples:");
-    println!("  git-ai config exclude_repositories");
-    println!("  git-ai config set disable_auto_updates true");
-    println!("  git-ai config set author.name \"Alice Example\"");
-    println!("  git-ai config set author.email alice@example.com");
-    println!("  git-ai config set exclude_repositories \"private/*\"");
-    println!("  git-ai config set exclude_repositories .         # Uses current repo's remotes");
-    println!("  git-ai config --add exclude_repositories \"temp/*\"");
-    println!("  git-ai config --add allow_repositories ~/projects/my-repo");
-    println!("  git-ai config --add feature_flags.my_flag true");
-    println!("  git-ai config --add git_ai_hooks.post_notes_updated \"./my-hook.sh\"");
-    println!("  git-ai config set codex_hooks_format hooks_json");
-    println!("  git-ai config set allow_superuser true");
-    println!("  git-ai config set transcript_streaming_lookback_days 1");
-    println!("  git-ai config set daemon_memory_limit_mb 1024");
-    println!("  git-ai config set custom_attributes '{{\"team\":\"platform\"}}'");
-    println!("  git-ai config --add custom_attributes.team platform");
-    println!("  git-ai config unset exclude_repositories");
+    println!("  dcc-ai-tracking config exclude_repositories");
+    println!("  dcc-ai-tracking config set disable_auto_updates true");
+    println!("  dcc-ai-tracking config set author.name \"Alice Example\"");
+    println!("  dcc-ai-tracking config set author.email alice@example.com");
+    println!("  dcc-ai-tracking config set exclude_repositories \"private/*\"");
+    println!(
+        "  dcc-ai-tracking config set exclude_repositories .         # Uses current repo's remotes"
+    );
+    println!("  dcc-ai-tracking config --add exclude_repositories \"temp/*\"");
+    println!("  dcc-ai-tracking config --add allow_repositories ~/projects/my-repo");
+    println!("  dcc-ai-tracking config --add feature_flags.my_flag true");
+    println!("  dcc-ai-tracking config --add git_ai_hooks.post_notes_updated \"./my-hook.sh\"");
+    println!("  dcc-ai-tracking config set codex_hooks_format hooks_json");
+    println!("  dcc-ai-tracking config set allow_superuser true");
+    println!("  dcc-ai-tracking config set transcript_streaming_lookback_days 1");
+    println!("  dcc-ai-tracking config set daemon_memory_limit_mb 1024");
+    println!("  dcc-ai-tracking config set custom_attributes '{{\"team\":\"platform\"}}'");
+    println!("  dcc-ai-tracking config --add custom_attributes.team platform");
+    println!("  dcc-ai-tracking config unset exclude_repositories");
     println!();
     std::process::exit(0);
 }
@@ -191,8 +196,8 @@ pub fn handle_config(args: &[String]) {
     if filtered_args.is_empty() {
         // Show all config if only --add was passed (which doesn't make sense)
         eprintln!("Error: --add requires <key> <value>");
-        eprintln!("Usage: git-ai config --add <key> <value>");
-        eprintln!("   or: git-ai config set <key> <value> --add");
+        eprintln!("Usage: dcc-ai-tracking config --add <key> <value>");
+        eprintln!("   or: dcc-ai-tracking config set <key> <value> --add");
         std::process::exit(1);
     }
 
@@ -200,7 +205,7 @@ pub fn handle_config(args: &[String]) {
         "set" => {
             if filtered_args.len() < 3 {
                 eprintln!("Error: set requires <key> <value>");
-                eprintln!("Usage: git-ai config set <key> <value>");
+                eprintln!("Usage: dcc-ai-tracking config set <key> <value>");
                 std::process::exit(1);
             }
             let key = filtered_args[1].as_str();
@@ -215,13 +220,13 @@ pub fn handle_config(args: &[String]) {
                 || key == "transcript_streaming_lookback_days"
                 || key == "daemon_memory_limit_mb"
             {
-                println!("Run `git-ai bg restart` for changes to take effect.");
+                println!("Run `dcc-ai-tracking bg restart` for changes to take effect.");
             }
         }
         "unset" => {
             if filtered_args.len() < 2 {
                 eprintln!("Error: unset requires <key>");
-                eprintln!("Usage: git-ai config unset <key>");
+                eprintln!("Usage: dcc-ai-tracking config unset <key>");
                 std::process::exit(1);
             }
             let key = filtered_args[1].as_str();
@@ -230,15 +235,15 @@ pub fn handle_config(args: &[String]) {
                 std::process::exit(1);
             }
             if key == "daemon_memory_limit_mb" {
-                println!("Run `git-ai bg restart` for changes to take effect.");
+                println!("Run `dcc-ai-tracking bg restart` for changes to take effect.");
             }
         }
         key => {
             if is_add_mode {
-                // git-ai config --add <key> <value>
+                // dcc-ai-tracking config --add <key> <value>
                 if filtered_args.len() < 2 {
                     eprintln!("Error: --add requires <key> <value>");
-                    eprintln!("Usage: git-ai config --add <key> <value>");
+                    eprintln!("Usage: dcc-ai-tracking config --add <key> <value>");
                     std::process::exit(1);
                 }
                 let value = filtered_args[1].as_str();
@@ -326,6 +331,11 @@ fn show_all_config() -> Result<(), String> {
     effective_config.insert(
         "disable_auto_updates".to_string(),
         Value::Bool(runtime_config.auto_updates_disabled()),
+    );
+
+    effective_config.insert(
+        "remote_api_enabled".to_string(),
+        Value::Bool(runtime_config.remote_api_enabled()),
     );
 
     // Optional strings
@@ -516,6 +526,7 @@ fn get_config_value(key: &str) -> Result<(), String> {
                 serde_json::to_value(runtime_config.get_feature_flags())
                     .unwrap_or_else(|_| Value::Object(serde_json::Map::new()))
             }
+            "remote_api_enabled" => Value::Bool(runtime_config.remote_api_enabled()),
             "api_base_url" => Value::String(runtime_config.api_base_url().to_string()),
             "api_key" => {
                 if let Some(ref key) = file_config.api_key {
@@ -779,6 +790,12 @@ fn set_config_value(key: &str, value: &str, add_mode: bool) -> Result<(), String
                 file_config.feature_flags = Some(json_value);
                 crate::config::save_file_config(&file_config)?;
                 println!("[feature_flags]: {}", value);
+            }
+            "remote_api_enabled" => {
+                let enabled = parse_bool(value)?;
+                file_config.remote_api_enabled = Some(enabled);
+                crate::config::save_file_config(&file_config)?;
+                println!("[remote_api_enabled]: {}", enabled);
             }
             "api_base_url" => {
                 file_config.api_base_url = Some(value.to_string());
@@ -1193,6 +1210,12 @@ fn unset_config_value(key: &str) -> Result<(), String> {
                 crate::config::save_file_config(&file_config)?;
                 if let Some(v) = old_value {
                     println!("- [feature_flags]: {}", v);
+                }
+            }
+            "remote_api_enabled" => {
+                if let Some(value) = file_config.remote_api_enabled.take() {
+                    crate::config::save_file_config(&file_config)?;
+                    println!("- [remote_api_enabled]: {}", value);
                 }
             }
             "api_base_url" => {

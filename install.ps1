@@ -6,16 +6,16 @@ function Start-DaemonIfRequested {
         return
     }
 
-    $daemonExe = Join-Path $HOME '.dcc-ai-tracking\bin\git-ai.exe'
+    $daemonExe = Join-Path $HOME '.dcc-ai-tracking\bin\dcc-ai-tracking.exe'
     if (-not (Test-Path $daemonExe)) {
-        Write-Warning 'Warning: Failed to locate git-ai.exe for daemon restart after install.'
+        Write-Warning 'Warning: Failed to locate dcc-ai-tracking.exe for daemon restart after install.'
         return
     }
 
     try {
         & $daemonExe bg start *> $null
     } catch {
-        Write-Warning 'Warning: Failed to restart git-ai background service automatically.'
+        Write-Warning 'Warning: Failed to restart dcc-ai-tracking background service automatically.'
     }
 }
 
@@ -97,7 +97,7 @@ function Get-GitAiManagedProcesses {
     )
 
     $targetPaths = @(
-        (Normalize-PathString (Join-Path $InstallDir 'git-ai.exe')),
+        (Normalize-PathString (Join-Path $InstallDir 'dcc-ai-tracking.exe')),
         (Normalize-PathString (Join-Path $InstallDir 'git.exe'))
     )
 
@@ -121,7 +121,7 @@ function Stop-GitAiManagedProcesses {
     }
 
     $pids = @($processes | Sort-Object ProcessId -Unique | Select-Object -ExpandProperty ProcessId)
-    Write-Warning ("Stopping lingering git-ai processes: {0}" -f ($pids -join ', '))
+    Write-Warning ("Stopping lingering dcc-ai-tracking processes: {0}" -f ($pids -join ', '))
 
     foreach ($managedPid in $pids) {
         try {
@@ -142,7 +142,7 @@ function Wait-ForFileAvailable {
     )
 
     $elapsed = 0
-    $gitAiExe = Join-Path $InstallDir 'git-ai.exe'
+    $gitAiExe = Join-Path $InstallDir 'dcc-ai-tracking.exe'
 
     [void](Stop-GitAiBackgroundService -GitAiExe $gitAiExe)
 
@@ -262,7 +262,17 @@ if (-not $arch) { Write-ErrorAndExit "Unsupported architecture: $([System.Runtim
 $os = 'windows'
 
 # Determine binary name and download URLs
-$binaryName = "git-ai-$os-$arch"
+$binaryName = "dcc-ai-tracking-$os-$arch"
+
+$npmUpgrade = $env:GIT_AI_NPM_UPGRADE -eq '1'
+if ($npmUpgrade) {
+    if ([string]::IsNullOrWhiteSpace($env:GIT_AI_LOCAL_BINARY)) {
+        Write-ErrorAndExit 'npm upgrade requires a verified local binary'
+    }
+    if (Test-Path -LiteralPath (Join-Path $HOME '.dcc-ai-tracking/dcc-install.json')) {
+        Write-ErrorAndExit 'This installation is managed by DCC'
+    }
+}
 
 # Determine release tag
 # Priority: 1. Local binary override, 2. Pinned version (for release builds), 3. Environment variable, 4. "latest"
@@ -334,7 +344,7 @@ if ($isElevated -and $env:GIT_AI_ALLOW_SUPERUSER -ne '1') {
 
     if (-not $isCi) {
         Write-Host ''
-        Write-Host 'Warning: installing git-ai as Administrator is not recommended.' -ForegroundColor Yellow
+        Write-Host 'Warning: installing dcc-ai-tracking as Administrator is not recommended.' -ForegroundColor Yellow
         Write-Host ''
         Write-Host 'Running with elevated privileges creates files owned by Administrator that'
         Write-Host 'become inaccessible to your normal user account, causing persistent daemon'
@@ -345,7 +355,7 @@ if ($isElevated -and $env:GIT_AI_ALLOW_SUPERUSER -ne '1') {
         Write-Host '  - Set $env:GIT_AI_ALLOW_SUPERUSER = "1"' -ForegroundColor Yellow
         Write-Host ''
     }
-    # Propagate to child git-ai invocations (install-hooks, exchange-nonce, login)
+    # Propagate to child dcc-ai-tracking invocations (install-hooks, exchange-nonce, login)
     $env:GIT_AI_ALLOW_SUPERUSER = '1'
 }
 
@@ -353,8 +363,8 @@ if ($isElevated -and $env:GIT_AI_ALLOW_SUPERUSER -ne '1') {
 $installDir = Join-Path $HOME ".dcc-ai-tracking\bin"
 New-Item -ItemType Directory -Force -Path $installDir | Out-Null
 
-Write-Host ("Downloading git-ai (release: {0})..." -f $releaseTag)
-$tmpFile = Join-Path $installDir "git-ai.tmp.$PID.exe"
+Write-Host ("Downloading dcc-ai-tracking (release: {0})..." -f $releaseTag)
+$tmpFile = Join-Path $installDir "dcc-ai-tracking.tmp.$PID.exe"
 
 function Try-Download {
     param(
@@ -384,7 +394,7 @@ if (-not [string]::IsNullOrWhiteSpace($env:GIT_AI_LOCAL_BINARY)) {
         Write-ErrorAndExit "Local binary not found at $($env:GIT_AI_LOCAL_BINARY)"
     }
     Copy-Item -Force -Path $env:GIT_AI_LOCAL_BINARY -Destination $tmpFile
-    $downloadedBinaryName = "$binaryName.exe"
+    $downloadedBinaryName = if ($npmUpgrade) { "dcc-ai-tracking.exe" } else { "$binaryName.exe" }
 } elseif (Try-Download -Url $downloadUrlExe) {
     $downloadedBinaryName = "$binaryName.exe"
 } elseif (Try-Download -Url $downloadUrlNoExt) {
@@ -409,18 +419,18 @@ try {
 # Verify checksum if embedded (release builds only)
 Verify-Checksum -File $tmpFile -BinaryName $downloadedBinaryName
 
-$finalExe = Join-Path $installDir 'git-ai.exe'
+$finalExe = Join-Path $installDir 'dcc-ai-tracking.exe'
 
-# Wait for git-ai.exe to be available if it exists and is in use
+# Wait for dcc-ai-tracking.exe to be available if it exists and is in use
 if (Test-Path -LiteralPath $finalExe) {
     if (-not (Wait-ForFileAvailable -Path $finalExe -InstallDir $installDir -MaxWaitSeconds 300 -RetryIntervalSeconds 5)) {
         Remove-Item -Force -ErrorAction SilentlyContinue $tmpFile
-        Write-ErrorAndExit "Timeout waiting for $finalExe to be available. Please close any running git-ai processes and try again."
+        Write-ErrorAndExit "Timeout waiting for $finalExe to be available. Please close any running dcc-ai-tracking processes and try again."
     }
 }
 
 Move-Item -Force -Path $tmpFile -Destination $finalExe
-try { Unblock-File -Path $finalExe -ErrorAction SilentlyContinue } catch { }
+if (-not $npmUpgrade) { try { Unblock-File -Path $finalExe -ErrorAction SilentlyContinue } catch { } }
 
 # Refresh git.exe for existing wrapper users (it's a copy, not a symlink on Windows)
 $gitShim = Join-Path $installDir 'git.exe'
@@ -429,8 +439,11 @@ if (Test-Path -LiteralPath $gitShim) {
         Write-ErrorAndExit "Timeout waiting for $gitShim to be available. Please close any running git processes and try again."
     }
     Copy-Item -Force -Path $finalExe -Destination $gitShim
-    try { Unblock-File -Path $gitShim -ErrorAction SilentlyContinue } catch { }
+    if (-not $npmUpgrade) { try { Unblock-File -Path $gitShim -ErrorAction SilentlyContinue } catch { } }
 }
+
+# The detached upgrade wrapper owns the daemon restart.
+if ($npmUpgrade) { exit 0 }
 
 # Login user with install token if provided
 $needLogin = $false
@@ -452,7 +465,7 @@ try {
     & $finalExe install-hooks --env | Out-Host
     Write-Success 'Successfully set up IDE/agent hooks'
 } catch {
-    Write-Warning "Warning: Failed to set up IDE/agent hooks. Please try running 'git-ai install-hooks' manually."
+    Write-Warning "Warning: Failed to set up IDE/agent hooks. Please try running 'dcc-ai-tracking install-hooks' manually."
 }
 
 # Best-effort restart only for daemon-initiated self-updates.
@@ -475,10 +488,10 @@ if ($env:GIT_AI_SKIP_PATH_UPDATE -ne '1') {
     } catch { }
 }
 
-Write-Success "Successfully installed git-ai into $installDir"
-Write-Success "You can now run 'git-ai' from your terminal"
+Write-Success "Successfully installed dcc-ai-tracking into $installDir"
+Write-Success "You can now run 'dcc-ai-tracking' from your terminal"
 
-Write-Host 'Close and reopen your terminal and IDE sessions to use git-ai.' -ForegroundColor Yellow
+Write-Host 'Close and reopen your terminal and IDE sessions to use dcc-ai-tracking.' -ForegroundColor Yellow
 
 # If nonce exchange failed, run interactive login
 if ($needLogin) {

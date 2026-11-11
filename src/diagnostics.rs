@@ -1311,7 +1311,7 @@ fn trace2_config_failure_details(
         ));
     }
 
-    details.push("Common causes: `git-ai install-hooks` has not run, was run with `--dry-run`, or failed while writing global Git config.".to_string());
+    details.push("Common causes: `dcc-ai-tracking install-hooks` has not run, was run with `--dry-run`, or failed while writing global Git config.".to_string());
     details.push("Common causes: git-ai cannot edit the same global Git config Git reads because HOME/USERPROFILE/XDG_CONFIG_HOME/GIT_CONFIG_GLOBAL points somewhere different, the global config file or parent directory is read-only or locked, permissions or ownership are wrong, or the configured git and terminal git use different config locations.".to_string());
     details
 }
@@ -1383,11 +1383,13 @@ mod tests {
     #[cfg(windows)]
     fn stdout_stderr_sleep_command() -> (&'static str, Vec<&'static str>) {
         (
-            "powershell.exe",
+            "cmd.exe",
             vec![
-                "-NoProfile",
-                "-Command",
-                "[Console]::Out.Write('out'); [Console]::Error.Write('err'); Start-Sleep -Seconds 60",
+                "/D",
+                "/S",
+                "/C",
+                // Redirect the delay command so it cannot keep the output pipes open.
+                "echo out & echo err 1>&2 & ping.exe /n 10 127.0.0.1 >NUL 2>&1",
             ],
         )
     }
@@ -1453,8 +1455,8 @@ mod tests {
     #[test]
     fn test_run_logged_command_with_timeout_reports_partial_output() {
         let (program, args) = stdout_stderr_sleep_command();
-        let record =
-            run_logged_command_with_timeout(program, &args, None, Duration::from_millis(300));
+        let timeout = Duration::from_secs(3);
+        let record = run_logged_command_with_timeout(program, &args, None, timeout);
 
         assert!(record.timed_out, "{record:?}");
         assert_eq!(record.stdout, "out");

@@ -1,8 +1,11 @@
+pub(super) mod npm;
+
 use crate::api::client::ApiContext;
 use crate::config::{self, UpdateChannel};
 use crate::observability::log_message;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fs;
 use std::io::IsTerminal;
@@ -83,7 +86,13 @@ impl UpgradeAction {
 struct ChannelRelease {
     tag: String,
     semver: String,
-    checksum: String,
+    download: ReleaseDownload,
+}
+
+#[derive(Debug, Clone)]
+enum ReleaseDownload {
+    Legacy(String),
+    Npm(Box<npm::Release>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -100,16 +109,27 @@ impl UpdateCache {
             last_checked_at: 0,
             available_tag: None,
             available_semver: None,
-            channel: channel.as_str().to_string(),
+            channel: update_cache_channel(channel).to_string(),
         }
     }
 
-    fn update_available(&self) -> bool {
-        self.available_semver.is_some()
+    fn pending_version(&self) -> Option<&str> {
+        let current = version_for_source(env!("CARGO_PKG_VERSION"), self.channel == "npm:dcc");
+        self.available_semver
+            .as_deref()
+            .filter(|version| is_newer_version(version, &current))
     }
 
     fn matches_channel(&self, channel: UpdateChannel) -> bool {
-        self.channel == channel.as_str()
+        self.channel == update_cache_channel(channel)
+    }
+}
+
+fn update_cache_channel(channel: UpdateChannel) -> &'static str {
+    if npm::enabled() {
+        "npm:dcc"
+    } else {
+        channel.as_str()
     }
 }
 
@@ -156,7 +176,7 @@ fn exit_if_invoked_via_git_extension() {
         std::env::var(ENV_BACKGROUND_UPGRADE_WORKER).as_deref() == Ok("1"),
     ) {
         eprintln!(
-            "error: `git ai upgrade` is not supported on Windows. Run `git-ai upgrade` instead."
+            "error: `git ai upgrade` is not supported on Windows. Run `dcc-ai-tracking upgrade` instead."
         );
         std::process::exit(1);
     }
@@ -278,7 +298,31 @@ fn semver_from_tag(tag: &str) -> String {
         .trim()
         .trim_start_matches("enterprise-")
         .trim_start_matches('v');
-    trimmed.split(['-', '+']).next().unwrap_or("").to_string()
+    let (version, revision) = split_release_version(trimmed);
+    match revision {
+        Some(revision) => format!("{version}-dcc.{revision}"),
+        None => version.to_string(),
+    }
+}
+
+fn split_release_version(version: &str) -> (&str, Option<u32>) {
+    let version = version.split('+').next().unwrap_or_default();
+    let (base, suffix) = version.split_once('-').unwrap_or((version, ""));
+    let revision = suffix.strip_prefix("dcc.").and_then(|suffix| {
+        let revision = suffix
+            .split_once("-next-")
+            .map_or(suffix, |(revision, _)| revision);
+        revision.parse().ok()
+    });
+    (base, revision)
+}
+
+fn version_for_source(version: &str, npm: bool) -> Cow<'_, str> {
+    if npm {
+        Cow::Borrowed(version)
+    } else {
+        Cow::Owned(semver_from_tag(version))
+    }
 }
 
 fn determine_action(force: bool, release: &ChannelRelease, current_version: &str) -> UpgradeAction {
@@ -286,9 +330,13 @@ fn determine_action(force: bool, release: &ChannelRelease, current_version: &str
         return UpgradeAction::ForceReinstall;
     }
 
+    let current_version = version_for_source(
+        current_version,
+        matches!(release.download, ReleaseDownload::Npm(_)),
+    );
     if release.semver == current_version {
         UpgradeAction::AlreadyLatest
-    } else if is_newer_version(&release.semver, current_version) {
+    } else if is_newer_version(&release.semver, &current_version) {
         UpgradeAction::UpgradeAvailable
     } else {
         UpgradeAction::RunningNewerVersion
@@ -473,7 +521,7 @@ fn release_from_response(
     Ok(ChannelRelease {
         tag,
         semver,
-        checksum,
+        download: ReleaseDownload::Legacy(checksum),
     })
 }
 
@@ -487,7 +535,90 @@ fn try_mock_releases(base: &str, channel: UpdateChannel) -> Option<Result<Channe
     )
 }
 
-fn run_install_script(script_content: &str, tag: &str, silent: bool) -> Result<(), String> {
+fn fetch_update_release(
+    api_base_url: &str,
+    channel: UpdateChannel,
+) -> Result<ChannelRelease, String> {
+    if npm::enabled() {
+        npm::standalone_home()?;
+        let release = npm::fetch()?;
+        let version = release.version().to_string();
+        Ok(ChannelRelease {
+            tag: version.clone(),
+            semver: version,
+            download: ReleaseDownload::Npm(Box::new(release)),
+        })
+    } else {
+        fetch_release_for_channel(api_base_url, channel)
+    }
+}
+
+#[cfg(not(windows))]
+pub(crate) fn npm_installed_executable() -> Option<PathBuf> {
+    if npm::enabled() {
+        npm::standalone_executable().ok()
+    } else {
+        None
+    }
+}
+
+fn install_release(
+    api_base_url: &str,
+    channel: UpdateChannel,
+    release: &ChannelRelease,
+    silent: bool,
+) -> Result<(), String> {
+    match &release.download {
+        ReleaseDownload::Legacy(checksum) => {
+            let checksums = fetch_and_verify_checksums(api_base_url, channel.as_str(), checksum)?;
+            let script =
+                fetch_and_verify_install_script(api_base_url, channel.as_str(), &checksums)?;
+            run_install_script(&script, &release.tag, silent, None)
+        }
+        ReleaseDownload::Npm(package) => {
+            #[cfg(not(windows))]
+            let installed_exe = npm::standalone_executable()?;
+            let staged = npm::stage(package)?;
+            run_install_script(&staged.script, &release.tag, silent, Some(&staged))?;
+
+            // PowerShell owns the staged payload until the detached installer exits.
+            #[cfg(windows)]
+            {
+                let _ = staged.directory.keep();
+            }
+
+            // The daemon update path already restarts in handle_run. Manual Unix
+            // updates used to restart via install-hooks, which npm updates skip.
+            #[cfg(not(windows))]
+            if !silent {
+                let config = crate::daemon::DaemonConfig::from_env_or_default_paths()
+                    .map_err(|error| error.to_string())?;
+                crate::commands::daemon::restart_daemon_after_install(&config, &installed_exe)?;
+            }
+            Ok(())
+        }
+    }
+}
+
+fn configure_install_command(cmd: &mut Command, staged: Option<&npm::Staged>) {
+    cmd.env_remove("GIT_AI_NPM_UPGRADE")
+        .env_remove("GIT_AI_NPM_STAGE");
+    if let Some(staged) = staged {
+        cmd.env("GIT_AI_NPM_UPGRADE", "1")
+            .env("GIT_AI_LOCAL_BINARY", staged.binary())
+            .stdin(Stdio::null());
+        #[cfg(windows)]
+        cmd.env("GIT_AI_NPM_STAGE", staged.directory.path())
+            .env(GIT_AI_RESTART_DAEMON_AFTER_INSTALL_ENV, "1");
+    }
+}
+
+fn run_install_script(
+    script_content: &str,
+    tag: &str,
+    silent: bool,
+    staged: Option<&npm::Staged>,
+) -> Result<(), String> {
     #[cfg(windows)]
     {
         if let Ok(daemon_config) = crate::daemon::DaemonConfig::from_env_or_default_paths() {
@@ -511,13 +642,13 @@ fn run_install_script(script_content: &str, tag: &str, silent: bool) -> Result<(
             .map_err(|e| format!("Failed to create log directory: {}", e))?;
 
         let log_file = log_dir.join(format!("upgrade-{}.log", pid));
-        let log_path_str = log_file.to_string_lossy().to_string();
+        let log_path_str = log_file.to_string_lossy().replace("'", "''");
 
         // Write the install script to a temp file
         let script_path = log_dir.join(format!("install-{}.ps1", pid));
         fs::write(&script_path, script_content)
             .map_err(|e| format!("Failed to write install script: {}", e))?;
-        let script_path_str = script_path.to_string_lossy().to_string();
+        let script_path_str = script_path.to_string_lossy().replace("'", "''");
 
         // Create log file with initial message
         fs::write(&log_file, format!("Starting upgrade at PID {}\n", pid))
@@ -531,17 +662,19 @@ fn run_install_script(script_content: &str, tag: &str, silent: bool) -> Result<(
              try {{ \
                   $ErrorActionPreference = 'Continue'; \
                   & '{}'; \
+                  if ($env:GIT_AI_NPM_UPGRADE -eq '1' -and $LASTEXITCODE -ne 0) {{ throw 'npm upgrade failed' }}; \
                   Write-Host 'Install script completed'; \
               }} catch {{ \
                   Write-Host \"Error: $_\"; \
                   Write-Host \"Stack trace: $($_.ScriptStackTrace)\"; \
               }} finally {{ \
                   if ($env:{} -eq '1') {{ \
-                      $daemonExe = Join-Path $HOME '.dcc-ai-tracking\\bin\\git-ai.exe'; \
+                      $daemonExe = Join-Path $HOME '.dcc-ai-tracking\\bin\\dcc-ai-tracking.exe'; \
                       if (Test-Path $daemonExe) {{ try {{ & $daemonExe bg start *> $null }} catch {{ }} }} \
                   }}; \
                   Stop-Transcript | Out-Null; \
-                  Remove-Item -Path '{}' -Force -ErrorAction SilentlyContinue; \
+                  Remove-Item -LiteralPath '{}' -Force -ErrorAction SilentlyContinue; \
+                  if ($env:GIT_AI_NPM_STAGE) {{ Remove-Item -LiteralPath $env:GIT_AI_NPM_STAGE -Recurse -Force -ErrorAction SilentlyContinue }}; \
               }}",
             log_path_str, script_path_str, GIT_AI_RESTART_DAEMON_AFTER_INSTALL_ENV, script_path_str
         );
@@ -554,6 +687,7 @@ fn run_install_script(script_content: &str, tag: &str, silent: bool) -> Result<(
                 .arg("-Command")
                 .arg(&ps_wrapper)
                 .env(GIT_AI_RELEASE_ENV, tag);
+            configure_install_command(&mut cmd, staged);
 
             // Hide the spawned console to prevent any host/UI bleed-through
             cmd.creation_flags(CREATE_NO_WINDOW);
@@ -617,6 +751,7 @@ fn run_install_script(script_content: &str, tag: &str, silent: bool) -> Result<(
 
         let mut cmd = Command::new("bash");
         cmd.arg(&script_path_str).env(GIT_AI_RELEASE_ENV, tag);
+        configure_install_command(&mut cmd, staged);
 
         if silent {
             cmd.env(GIT_AI_DAEMON_UPGRADE_ENV, "1");
@@ -657,7 +792,7 @@ pub fn run_with_args(args: &[String]) {
             "--background" => background = true, // Undocumented flag for internal use when spawning background process
             _ => {
                 eprintln!("Unknown argument: {}", arg);
-                eprintln!("Usage: git-ai upgrade [--force]");
+                eprintln!("Usage: dcc-ai-tracking upgrade [--force]");
                 std::process::exit(1);
             }
         }
@@ -669,7 +804,7 @@ pub fn run_with_args(args: &[String]) {
 fn run_impl(force: bool, background: bool) {
     let config = config::Config::fresh();
     let channel = config.update_channel();
-    let skip_install = background && config.auto_updates_disabled();
+    let skip_install = background && (config.auto_updates_disabled() || npm::enabled());
     let _ = run_impl_with_url(force, config.api_base_url(), channel, skip_install);
 }
 
@@ -681,9 +816,12 @@ fn run_impl_with_url(
 ) -> UpgradeAction {
     let current_version = env!("CARGO_PKG_VERSION");
 
-    println!("Checking for updates (channel: {})...", channel.as_str());
+    println!(
+        "Checking for updates (channel: {})...",
+        update_cache_channel(channel)
+    );
 
-    let release = match fetch_release_for_channel(api_base_url, channel) {
+    let release = match fetch_update_release(api_base_url, channel) {
         Ok(release) => release,
         Err(err) => {
             eprintln!("{}", err);
@@ -694,7 +832,7 @@ fn run_impl_with_url(
     println!("Current version: v{}", current_version);
     println!(
         "Available {} version: v{} (tag {})",
-        channel.as_str(),
+        update_cache_channel(channel),
         release.semver,
         release.tag
     );
@@ -720,7 +858,7 @@ fn run_impl_with_url(
             println!("You are already on the latest version!");
             println!();
             println!("To reinstall anyway, run:");
-            println!("  \x1b[1;36mgit-ai upgrade --force\x1b[0m");
+            println!("  \x1b[1;36mdcc-ai-tracking upgrade --force\x1b[0m");
             return action;
         }
         UpgradeAction::RunningNewerVersion => {
@@ -728,7 +866,7 @@ fn run_impl_with_url(
             println!("(This usually means you're running a development build)");
             println!();
             println!("To reinstall the selected release anyway, run:");
-            println!("  \x1b[1;36mgit-ai upgrade --force\x1b[0m");
+            println!("  \x1b[1;36mdcc-ai-tracking upgrade --force\x1b[0m");
             return action;
         }
         UpgradeAction::ForceReinstall => {
@@ -747,42 +885,8 @@ fn run_impl_with_url(
         return action;
     }
 
-    println!("Fetching and verifying release artifacts...");
-
-    // Fetch and verify SHA256SUMS against the release's master checksum
-    let checksums =
-        match fetch_and_verify_checksums(api_base_url, channel.as_str(), &release.checksum) {
-            Ok(checksums) => {
-                println!("\x1b[1;32m✓\x1b[0m SHA256SUMS verified");
-                checksums
-            }
-            Err(err) => {
-                eprintln!("Failed to fetch/verify checksums: {}", err);
-                std::process::exit(1);
-            }
-        };
-
-    // Fetch and verify the install script
-    let script_content =
-        match fetch_and_verify_install_script(api_base_url, channel.as_str(), &checksums) {
-            Ok(content) => {
-                #[cfg(windows)]
-                println!("\x1b[1;32m✓\x1b[0m install.ps1 verified");
-                #[cfg(not(windows))]
-                println!("\x1b[1;32m✓\x1b[0m install.sh verified");
-                content
-            }
-            Err(err) => {
-                eprintln!("Failed to fetch/verify install script: {}", err);
-                std::process::exit(1);
-            }
-        };
-
-    println!();
-    println!("Running installation script...");
-    println!();
-
-    match run_install_script(&script_content, &release.tag, false) {
+    println!("Fetching, verifying and installing release artifacts...");
+    match install_release(api_base_url, channel, &release, false) {
         Ok(()) => {
             // On Windows, we spawn the installer in the background and can't verify success
             #[cfg(not(windows))]
@@ -836,14 +940,15 @@ fn print_cached_notice(cache: &UpdateCache) {
         current_version, available_version
     );
     eprintln!(
-        "\x1b[1;33mRun \x1b[1;36mgit-ai upgrade\x1b[0m \x1b[1;33mto upgrade to the latest version.\x1b[0m"
+        "\x1b[1;33mRun \x1b[1;36mdcc-ai-tracking upgrade\x1b[0m \x1b[1;33mto upgrade to the latest version.\x1b[0m"
     );
     eprintln!();
 }
 
 pub fn maybe_schedule_background_update_check() {
     let config = config::Config::get();
-    if config.version_checks_disabled() {
+    // The daemon owns automatic npm installs. CLI invocations should not race it.
+    if config.version_checks_disabled() || npm::enabled() {
         return;
     }
 
@@ -853,7 +958,7 @@ pub fn maybe_schedule_background_update_check() {
     if config.auto_updates_disabled()
         && let Some(cache) = cache.as_ref()
         && cache.matches_channel(channel)
-        && cache.update_available()
+        && cache.pending_version().is_some()
     {
         print_cached_notice(cache);
     }
@@ -903,7 +1008,10 @@ pub enum DaemonUpdateCheckResult {
 /// no pending update was found or updates are disabled.
 pub fn check_and_install_update_if_available() -> Result<DaemonUpdateCheckResult, String> {
     let config = config::Config::fresh();
-    if config.version_checks_disabled() || config.auto_updates_disabled() {
+    if config.version_checks_disabled()
+        || config.auto_updates_disabled()
+        || (npm::enabled() && npm::standalone_home().is_err())
+    {
         return Ok(DaemonUpdateCheckResult::NoUpdate);
     }
 
@@ -915,17 +1023,14 @@ pub fn check_and_install_update_if_available() -> Result<DaemonUpdateCheckResult
     // hourly check loop already confirmed an update is available and
     // persisted that fact — re-checking the 24h guard would always say
     // "too soon" and the install would never run.
-    let cache = read_update_cache();
-    let has_pending_update = cache
-        .as_ref()
-        .is_some_and(|c| c.matches_channel(channel) && c.update_available());
-
-    if !has_pending_update {
+    if !read_update_cache()
+        .is_some_and(|cache| cache.matches_channel(channel) && cache.pending_version().is_some())
+    {
         return Ok(DaemonUpdateCheckResult::NoUpdate);
     }
 
-    // Re-fetch the release to get the tag needed for the installer.
-    let release = fetch_release_for_channel(api_base_url, channel)?;
+    // Resolve the channel again in case the publisher moved its tag since the check.
+    let release = fetch_update_release(api_base_url, channel)?;
     let current_version = env!("CARGO_PKG_VERSION");
     let action = determine_action(false, &release, current_version);
 
@@ -946,13 +1051,11 @@ pub fn check_and_install_update_if_available() -> Result<DaemonUpdateCheckResult
         })),
     );
 
-    // Fetch, verify, and run the install script silently.
-    let checksums = fetch_and_verify_checksums(api_base_url, channel.as_str(), &release.checksum)?;
-    let script_content =
-        fetch_and_verify_install_script(api_base_url, channel.as_str(), &checksums)?;
-    run_install_script(&script_content, &release.tag, true)?;
-
-    // Clear the cached update now that we've installed it.
+    if npm::enabled() {
+        // A newly started daemon must not inherit the old pending installation.
+        persist_update_state(channel, None);
+    }
+    install_release(api_base_url, channel, &release, true)?;
     persist_update_state(channel, None);
 
     log_message(
@@ -976,7 +1079,7 @@ pub fn check_and_install_update_if_available() -> Result<DaemonUpdateCheckResult
 /// the channel has a newer version than the running binary.
 pub fn check_for_update_available() -> Result<DaemonUpdateCheckResult, String> {
     let config = config::Config::fresh();
-    if config.version_checks_disabled() {
+    if config.version_checks_disabled() || (npm::enabled() && npm::standalone_home().is_err()) {
         return Ok(DaemonUpdateCheckResult::NoUpdate);
     }
 
@@ -988,7 +1091,7 @@ pub fn check_for_update_available() -> Result<DaemonUpdateCheckResult, String> {
         // Even if it's not time to re-check, an earlier check may have found an update.
         if let Some(ref c) = cache
             && c.matches_channel(channel)
-            && c.update_available()
+            && c.pending_version().is_some()
             && !config.auto_updates_disabled()
         {
             return Ok(DaemonUpdateCheckResult::UpdateReady);
@@ -996,7 +1099,7 @@ pub fn check_for_update_available() -> Result<DaemonUpdateCheckResult, String> {
         return Ok(DaemonUpdateCheckResult::NoUpdate);
     }
 
-    let release = fetch_release_for_channel(api_base_url, channel)?;
+    let release = fetch_update_release(api_base_url, channel)?;
     let current_version = env!("CARGO_PKG_VERSION");
     let action = determine_action(false, &release, current_version);
     let cache_release = matches!(action, UpgradeAction::UpgradeAvailable);
@@ -1021,9 +1124,18 @@ pub fn check_for_update_available() -> Result<DaemonUpdateCheckResult, String> {
 }
 
 fn is_newer_version(latest: &str, current: &str) -> bool {
+    if let (Ok(latest), Ok(current)) = (
+        semver::Version::parse(latest),
+        semver::Version::parse(current),
+    ) {
+        return latest.cmp_precedence(&current).is_gt();
+    }
+    // Preserve the legacy release parser's handling of short and four-part versions.
     let parse_version =
         |v: &str| -> Vec<u32> { v.split('.').filter_map(|s| s.parse::<u32>().ok()).collect() };
 
+    let (latest, latest_revision) = split_release_version(latest);
+    let (current, current_revision) = split_release_version(current);
     let latest_parts = parse_version(latest);
     let current_parts = parse_version(current);
 
@@ -1038,7 +1150,11 @@ fn is_newer_version(latest: &str, current: &str) -> bool {
         }
     }
 
-    false
+    match (latest_revision, current_revision) {
+        (Some(latest), Some(current)) => latest > current,
+        (None, Some(_)) => true,
+        _ => false,
+    }
 }
 
 #[cfg(test)]
@@ -1116,6 +1232,27 @@ mod tests {
         assert_eq!(semver_from_tag("v1.2.3-next-abc"), "1.2.3");
         assert_eq!(semver_from_tag("enterprise-v1.2.3"), "1.2.3");
         assert_eq!(semver_from_tag("enterprise-v1.2.3-next-abc"), "1.2.3");
+    }
+
+    #[test]
+    fn test_upgrade_action_compares_dcc_release_revisions() {
+        for (tag, expected) in [
+            ("enterprise-v1.7.7-dcc.9", UpgradeAction::AlreadyLatest),
+            (
+                "enterprise-v1.7.7-dcc.10-next-deadbeef",
+                UpgradeAction::UpgradeAvailable,
+            ),
+            (
+                "enterprise-v1.7.7-dcc.8",
+                UpgradeAction::RunningNewerVersion,
+            ),
+        ] {
+            let url = format!(
+                r#"mock://{{"channels":{{"enterprise-next":{{"version":"{tag}","checksum":"abc"}}}}}}"#
+            );
+            let release = fetch_release_for_channel(&url, UpdateChannel::EnterpriseNext).unwrap();
+            assert_eq!(determine_action(false, &release, "1.7.7-dcc.9"), expected);
+        }
     }
 
     #[test]
@@ -1330,18 +1467,18 @@ mod tests {
 
     #[test]
     fn test_parse_checksums_valid_format() {
-        let content = "594de6cf107e8ffb6efd9029bf727b465ab55a9b4c4c3995eb3e628c857dc423  git-ai-linux-arm64\n\
-                       88db3c0c7fc62a815579ec0ca42535c2b83ab18d9e3af8efe345dee96677b1d8  git-ai-linux-x64\n\
+        let content = "594de6cf107e8ffb6efd9029bf727b465ab55a9b4c4c3995eb3e628c857dc423  dcc-ai-tracking-linux-arm64\n\
+                       88db3c0c7fc62a815579ec0ca42535c2b83ab18d9e3af8efe345dee96677b1d8  dcc-ai-tracking-linux-x64\n\
                        75d1692d347c3e08a208dc6373df4cee2b5ffd0e2aee62ccb1bb47aae866b2c8  install.sh";
 
         let checksums = parse_checksums(content);
         assert_eq!(checksums.len(), 3);
         assert_eq!(
-            checksums.get("git-ai-linux-arm64"),
+            checksums.get("dcc-ai-tracking-linux-arm64"),
             Some(&"594de6cf107e8ffb6efd9029bf727b465ab55a9b4c4c3995eb3e628c857dc423".to_string())
         );
         assert_eq!(
-            checksums.get("git-ai-linux-x64"),
+            checksums.get("dcc-ai-tracking-linux-x64"),
             Some(&"88db3c0c7fc62a815579ec0ca42535c2b83ab18d9e3af8efe345dee96677b1d8".to_string())
         );
         assert_eq!(
@@ -1352,12 +1489,12 @@ mod tests {
 
     #[test]
     fn test_parse_checksums_with_extensions() {
-        let content = "23c693a25f4f2e99463c911e67d534ae17cbd9b98513aa65f0ae9da861775d54  git-ai-windows-x64.exe\n\
+        let content = "23c693a25f4f2e99463c911e67d534ae17cbd9b98513aa65f0ae9da861775d54  dcc-ai-tracking-windows-x64.exe\n\
                        f895af791eb30f6b074b2ab9f0f803e91230b084f5864befcb51ee9ced752adf  install.ps1";
 
         let checksums = parse_checksums(content);
         assert_eq!(checksums.len(), 2);
-        assert!(checksums.contains_key("git-ai-windows-x64.exe"));
+        assert!(checksums.contains_key("dcc-ai-tracking-windows-x64.exe"));
         assert!(checksums.contains_key("install.ps1"));
     }
 
@@ -1389,22 +1526,44 @@ mod tests {
     // --- Additional comprehensive tests ---
 
     #[test]
+    fn npm_versions_compare_patch_before_prerelease() {
+        assert!(is_newer_version("1.7.8-dcc.1", "1.7.7-dcc.10"));
+        assert!(is_newer_version("1.7.7-dcc.10", "1.7.7-dcc.9"));
+        assert!(!is_newer_version("1.7.7-dcc.4", "1.7.7-dcc.4"));
+    }
+
+    #[test]
+    #[serial]
+    fn daemon_does_not_restart_for_a_cached_version_already_installed() {
+        with_update_check_env(true, false, || {
+            let mut cache = read_update_cache().unwrap();
+            cache.available_tag = Some(env!("CARGO_PKG_VERSION").into());
+            cache.available_semver = cache.available_tag.clone();
+            write_update_cache(&cache);
+            assert_eq!(
+                check_for_update_available().unwrap(),
+                DaemonUpdateCheckResult::NoUpdate
+            );
+        });
+    }
+
+    #[test]
     fn test_update_cache_new() {
         let cache = UpdateCache::new(UpdateChannel::Latest);
         assert_eq!(cache.last_checked_at, 0);
         assert!(cache.available_tag.is_none());
         assert!(cache.available_semver.is_none());
         assert_eq!(cache.channel, "latest");
-        assert!(!cache.update_available());
+        assert!(cache.pending_version().is_none());
         assert!(cache.matches_channel(UpdateChannel::Latest));
         assert!(!cache.matches_channel(UpdateChannel::Next));
     }
 
     #[test]
-    fn test_update_cache_update_available() {
+    fn test_update_cache_has_pending_version() {
         let mut cache = UpdateCache::new(UpdateChannel::Latest);
         cache.available_semver = Some("2.0.0".to_string());
-        assert!(cache.update_available());
+        assert!(cache.pending_version().is_some());
     }
 
     #[test]
@@ -1420,7 +1579,7 @@ mod tests {
         let release = ChannelRelease {
             tag: "v1.0.0".to_string(),
             semver: "1.0.0".to_string(),
-            checksum: "abc".to_string(),
+            download: ReleaseDownload::Legacy("abc".to_string()),
         };
         let action = determine_action(true, &release, "1.0.0");
         assert_eq!(action, UpgradeAction::ForceReinstall);
@@ -1431,7 +1590,7 @@ mod tests {
         let release = ChannelRelease {
             tag: "v1.0.0".to_string(),
             semver: "1.0.0".to_string(),
-            checksum: "abc".to_string(),
+            download: ReleaseDownload::Legacy("abc".to_string()),
         };
         let action = determine_action(false, &release, "1.0.0");
         assert_eq!(action, UpgradeAction::AlreadyLatest);
@@ -1442,7 +1601,7 @@ mod tests {
         let release = ChannelRelease {
             tag: "v2.0.0".to_string(),
             semver: "2.0.0".to_string(),
-            checksum: "abc".to_string(),
+            download: ReleaseDownload::Legacy("abc".to_string()),
         };
         let action = determine_action(false, &release, "1.0.0");
         assert_eq!(action, UpgradeAction::UpgradeAvailable);
@@ -1453,7 +1612,7 @@ mod tests {
         let release = ChannelRelease {
             tag: "v1.0.0".to_string(),
             semver: "1.0.0".to_string(),
-            checksum: "abc".to_string(),
+            download: ReleaseDownload::Legacy("abc".to_string()),
         };
         let action = determine_action(false, &release, "2.0.0");
         assert_eq!(action, UpgradeAction::RunningNewerVersion);
@@ -1618,7 +1777,9 @@ mod tests {
         let release = result.unwrap();
         assert_eq!(release.tag, "v1.2.3");
         assert_eq!(release.semver, "1.2.3");
-        assert_eq!(release.checksum, "abc123def456");
+        assert!(
+            matches!(release.download, ReleaseDownload::Legacy(checksum) if checksum == "abc123def456")
+        );
     }
 
     #[test]
@@ -1676,7 +1837,7 @@ mod tests {
         let release = ChannelRelease {
             tag: "v1.5.0".to_string(),
             semver: "1.5.0".to_string(),
-            checksum: "test".to_string(),
+            download: ReleaseDownload::Legacy("test".to_string()),
         };
 
         // Manually construct what persist_update_state would create
@@ -1748,7 +1909,7 @@ mod tests {
         // Persist and verify the cache reflects the available update.
         persist_update_state(UpdateChannel::Latest, Some(&release));
         let cache = read_update_cache().unwrap();
-        assert!(cache.update_available());
+        assert!(cache.pending_version().is_some());
         assert_eq!(cache.available_semver.as_deref(), Some("999.0.0"));
 
         clear_test_cache_dir();
@@ -1773,7 +1934,7 @@ mod tests {
         let mut cache = UpdateCache::new(UpdateChannel::Latest);
         cache.last_checked_at = current_timestamp();
         // No available_tag/semver set — mirrors what persist_update_state(channel, None) does.
-        assert!(!cache.update_available());
+        assert!(cache.pending_version().is_none());
     }
 
     #[test]

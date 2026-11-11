@@ -1,8 +1,12 @@
 import { execFile } from "child_process";
+import { accessSync, constants, statSync } from "node:fs";
 import * as os from "os";
+import * as path from "node:path";
 import * as vscode from "vscode";
 
+const binaryName = "dcc-ai-tracking";
 let resolvedPath: string | null = null;
+let processBinaryPath: string | undefined;
 let resolvePromise: Promise<string | null> | null = null;
 let extensionMode: vscode.ExtensionMode | null = null;
 
@@ -14,14 +18,12 @@ export function initBinaryResolver(mode: vscode.ExtensionMode): void {
 }
 
 /**
- * Resolve the full path to the `git-ai` binary using a login shell.
- * Only runs in development mode — in production the plain "git-ai" name
- * is used directly (relies on the process PATH).
+ * Use a login shell in development, where the extension host can have a
+ * stripped PATH.
  *
  * The result is cached after the first successful resolution.
  */
 export function resolveGitAiBinary(): Promise<string | null> {
-  // Skip shell resolution in production — just use "git-ai"
   if (extensionMode !== vscode.ExtensionMode.Development) {
     return Promise.resolve(null);
   }
@@ -37,8 +39,7 @@ export function resolveGitAiBinary(): Promise<string | null> {
     const platform = os.platform();
 
     if (platform === "win32") {
-      // Windows: use `where git-ai`
-      execFile("where", ["git-ai"], (err, stdout) => {
+      execFile("where.exe", [binaryName], (err, stdout) => {
         if (err || !stdout.trim()) {
           console.log("[git-ai] Could not resolve git-ai binary via 'where'");
           resolve(null);
@@ -52,7 +53,7 @@ export function resolveGitAiBinary(): Promise<string | null> {
     } else {
       // macOS/Linux: spawn a login shell so the user's profile is sourced
       const shell = process.env.SHELL || "/bin/bash";
-      execFile(shell, ["-ilc", "which git-ai"], { timeout: 5000 }, (err, stdout) => {
+      execFile(shell, ["-ilc", `command -v ${binaryName}`], { timeout: 5000 }, (err, stdout) => {
         if (err || !stdout.trim()) {
           console.log("[git-ai] Could not resolve git-ai binary via login shell");
           resolve(null);
@@ -68,10 +69,25 @@ export function resolveGitAiBinary(): Promise<string | null> {
   return resolvePromise;
 }
 
-/**
- * Get the resolved git-ai binary path, or fall back to just "git-ai"
- * (which relies on the current process PATH).
- */
+function findProcessBinary(): string | undefined {
+  const suffix = os.platform() === "win32" ? ".exe" : "";
+  const directories = [
+    path.join(os.homedir(), ".dcc-ai-tracking", "bin"),
+    ...(process.env.PATH ?? "").split(path.delimiter).filter(path.isAbsolute),
+  ];
+  for (const directory of directories) {
+    const candidate = path.join(directory, binaryName + suffix);
+    try {
+      if (statSync(candidate).isFile()) {
+        accessSync(candidate, constants.X_OK);
+        return candidate;
+      }
+    } catch {
+      // Try the next installation or PATH entry.
+    }
+  }
+}
+
 export function getGitAiBinary(): string {
-  return resolvedPath || "git-ai";
+  return resolvedPath ?? (processBinaryPath ??= findProcessBinary()) ?? binaryName;
 }

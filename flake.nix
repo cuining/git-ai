@@ -33,7 +33,7 @@
           rustc = rustToolchain;
         };
 
-        # Build the git-ai binary using the pinned Rust toolchain
+        # Build the dcc-ai-tracking binary using the pinned Rust toolchain
         git-ai-unwrapped = rustPlatform.buildRustPackage {
           pname = "git-ai";
           version = "1.7.7";
@@ -75,13 +75,13 @@
             homepage = "https://github.com/acunniffe/git-ai";
             license = licenses.gpl3Plus;
             maintainers = [ ];
-            mainProgram = "git-ai";
+            mainProgram = "dcc-ai-tracking";
             platforms = platforms.unix;
           };
         };
 
         # Wrapped version that sets up the git-ai environment properly
-        git-ai-wrapped = pkgs.writeShellScriptBin "git-ai" ''
+        git-ai-wrapped = pkgs.writeShellScriptBin "dcc-ai-tracking" ''
           # Ensure config directory exists
           mkdir -p "$HOME/.dcc-ai-tracking"
 
@@ -96,8 +96,7 @@
           EOF
           fi
 
-          # Execute git-ai with all arguments
-          exec ${git-ai-unwrapped}/bin/git-ai "$@"
+          exec ${git-ai-unwrapped}/bin/dcc-ai-tracking "$@"
         '';
 
         # Wrapper for git command that preserves argv[0] as "git"
@@ -118,9 +117,9 @@
           EOF
           fi
 
-          # Execute git-ai with argv[0] set to "git" to trigger passthrough mode
+          # Execute dcc-ai-tracking with argv[0] set to "git" to trigger passthrough mode
           # The -a flag ensures argv[0] is "git" regardless of the actual binary path
-          exec -a git ${git-ai-unwrapped}/bin/git-ai "$@"
+          exec -a git ${git-ai-unwrapped}/bin/dcc-ai-tracking "$@"
         '';
 
         # Create git-og wrapper that bypasses git-ai and calls real git directly
@@ -175,8 +174,8 @@
 
             # Runtime dependencies for testing
             # NOTE: git is NOT included as a package here. Instead, the
-            # shellHook creates wrapper scripts (git, git-ai, git-og) that
-            # point to the locally-built target/debug/git-ai binary, so that
+            # shellHook creates wrapper scripts (git, dcc-ai-tracking, git-og) that
+            # point to the locally-built target/debug/dcc-ai-tracking binary, so that
             # development builds are tested directly. Use `git-og` to bypass
             # git-ai and call real git.
             sqlite
@@ -203,7 +202,7 @@
             BUILD_TYPE="''${GIT_AI_BUILD_TYPE:-debug}"
             GITWRAP_DIR="$HOME/.git-ai-local-dev/gitwrap/bin"
             TARGET_DIR="''${CARGO_TARGET_DIR:-$(pwd)/target}"
-            BINARY="$TARGET_DIR/$BUILD_TYPE/git-ai"
+            BINARY="$TARGET_DIR/$BUILD_TYPE/dcc-ai-tracking"
 
             mkdir -p "$GITWRAP_DIR"
 
@@ -211,7 +210,7 @@
             cat > "$GITWRAP_DIR/git" <<GITEOF
 #!/bin/bash
 if [ ! -x "$BINARY" ]; then
-  echo "git-ai: dev binary not found at $BINARY" >&2
+  echo "dcc-ai-tracking: dev binary not found at $BINARY" >&2
   echo "Run 'cargo build' first, then retry." >&2
   exit 1
 fi
@@ -219,17 +218,17 @@ exec -a git "$BINARY" "\$@"
 GITEOF
             chmod +x "$GITWRAP_DIR/git"
 
-            # Create git-ai wrapper
-            cat > "$GITWRAP_DIR/git-ai" <<GITAIEOF
+            # Create dcc-ai-tracking wrapper
+            cat > "$GITWRAP_DIR/dcc-ai-tracking" <<GITAIEOF
 #!/bin/bash
 if [ ! -x "$BINARY" ]; then
-  echo "git-ai: dev binary not found at $BINARY" >&2
+  echo "dcc-ai-tracking: dev binary not found at $BINARY" >&2
   echo "Run 'cargo build' first, then retry." >&2
   exit 1
 fi
 exec "$BINARY" "\$@"
 GITAIEOF
-            chmod +x "$GITWRAP_DIR/git-ai"
+            chmod +x "$GITWRAP_DIR/dcc-ai-tracking"
 
             # Create git-og wrapper (bypasses git-ai, calls real git directly)
             cat > "$GITWRAP_DIR/git-og" <<GITOGEOF
@@ -242,7 +241,7 @@ GITOGEOF
 
             # Install hooks if binary is already built
             if [ -x "$BINARY" ]; then
-              "$GITWRAP_DIR/git-ai" install-hooks 2>/dev/null || true
+              "$GITWRAP_DIR/dcc-ai-tracking" install-hooks 2>/dev/null || true
             fi
 
             # Install lefthook git hooks (use real git, not the git-ai wrapper,
@@ -265,14 +264,14 @@ GITOGEOF
               echo "Run 'cargo build' to build, then hooks will be installed on next 'nix develop'."
             fi
             echo ""
-            echo "git, git-ai, git-og -> wrappers in $GITWRAP_DIR"
+            echo "git, dcc-ai-tracking, git-og -> wrappers in $GITWRAP_DIR"
             echo "Set GIT_AI_BUILD_TYPE=release for release builds."
           '';
         };
 
         # Main packages
         packages = {
-          # Unwrapped binary (just the git-ai executable)
+          # Unwrapped binary (just the dcc-ai-tracking executable)
           unwrapped = git-ai-unwrapped;
 
           # Wrapped version with helper scripts
@@ -291,7 +290,7 @@ GITOGEOF
         # Make app available for `nix run`
         apps.default = flake-utils.lib.mkApp {
           drv = git-ai-package;
-          exePath = "/bin/git-ai";
+          exePath = "/bin/dcc-ai-tracking";
         };
 
         # Nix flake checks: run with `nix flake check`
@@ -417,7 +416,7 @@ GITOGEOF
               type = types.bool;
               default = true;
               description = ''
-                Whether to run 'git-ai install-hooks' on system activation.
+                Whether to run 'dcc-ai-tracking install-hooks' on system activation.
                 This sets up IDE and agent integration hooks.
               '';
             };
@@ -702,9 +701,9 @@ GITOGEOF
 
                     # Install hooks (run as user if possible)
                     if command -v sudo >/dev/null 2>&1 && [ "$user" != "root" ]; then
-                      sudo -u "$user" ${cfg.package}/bin/git-ai install-hooks 2>/dev/null || true
+                      sudo -u "$user" ${cfg.package}/bin/dcc-ai-tracking install-hooks 2>/dev/null || true
                     else
-                      ${cfg.package}/bin/git-ai install-hooks 2>/dev/null || true
+                      ${cfg.package}/bin/dcc-ai-tracking install-hooks 2>/dev/null || true
                     fi
                   fi
                 done
@@ -769,7 +768,7 @@ GITOGEOF
               type = types.bool;
               default = true;
               description = ''
-                Whether to run 'git-ai install-hooks' on activation.
+                Whether to run 'dcc-ai-tracking install-hooks' on activation.
                 This sets up IDE and agent integration hooks.
               '';
             };
@@ -1042,7 +1041,7 @@ GITOGEOF
             # Run install-hooks on activation
             home.activation.git-ai-install-hooks = mkIf cfg.installHooks (
               lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-                $DRY_RUN_CMD ${cfg.package}/bin/git-ai install-hooks || true
+                $DRY_RUN_CMD ${cfg.package}/bin/dcc-ai-tracking install-hooks || true
               ''
             );
           };

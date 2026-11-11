@@ -1,4 +1,4 @@
-# Register a per-user Scheduled Task that runs `git-ai bg start` when the user
+# Register a per-user Scheduled Task that runs `dcc-ai-tracking bg start` when the user
 # logs on, so the Git AI background service is up before the first git command.
 #
 # Usage (run as the user, NOT elevated):
@@ -17,7 +17,7 @@ $TaskPath = '\GitAI\'
 $TaskName = 'Start bg at logon'
 $LauncherDir = Join-Path $HOME '.dcc-ai-tracking\login'
 $LauncherPath = Join-Path $LauncherDir 'start-bg.ps1'
-$DefaultBin = Join-Path $HOME '.dcc-ai-tracking\bin\git-ai.exe'
+$DefaultBin = Join-Path $HOME '.dcc-ai-tracking\bin\dcc-ai-tracking.exe'
 
 $Mode = 'install'
 $Start = $true
@@ -36,7 +36,7 @@ Usage:
   install-login-start.ps1 --uninstall
 
 Registers a per-user Scheduled Task (\GitAI\Start bg at logon) that runs
-`git-ai bg start` at logon. Run as the user, not from an elevated shell.
+`dcc-ai-tracking bg start` at logon. Run as the user, not from an elevated shell.
 '@
 }
 

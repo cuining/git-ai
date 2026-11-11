@@ -29,7 +29,9 @@ impl CursorInstaller {
 
     fn is_cursor_checkpoint_command(cmd: &str) -> bool {
         cmd.contains("git-ai checkpoint cursor")
-            || (cmd.contains("git-ai") && cmd.contains("checkpoint") && cmd.contains("cursor"))
+            || ((cmd.contains("dcc-ai-tracking") || cmd.contains("git-ai"))
+                && cmd.contains("checkpoint")
+                && cmd.contains("cursor"))
     }
 }
 

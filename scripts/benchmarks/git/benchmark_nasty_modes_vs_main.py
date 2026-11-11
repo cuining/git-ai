@@ -87,16 +87,25 @@ def run_cmd(
 def build_release_binary(repo_dir: Path, target_dir: Path) -> Path:
     env = dict(os.environ)
     env["CARGO_TARGET_DIR"] = str(target_dir)
+    metadata = json.loads(run_cmd(
+        ["cargo", "metadata", "--no-deps", "--format-version", "1"],
+        cwd=repo_dir,
+        env=env,
+        timeout_s=120,
+    ).stdout)
+    package = next(package for package in metadata["packages"]
+                   if Path(package["manifest_path"]).resolve() == (repo_dir / "Cargo.toml").resolve())
+    binary_name = package.get("default_run") or package["name"]
     run_cmd(
-        ["cargo", "build", "--release", "--bin", "git-ai"],
+        ["cargo", "build", "--release", "--bin", binary_name],
         cwd=repo_dir,
         env=env,
         timeout_s=3600,
     )
     if os.name == "nt":
-        binary = target_dir / "release" / "git-ai.exe"
+        binary = target_dir / "release" / f"{binary_name}.exe"
     else:
-        binary = target_dir / "release" / "git-ai"
+        binary = target_dir / "release" / binary_name
     if not binary.exists():
         raise BenchmarkError(f"Expected binary not found: {binary}")
     return binary
@@ -150,8 +159,10 @@ def resolve_real_git_binary(repo_root: Path) -> Path:
         raise BenchmarkError("Unable to resolve system git from PATH.")
 
     fallback_path = Path(fallback).resolve()
+    fallback_name = fallback_path.name.lower()
     if (
-        "git-ai" in fallback_path.name.lower()
+        "git-ai" in fallback_name
+        or "dcc-ai-tracking" in fallback_name
         or str(repo_root / "target") in str(fallback_path)
     ):
         raise BenchmarkError(

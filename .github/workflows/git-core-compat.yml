@@ -125,7 +125,7 @@ jobs:
           test -x /usr/local/libexec/git-core/git-remote-https
 
       - name: Build git-ai
-        run: cargo build --release --bin git-ai
+        run: cargo build --release --bin dcc-ai-tracking
 
       - name: Verify git-ai uses pinned Git without a config
         run: |
@@ -133,7 +133,7 @@ jobs:
           compat_home="$(mktemp -d)"
           trap 'rm -rf "$compat_home"' EXIT
           expected_version="$(/tmp/git-core-tests/git --version)"
-          actual_version="$(env HOME="$compat_home" _GITAI_INTERNAL_DISABLE_WRAPPER_DAEMON_AUTOSPAWN=1 bash -c 'exec -a git ./target/release/git-ai --version')"
+          actual_version="$(env HOME="$compat_home" _GITAI_INTERNAL_DISABLE_WRAPPER_DAEMON_AUTOSPAWN=1 bash -c 'exec -a git ./target/release/dcc-ai-tracking --version')"
           printf 'Pinned Git: %s\nGit AI proxy: %s\n' "$expected_version" "$actual_version"
           test "$actual_version" = "$expected_version"
 

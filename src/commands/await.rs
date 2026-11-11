@@ -20,7 +20,7 @@ struct AwaitResponse {
     notes_remaining: usize,
 }
 
-/// Handle `git-ai await [--timeout <seconds>]`.
+/// Handle `dcc-ai-tracking await [--timeout <seconds>]`.
 ///
 /// Beta command. Blocks until the daemon reports it has drained all work and flushed
 /// telemetry, or until the configured timeout elapses. Prints a progress
@@ -136,7 +136,7 @@ fn response_error_message(response: &ControlResponse) -> &str {
 }
 
 fn print_usage() {
-    eprintln!("Usage: git-ai await [--timeout <seconds>]");
+    eprintln!("Usage: dcc-ai-tracking await [--timeout <seconds>]");
     eprintln!(
         "  [beta] Wait for the background service to finish all work and telemetry flushing."
     );

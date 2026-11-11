@@ -51,11 +51,11 @@ pub fn handle_debug(args: &[String]) {
 }
 
 fn print_debug_help() {
-    eprintln!("git-ai debug - Print diagnostic information for troubleshooting");
+    eprintln!("dcc-ai-tracking debug - Print diagnostic information for troubleshooting");
     eprintln!();
     eprintln!("Usage:");
-    eprintln!("  git-ai debug [--skip-trace2-checks]");
-    eprintln!("  git-ai debug --help");
+    eprintln!("  dcc-ai-tracking debug [--skip-trace2-checks]");
+    eprintln!("  dcc-ai-tracking debug --help");
     eprintln!();
     eprintln!("Options:");
     eprintln!(
@@ -104,7 +104,7 @@ fn build_debug_report(options: DebugOptions) -> String {
     let shell_git_version = run_git_command_capture("git", &["--version"]);
     debug_progress("collecting git config");
     let git_config = collect_git_config_dump(&git_cmd);
-    debug_progress("collecting git-ai config and login state");
+    debug_progress("collecting dcc-ai-tracking config and login state");
     let git_ai_config = collect_git_ai_config_dump();
     let platform_info = collect_platform_info();
     let hardware_info = collect_hardware_info();
@@ -115,7 +115,7 @@ fn build_debug_report(options: DebugOptions) -> String {
     debug_progress("debug report ready");
 
     let mut out = String::new();
-    let _ = writeln!(out, "git-ai debug report");
+    let _ = writeln!(out, "dcc-ai-tracking debug report");
     let _ = writeln!(out, "Generated (UTC): {}", chrono::Utc::now().to_rfc3339());
     let _ = writeln!(out);
 
@@ -1426,11 +1426,13 @@ mod tests {
     #[cfg(windows)]
     fn stdout_stderr_sleep_command() -> (&'static str, Vec<&'static str>) {
         (
-            "powershell.exe",
+            "cmd.exe",
             vec![
-                "-NoProfile",
-                "-Command",
-                "[Console]::Out.Write('out'); [Console]::Error.Write('err'); Start-Sleep -Seconds 60",
+                "/D",
+                "/S",
+                "/C",
+                // Redirect the delay command so it cannot keep the output pipes open.
+                "echo out & echo err 1>&2 & ping.exe /n 10 127.0.0.1 >NUL 2>&1",
             ],
         )
     }
@@ -1565,8 +1567,8 @@ mod tests {
     #[test]
     fn test_run_command_capture_with_timeout_reports_partial_output() {
         let (program, args) = stdout_stderr_sleep_command();
-        let err = run_command_capture_with_timeout(program, &args, Duration::from_millis(300))
-            .unwrap_err();
+        let timeout = Duration::from_secs(3);
+        let err = run_command_capture_with_timeout(program, &args, timeout).unwrap_err();
 
         assert!(err.contains("timed out after"), "{err}");
         assert!(

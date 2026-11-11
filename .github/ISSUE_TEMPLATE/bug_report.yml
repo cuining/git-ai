@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible problem with git-ai
+description: Report a reproducible problem with dcc-ai-tracking
 title: "[Bug]: "
 labels:
   - bug
@@ -41,12 +41,12 @@ body:
   - type: textarea
     id: debug_output
     attributes:
-      label: Diagnostics (`git-ai debug`)
-      description: Run `git-ai debug` and paste the output (feel free to redact private repo names/URLs).
+      label: Diagnostics (`dcc-ai-tracking debug`)
+      description: Run `dcc-ai-tracking debug` and paste the output (feel free to redact private repo names/URLs).
       render: shell
       placeholder: |
-        $ git-ai debug
-        git-ai debug report
+        $ dcc-ai-tracking debug
+        dcc-ai-tracking debug report
         ...
     validations:
       required: true

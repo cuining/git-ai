@@ -534,19 +534,21 @@ fn configure_test_home_env(command: &mut Command, test_home: &Path) {
                 if git_path.is_file() || git_path.is_symlink() {
                     // Shell-script wrapper containing "git-ai"
                     if let Ok(contents) = fs::read_to_string(&git_path)
-                        && contents.contains("git-ai")
+                        && (contents.contains("git-ai") || contents.contains("dcc-ai-tracking"))
                     {
                         return false;
                     }
                     // Symlink whose target contains "git-ai"
                     if let Ok(target) = std::fs::read_link(&git_path)
-                        && target.to_string_lossy().contains("git-ai")
+                        && (target.to_string_lossy().contains("git-ai")
+                            || target.to_string_lossy().contains("dcc-ai-tracking"))
                     {
                         return false;
                     }
                     // Canonical path contains "git-ai"
                     if let Ok(canonical) = git_path.canonicalize()
-                        && canonical.to_string_lossy().contains("git-ai")
+                        && (canonical.to_string_lossy().contains("git-ai")
+                            || canonical.to_string_lossy().contains("dcc-ai-tracking"))
                     {
                         return false;
                     }
@@ -1294,6 +1296,20 @@ impl TestRepo {
             );
         }
 
+        if let Some(backend) = &patch.notes_backend {
+            config.insert(
+                "notes_backend".to_string(),
+                serde_json::to_value(backend).expect("failed to serialize test notes backend"),
+            );
+        }
+
+        if let Some(enabled) = patch.remote_api_enabled {
+            config.insert(
+                "remote_api_enabled".to_string(),
+                serde_json::Value::Bool(enabled),
+            );
+        }
+
         let config_dir = git_ai::config::git_ai_dir_for_home(home);
         fs::create_dir_all(&config_dir).expect("failed to create test HOME config directory");
         let config_path = config_dir.join("config.json");
@@ -1981,7 +1997,19 @@ impl TestRepo {
         let Some(daemon) = self.daemon_process.as_ref() else {
             return String::new();
         };
-        fs::read_to_string(&daemon.stderr_log_path).unwrap_or_default()
+        let stderr = fs::read_to_string(&daemon.stderr_log_path).unwrap_or_default();
+        // Windows redirects stderr to the per-process log even in test mode.
+        #[cfg(windows)]
+        {
+            let runtime_log = git_ai::config::internal_dir_for_home(&daemon.daemon_home)
+                .join("daemon")
+                .join("logs")
+                .join(format!("{}.log", daemon.pid));
+            if let Ok(log) = fs::read_to_string(runtime_log) {
+                return stderr + &log;
+            }
+        }
+        stderr
     }
 
     fn daemon_completion_entries_for_family(
@@ -3692,17 +3720,20 @@ fn ensure_isolated_process_home() {
                         let git_path = std::path::Path::new(dir).join("git");
                         if git_path.is_file() || git_path.is_symlink() {
                             if let Ok(contents) = fs::read_to_string(&git_path)
-                                && contents.contains("git-ai")
+                                && (contents.contains("git-ai")
+                                    || contents.contains("dcc-ai-tracking"))
                             {
                                 return false;
                             }
                             if let Ok(target) = std::fs::read_link(&git_path)
-                                && target.to_string_lossy().contains("git-ai")
+                                && (target.to_string_lossy().contains("git-ai")
+                                    || target.to_string_lossy().contains("dcc-ai-tracking"))
                             {
                                 return false;
                             }
                             if let Ok(canonical) = git_path.canonicalize()
-                                && canonical.to_string_lossy().contains("git-ai")
+                                && (canonical.to_string_lossy().contains("git-ai")
+                                    || canonical.to_string_lossy().contains("dcc-ai-tracking"))
                             {
                                 return false;
                             }
@@ -4005,7 +4036,13 @@ fn compile_binary() -> PathBuf {
 
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let output = Command::new("cargo")
-        .args(["build", "--bin", "git-ai", "--features", "test-support"])
+        .args([
+            "build",
+            "--bin",
+            "dcc-ai-tracking",
+            "--features",
+            "test-support",
+        ])
         .current_dir(manifest_dir)
         .output()
         .expect("Failed to compile git-ai binary");
@@ -4026,9 +4063,9 @@ fn compile_binary() -> PathBuf {
             .into_owned()
     });
     #[cfg(windows)]
-    let binary_path = PathBuf::from(&target_dir).join("debug/git-ai.exe");
+    let binary_path = PathBuf::from(&target_dir).join("debug/dcc-ai-tracking.exe");
     #[cfg(not(windows))]
-    let binary_path = PathBuf::from(&target_dir).join("debug/git-ai");
+    let binary_path = PathBuf::from(&target_dir).join("debug/dcc-ai-tracking");
 
     // Warm the freshly built binary once so the first daemon startups in highly parallel
     // suites don't all pay cold process initialization overhead at the same time.

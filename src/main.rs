@@ -3,7 +3,7 @@ use git_ai::commands;
 use git_ai::utils::{SuperuserCheckResult, check_superuser_guard, print_superuser_warning};
 
 #[derive(Parser)]
-#[command(name = "git-ai")]
+#[command(name = "dcc-ai-tracking")]
 #[command(about = "git proxy with AI authorship tracking", long_about = None)]
 #[command(disable_help_flag = true, disable_version_flag = true)]
 struct Cli {
@@ -46,14 +46,16 @@ fn main() {
                 .and_then(|name| name.to_str())
                 .map(|s| s.to_string())
         })
-        .unwrap_or("git-ai".to_string());
+        .unwrap_or("dcc-ai-tracking".to_string());
+    #[cfg(windows)]
+    let binary_name = binary_name.to_ascii_lowercase();
 
     if commands::git_hook_handlers::is_git_hook_binary_name(&binary_name) {
         eprintln!(
             "git-ai: the git core hooks feature has been sunset.\n\
              To remove the deprecated git-ai hook symlinks from this repository, run:\n\
              \n\
-             \x20 git-ai git-hooks remove\n"
+             \x20 dcc-ai-tracking git-hooks remove\n"
         );
         std::process::exit(0);
     }
@@ -68,10 +70,13 @@ fn main() {
         }
     }
 
-    if binary_name == "git-ai" || binary_name == "git-ai.exe" {
+    if matches!(
+        binary_name.as_str(),
+        "dcc-ai-tracking" | "dcc-ai-tracking.exe"
+    ) {
         // Block elevated privileges to prevent creating root-owned files
         // that break normal-user daemon startup. Only applies to direct
-        // `git-ai` commands (not the git proxy, which must stay transparent).
+        // `dcc-ai-tracking` commands. The git proxy must stay transparent.
         // Exempt commands that must work regardless (upgrade, daemon run, help, etc.).
         if !is_superuser_exempt_command(&cli.args) {
             match check_superuser_guard() {
@@ -88,5 +93,10 @@ fn main() {
         std::process::exit(0);
     }
 
-    commands::git_handlers::handle_git(&cli.args);
+    if binary_name.eq_ignore_ascii_case("git") || binary_name.eq_ignore_ascii_case("git.exe") {
+        commands::git_handlers::handle_git(&cli.args);
+    } else {
+        eprintln!("Unsupported executable name '{binary_name}'. Use dcc-ai-tracking.");
+        std::process::exit(1);
+    }
 }

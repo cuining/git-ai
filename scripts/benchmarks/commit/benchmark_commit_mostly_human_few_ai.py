@@ -95,12 +95,12 @@ def resolve_git_ai_bin(repo_root: Path, explicit: str | None) -> Path:
             raise FileNotFoundError(f"--git-ai-bin does not exist: {path}")
         return path
 
-    local_debug = repo_root / "target" / "debug" / "git-ai"
+    local_debug = repo_root / "target" / "debug" / "dcc-ai-tracking"
     if local_debug.exists():
         return local_debug
 
-    print("Building local debug binary (cargo build --bin git-ai)...")
-    run(["cargo", "build", "--quiet", "--bin", "git-ai"], cwd=repo_root)
+    print("Building local debug binary (cargo build --bin dcc-ai-tracking)...")
+    run(["cargo", "build", "--quiet", "--bin", "dcc-ai-tracking"], cwd=repo_root)
     if not local_debug.exists():
         raise FileNotFoundError(f"Expected local debug binary at {local_debug}")
     return local_debug
@@ -367,7 +367,7 @@ def main() -> None:
         default=None,
         help=(
             "Path to git-ai binary. Defaults to this repo's local debug binary "
-            "(target/debug/git-ai)."
+            "(target/debug/dcc-ai-tracking)."
         ),
     )
     parser.add_argument("--total-files", type=int, default=7000)

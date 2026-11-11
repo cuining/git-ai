@@ -1,4 +1,4 @@
-//! `git-ai usage` — local statistics from persisted metric events.
+//! `dcc-ai-tracking usage` — local statistics from persisted metric events.
 
 use crate::metrics::local_stats::{
     BucketGranularity, LocalActivityStats, RepoActivitySummary, compute_all,
@@ -50,7 +50,7 @@ pub fn handle_usage(args: &[String]) {
                     Some(value) => period = value.clone(),
                     None => {
                         eprintln!("Missing value for --period.");
-                        eprintln!("Run 'git-ai usage --help' for usage.");
+                        eprintln!("Run 'dcc-ai-tracking usage --help' for usage.");
                         std::process::exit(1);
                     }
                 }
@@ -60,7 +60,7 @@ pub fn handle_usage(args: &[String]) {
             }
             other => {
                 eprintln!("Unknown argument: {}", other);
-                eprintln!("Run 'git-ai usage --help' for usage.");
+                eprintln!("Run 'dcc-ai-tracking usage --help' for usage.");
                 std::process::exit(1);
             }
         }
@@ -71,7 +71,7 @@ pub fn handle_usage(args: &[String]) {
         Ok(resolved) => resolved,
         Err(e) => {
             eprintln!("{}", e);
-            eprintln!("Run 'git-ai usage --help' for usage.");
+            eprintln!("Run 'dcc-ai-tracking usage --help' for usage.");
             std::process::exit(1);
         }
     };
@@ -141,9 +141,9 @@ fn days_ago(days: u64) -> u32 {
 }
 
 fn print_help() {
-    eprintln!("git-ai usage - Show local activity statistics");
+    eprintln!("dcc-ai-tracking usage - Show local activity statistics");
     eprintln!();
-    eprintln!("Usage: git-ai usage [options]");
+    eprintln!("Usage: dcc-ai-tracking usage [options]");
     eprintln!();
     eprintln!("Options:");
     eprintln!("  --period <1d|3d|7d|30d>           Time window (default: 30d)");

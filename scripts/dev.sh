@@ -61,20 +61,20 @@ fi
 
 if [[ "$NEEDS_INSTALL" == true ]]; then
     echo "Installing local git-ai build..."
-    GIT_AI_LOCAL_BINARY="$PWD/target/$BUILD_TYPE/git-ai" bash "$(dirname "$0")/../install.sh"
+    GIT_AI_LOCAL_BINARY="$PWD/target/$BUILD_TYPE/dcc-ai-tracking" bash "$(dirname "$0")/../install.sh"
 fi
 
 # Install binary via temp file + atomic mv to avoid macOS code signature cache
 # issues: direct cp reuses the inode, causing syspolicyd to fail validating the
 # changed binary, leaving the process stuck in launched-suspended state unkillably.
-echo "Installing binary to ~/.dcc-ai-tracking/bin/git-ai..."
-TMP_BIN="$HOME/.dcc-ai-tracking/bin/git-ai.tmp.$$"
-cp "target/$BUILD_TYPE/git-ai" "$TMP_BIN"
-mv -f "$TMP_BIN" "$HOME/.dcc-ai-tracking/bin/git-ai"
-chmod +x "$HOME/.dcc-ai-tracking/bin/git-ai"
+echo "Installing binary to ~/.dcc-ai-tracking/bin/dcc-ai-tracking..."
+TMP_BIN="$HOME/.dcc-ai-tracking/bin/dcc-ai-tracking.tmp.$$"
+cp "target/$BUILD_TYPE/dcc-ai-tracking" "$TMP_BIN"
+mv -f "$TMP_BIN" "$HOME/.dcc-ai-tracking/bin/dcc-ai-tracking"
+chmod +x "$HOME/.dcc-ai-tracking/bin/dcc-ai-tracking"
 
 # Run install hooks
 echo "Running install hooks..."
-~/.dcc-ai-tracking/bin/git-ai install
+~/.dcc-ai-tracking/bin/dcc-ai-tracking install
 
 echo "Done!"

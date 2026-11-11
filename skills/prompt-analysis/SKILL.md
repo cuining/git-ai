@@ -2,7 +2,7 @@
 name: prompt-analysis
 description: "Analyze AI prompting patterns and acceptance rates"
 argument-hint: "[question about prompts]"
-allowed-tools: ["Bash(git-ai:*)", "Read", "Glob", "Grep", "Task"]
+allowed-tools: ["Bash(dcc-ai-tracking:*)", "Read", "Glob", "Grep", "Task"]
 ---
 
 # Prompt Analysis Skill
@@ -30,11 +30,11 @@ First, determine scope from the user's question:
 | specific person's name | `--author "<name>"` |
 | specific time range | `--since <days>` (default: 30) |
 
-Discovery is notes-only — `git-ai prompts` always operates on the current repository (the working directory must be inside a git repo). To analyze multiple repos, run the command separately in each.
+Discovery is notes-only — `dcc-ai-tracking prompts` always operates on the current repository (the working directory must be inside a git repo). To analyze multiple repos, run the command separately in each.
 
 Run initialization:
 ```bash
-git-ai prompts [flags]
+dcc-ai-tracking prompts [flags]
 ```
 
 This creates/updates `prompts.db` in the current directory.
@@ -60,7 +60,7 @@ The `prompts` table contains:
 
 Use direct SQL queries:
 ```bash
-git-ai prompts exec "SELECT model, AVG(accepted_rate), COUNT(*) FROM prompts GROUP BY model"
+dcc-ai-tracking prompts exec "SELECT model, AVG(accepted_rate), COUNT(*) FROM prompts GROUP BY model"
 ```
 
 ### For per-prompt analysis (categorization, content analysis)
@@ -69,23 +69,23 @@ When questions require examining each prompt's content (messages JSON), use suba
 
 1. **Add analysis columns** to the schema:
 ```bash
-git-ai prompts exec "ALTER TABLE prompts ADD COLUMN work_type TEXT"
-git-ai prompts exec "ALTER TABLE prompts ADD COLUMN analysis_notes TEXT"
+dcc-ai-tracking prompts exec "ALTER TABLE prompts ADD COLUMN work_type TEXT"
+dcc-ai-tracking prompts exec "ALTER TABLE prompts ADD COLUMN analysis_notes TEXT"
 ```
 
 2. **Reset the iteration pointer**:
 ```bash
-git-ai prompts reset
+dcc-ai-tracking prompts reset
 ```
 
 3. **Iterate with subagents** - Launch parallel subagents using Task tool with `subagent_type: "general-purpose"`. Each subagent:
-   - Runs `git-ai prompts next` to get one prompt as JSON
+   - Runs `dcc-ai-tracking prompts next` to get one prompt as JSON
    - Analyzes the `messages` content
-   - Updates the database: `git-ai prompts exec "UPDATE prompts SET work_type='...' WHERE id='...'"`
+   - Updates the database: `dcc-ai-tracking prompts exec "UPDATE prompts SET work_type='...' WHERE id='...'"`
 
 4. **Final synthesis** - Query the enriched data:
 ```bash
-git-ai prompts exec "SELECT work_type, COUNT(*), AVG(accepted_rate) FROM prompts GROUP BY work_type"
+dcc-ai-tracking prompts exec "SELECT work_type, COUNT(*), AVG(accepted_rate) FROM prompts GROUP BY work_type"
 ```
 
 ## Subagent Pattern for Iteration
@@ -93,26 +93,26 @@ git-ai prompts exec "SELECT work_type, COUNT(*), AVG(accepted_rate) FROM prompts
 When processing prompts individually, spawn multiple subagents in parallel. Each subagent prompt should include:
 
 ```
-Run `git-ai prompts next` to get the next prompt.
+Run `dcc-ai-tracking prompts next` to get the next prompt.
 
 Analyze the messages JSON to determine: [specific analysis task]
 
 Then update the database:
-git-ai prompts exec "UPDATE prompts SET [column]='[value]' WHERE id='[prompt_id]'"
+dcc-ai-tracking prompts exec "UPDATE prompts SET [column]='[value]' WHERE id='[prompt_id]'"
 
 Return your analysis result.
 ```
 
-Spawn 3-5 subagents at a time, check results, spawn more until `git-ai prompts next` returns "No more prompts."
+Spawn 3-5 subagents at a time, check results, spawn more until `dcc-ai-tracking prompts next` returns "No more prompts."
 
-**IMPORTANT:** The `git-ai prompts next` command returns ALL the data needed for analysis as JSON, including:
+**IMPORTANT:** The `dcc-ai-tracking prompts next` command returns ALL the data needed for analysis as JSON, including:
 - The full `messages` array with the complete conversation (human prompts and AI responses)
 - Metadata like `model`, `tool`, `accepted_rate`, `accepted_lines`, etc.
 
-Subagents should NOT run additional commands like `git show` or `git log` - everything needed is in the JSON output from `git-ai prompts next`. Instruct subagents explicitly:
+Subagents should NOT run additional commands like `git show` or `git log` - everything needed is in the JSON output from `dcc-ai-tracking prompts next`. Instruct subagents explicitly:
 
 ```
-IMPORTANT: All data you need is in the JSON output from `git-ai prompts next`.
+IMPORTANT: All data you need is in the JSON output from `dcc-ai-tracking prompts next`.
 Do NOT run git commands. Analyze the `messages` field in the JSON directly.
 ```
 
@@ -124,13 +124,13 @@ Do NOT run git commands. Analyze the `messages` field in the JSON directly.
 
 **Setup:**
 ```bash
-git-ai prompts exec "ALTER TABLE prompts ADD COLUMN work_type TEXT"
-git-ai prompts reset
+dcc-ai-tracking prompts exec "ALTER TABLE prompts ADD COLUMN work_type TEXT"
+dcc-ai-tracking prompts reset
 ```
 
 **Subagent prompt:**
 ```
-Run `git-ai prompts next` to get the next prompt as JSON.
+Run `dcc-ai-tracking prompts next` to get the next prompt as JSON.
 
 IMPORTANT: All data you need is in this JSON output. Do NOT run git commands.
 Analyze the `messages` field directly.
@@ -145,7 +145,7 @@ Read the messages JSON and categorize this prompt into ONE of:
 - "other" - doesn't fit above categories
 
 Update the database:
-git-ai prompts exec "UPDATE prompts SET work_type='<category>' WHERE id='<prompt_id>'"
+dcc-ai-tracking prompts exec "UPDATE prompts SET work_type='<category>' WHERE id='<prompt_id>'"
 
 Return: the prompt id, your categorization, and a one-sentence reason.
 ```
@@ -167,13 +167,13 @@ ORDER BY count DESC
 
 **Setup:**
 ```bash
-git-ai prompts exec "ALTER TABLE prompts ADD COLUMN low_acceptance_reason TEXT"
-git-ai prompts exec "UPDATE pointers SET current_seq_id = (SELECT MIN(seq_id) - 1 FROM prompts WHERE accepted_rate < 0.5 AND accepted_rate IS NOT NULL)"
+dcc-ai-tracking prompts exec "ALTER TABLE prompts ADD COLUMN low_acceptance_reason TEXT"
+dcc-ai-tracking prompts exec "UPDATE pointers SET current_seq_id = (SELECT MIN(seq_id) - 1 FROM prompts WHERE accepted_rate < 0.5 AND accepted_rate IS NOT NULL)"
 ```
 
 **Subagent prompt:**
 ```
-Run `git-ai prompts next` to get the next prompt as JSON.
+Run `dcc-ai-tracking prompts next` to get the next prompt as JSON.
 
 IMPORTANT: All data you need is in this JSON output. Do NOT run git commands.
 Analyze the `messages` field directly.
@@ -189,7 +189,7 @@ Analyze the messages JSON and identify the likely reason:
 - "other" - explain briefly
 
 Update the database:
-git-ai prompts exec "UPDATE prompts SET low_acceptance_reason='<reason>' WHERE id='<prompt_id>'"
+dcc-ai-tracking prompts exec "UPDATE prompts SET low_acceptance_reason='<reason>' WHERE id='<prompt_id>'"
 
 Return: prompt id, the reason, and specific evidence from the conversation.
 ```
@@ -200,14 +200,14 @@ Return: prompt id, the reason, and specific evidence from the conversation.
 
 **Setup:**
 ```bash
-git-ai prompts exec "ALTER TABLE prompts ADD COLUMN reusable_pattern TEXT"
-git-ai prompts exec "ALTER TABLE prompts ADD COLUMN pattern_description TEXT"
-git-ai prompts reset
+dcc-ai-tracking prompts exec "ALTER TABLE prompts ADD COLUMN reusable_pattern TEXT"
+dcc-ai-tracking prompts exec "ALTER TABLE prompts ADD COLUMN pattern_description TEXT"
+dcc-ai-tracking prompts reset
 ```
 
 **Subagent prompt:**
 ```
-Run `git-ai prompts next` to get the next prompt as JSON.
+Run `dcc-ai-tracking prompts next` to get the next prompt as JSON.
 
 IMPORTANT: All data you need is in this JSON output. Do NOT run git commands.
 Analyze the `messages` field directly.
@@ -221,7 +221,7 @@ and pattern_description to a one-sentence description of what it does.
 
 If not reusable, set both to NULL.
 
-git-ai prompts exec "UPDATE prompts SET reusable_pattern='<name>', pattern_description='<desc>' WHERE id='<prompt_id>'"
+dcc-ai-tracking prompts exec "UPDATE prompts SET reusable_pattern='<name>', pattern_description='<desc>' WHERE id='<prompt_id>'"
 
 Return: prompt id and whether you marked it as reusable (with the pattern name if yes).
 ```
@@ -232,14 +232,14 @@ Return: prompt id and whether you marked it as reusable (with the pattern name i
 
 **Setup:**
 ```bash
-git-ai prompts exec "ALTER TABLE prompts ADD COLUMN clarity_score INTEGER"
-git-ai prompts exec "ALTER TABLE prompts ADD COLUMN clarity_feedback TEXT"
-git-ai prompts reset
+dcc-ai-tracking prompts exec "ALTER TABLE prompts ADD COLUMN clarity_score INTEGER"
+dcc-ai-tracking prompts exec "ALTER TABLE prompts ADD COLUMN clarity_feedback TEXT"
+dcc-ai-tracking prompts reset
 ```
 
 **Subagent prompt:**
 ```
-Run `git-ai prompts next` to get the next prompt as JSON.
+Run `dcc-ai-tracking prompts next` to get the next prompt as JSON.
 
 IMPORTANT: All data you need is in this JSON output. Do NOT run git commands.
 Analyze the `messages` field directly.
@@ -253,7 +253,7 @@ Score the HUMAN's prompt clarity from 1-5:
 
 Also provide brief feedback on how the prompt could be improved.
 
-git-ai prompts exec "UPDATE prompts SET clarity_score=<1-5>, clarity_feedback='<feedback>' WHERE id='<prompt_id>'"
+dcc-ai-tracking prompts exec "UPDATE prompts SET clarity_score=<1-5>, clarity_feedback='<feedback>' WHERE id='<prompt_id>'"
 
 Return: prompt id, score, and your feedback.
 ```
@@ -274,14 +274,14 @@ ORDER BY clarity_score DESC
 
 **Setup:**
 ```bash
-git-ai prompts exec "ALTER TABLE prompts ADD COLUMN technique TEXT"
-git-ai prompts exec "ALTER TABLE prompts ADD COLUMN technique_notes TEXT"
-git-ai prompts reset
+dcc-ai-tracking prompts exec "ALTER TABLE prompts ADD COLUMN technique TEXT"
+dcc-ai-tracking prompts exec "ALTER TABLE prompts ADD COLUMN technique_notes TEXT"
+dcc-ai-tracking prompts reset
 ```
 
 **Subagent prompt:**
 ```
-Run `git-ai prompts next` to get the next prompt as JSON.
+Run `dcc-ai-tracking prompts next` to get the next prompt as JSON.
 
 IMPORTANT: All data you need is in this JSON output. Do NOT run git commands.
 Analyze the `messages` field directly.
@@ -298,7 +298,7 @@ Analyze the HUMAN's prompting technique in the messages. Identify which techniqu
 
 Also note any specific effective or ineffective patterns in technique_notes.
 
-git-ai prompts exec "UPDATE prompts SET technique='<technique>', technique_notes='<notes>' WHERE id='<prompt_id>'"
+dcc-ai-tracking prompts exec "UPDATE prompts SET technique='<technique>', technique_notes='<notes>' WHERE id='<prompt_id>'"
 
 Return: prompt id, technique identified, the acceptance_rate, and your observations.
 ```
@@ -326,17 +326,17 @@ ORDER BY avg_acceptance DESC
 
 **Setup:**
 ```bash
-git-ai prompts exec "ALTER TABLE prompts ADD COLUMN failure_analysis TEXT"
-git-ai prompts exec "ALTER TABLE prompts ADD COLUMN failure_category TEXT"
-git-ai prompts exec "ALTER TABLE prompts ADD COLUMN improvement_suggestion TEXT"
+dcc-ai-tracking prompts exec "ALTER TABLE prompts ADD COLUMN failure_analysis TEXT"
+dcc-ai-tracking prompts exec "ALTER TABLE prompts ADD COLUMN failure_category TEXT"
+dcc-ai-tracking prompts exec "ALTER TABLE prompts ADD COLUMN improvement_suggestion TEXT"
 -- Set pointer to iterate only over failed prompts
-git-ai prompts exec "DELETE FROM pointers WHERE name='default'"
-git-ai prompts exec "INSERT INTO pointers (name, current_seq_id) VALUES ('default', (SELECT MIN(seq_id) - 1 FROM prompts WHERE accepted_lines IS NULL OR accepted_lines = 0))"
+dcc-ai-tracking prompts exec "DELETE FROM pointers WHERE name='default'"
+dcc-ai-tracking prompts exec "INSERT INTO pointers (name, current_seq_id) VALUES ('default', (SELECT MIN(seq_id) - 1 FROM prompts WHERE accepted_lines IS NULL OR accepted_lines = 0))"
 ```
 
 **Subagent prompt:**
 ```
-Run `git-ai prompts next` to get the next prompt as JSON.
+Run `dcc-ai-tracking prompts next` to get the next prompt as JSON.
 
 IMPORTANT: All data you need is in this JSON output. Do NOT run git commands.
 Analyze the `messages` field directly.
@@ -359,7 +359,7 @@ Perform a qualitative analysis by reading the full conversation in messages JSON
 
 4. **How could the prompt be improved?** Specific, actionable suggestion.
 
-git-ai prompts exec "UPDATE prompts SET failure_category='<category>', failure_analysis='<analysis>', improvement_suggestion='<suggestion>' WHERE id='<prompt_id>'"
+dcc-ai-tracking prompts exec "UPDATE prompts SET failure_category='<category>', failure_analysis='<analysis>', improvement_suggestion='<suggestion>' WHERE id='<prompt_id>'"
 
 Return a detailed analysis including: prompt id, what was requested, what went wrong, and how to prompt better next time.
 ```
@@ -383,15 +383,15 @@ Then review individual `failure_analysis` and `improvement_suggestion` values to
 
 **Setup:**
 ```bash
-git-ai prompts exec "ALTER TABLE prompts ADD COLUMN grade TEXT"
-git-ai prompts exec "ALTER TABLE prompts ADD COLUMN grade_breakdown TEXT"
-git-ai prompts exec "ALTER TABLE prompts ADD COLUMN grade_feedback TEXT"
-git-ai prompts reset
+dcc-ai-tracking prompts exec "ALTER TABLE prompts ADD COLUMN grade TEXT"
+dcc-ai-tracking prompts exec "ALTER TABLE prompts ADD COLUMN grade_breakdown TEXT"
+dcc-ai-tracking prompts exec "ALTER TABLE prompts ADD COLUMN grade_feedback TEXT"
+dcc-ai-tracking prompts reset
 ```
 
 **Subagent prompt:**
 ```
-Run `git-ai prompts next` to get the next prompt as JSON.
+Run `dcc-ai-tracking prompts next` to get the next prompt as JSON.
 
 IMPORTANT: All data you need is in this JSON output. Do NOT run git commands.
 Analyze the `messages` field directly.
@@ -434,7 +434,7 @@ Grade the HUMAN's prompt against these best practices for AI-assisted coding:
 
 Store breakdown as JSON: {"specificity": X, "context": X, "scope": X, "constraints": X, "testability": X}
 
-git-ai prompts exec "UPDATE prompts SET grade='<A-F>', grade_breakdown='<json>', grade_feedback='<specific feedback>' WHERE id='<prompt_id>'"
+dcc-ai-tracking prompts exec "UPDATE prompts SET grade='<A-F>', grade_breakdown='<json>', grade_feedback='<specific feedback>' WHERE id='<prompt_id>'"
 
 Return: prompt id, grade, total score, and one key improvement suggestion.
 ```
@@ -578,7 +578,7 @@ To avoid being prompted for every `git-ai` command, add to project or user setti
 {
   "permissions": {
     "allow": [
-      "Bash(git-ai:*)"
+      "Bash(dcc-ai-tracking:*)"
     ]
   }
 }

@@ -1,6 +1,6 @@
-name: MDM Login Start (Nightly)
+name: Upstream MDM Login Start (Nightly)
 
-# Exercises mdm/*/install-login-start.* against published releases: the
+# Exercises upstream mdm/*/install-login-start.* against its published releases: the
 # lifecycle scenario on the latest release, and the auto-update scenario from
 # an older release, which must self-update to latest while registered.
 
@@ -56,7 +56,7 @@ jobs:
           # The daemon updates to whatever the `latest` channel serves, which can
           # lag the newest GitHub release while a release is being promoted.
           channel_url = "https://usegitai.com/worker/releases"
-          with urllib.request.urlopen(urllib.request.Request(channel_url, headers=headers)) as response:
+          with urllib.request.urlopen(channel_url) as response:
               channel_version = json.load(response)["channels"]["latest"]["version"]
           channel = pattern.match(channel_version)
           if not channel:
@@ -92,9 +92,11 @@ jobs:
       GIT_AI_RELEASE_TAG: ${{ matrix.scenario == 'lifecycle' && needs.select-releases.outputs.latest || needs.select-releases.outputs.older }}
 
     steps:
-      - name: Checkout code
+      - name: Checkout upstream release fixtures
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          repository: git-ai-project/git-ai
+          ref: ${{ needs.select-releases.outputs.latest }}
           persist-credentials: false
 
       - name: Ensure a systemd user manager is running
@@ -140,12 +142,14 @@ jobs:
           if-no-files-found: warn
 
   published-assets:
-    name: Published assets match main
+    name: Upstream published assets match upstream main
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: Checkout upstream main
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          repository: git-ai-project/git-ai
+          ref: main
           persist-credentials: false
 
       # A release that predates a script change legitimately differs until the

@@ -2,12 +2,12 @@
 name: git-ai-search
 description: "Search and restore AI conversation context from git history"
 argument-hint: "[search query or workflow]"
-allowed-tools: ["Bash(git-ai:*)", "Read", "Glob", "Grep"]
+allowed-tools: ["Bash(dcc-ai-tracking:*)", "Read", "Glob", "Grep"]
 ---
 
 # Git AI Search Skill
 
-Search and restore AI conversation context from git history using `git-ai search` and `git-ai continue`.
+Search and restore AI conversation context from git history using `dcc-ai-tracking search` and `dcc-ai-tracking continue`.
 
 ## Overview
 
@@ -20,15 +20,15 @@ Git AI tracks AI-generated code and the conversations that produced it. This ski
 
 | You want to... | Use... |
 |---------------|--------|
-| See what AI context exists for a commit | `git-ai search --commit <sha>` |
-| See AI context for specific lines | `git-ai search --file <path> --lines <range>` |
-| Read the full AI conversation | `git-ai search --commit <sha> --verbose` |
-| Get machine-readable output | `git-ai search --json` |
-| Find prompts mentioning a topic | `git-ai search --pattern "keyword"` |
-| Continue someone's AI session | `git-ai continue --commit <sha>` |
-| Continue working on a code region | `git-ai continue --file <path> --lines <range>` |
-| Launch Claude with restored context | `git-ai continue --commit <sha> --launch` |
-| View a specific prompt transcript | `git-ai show-prompt <id>` |
+| See what AI context exists for a commit | `dcc-ai-tracking search --commit <sha>` |
+| See AI context for specific lines | `dcc-ai-tracking search --file <path> --lines <range>` |
+| Read the full AI conversation | `dcc-ai-tracking search --commit <sha> --verbose` |
+| Get machine-readable output | `dcc-ai-tracking search --json` |
+| Find prompts mentioning a topic | `dcc-ai-tracking search --pattern "keyword"` |
+| Continue someone's AI session | `dcc-ai-tracking continue --commit <sha>` |
+| Continue working on a code region | `dcc-ai-tracking continue --file <path> --lines <range>` |
+| Launch Claude with restored context | `dcc-ai-tracking continue --commit <sha> --launch` |
+| View a specific prompt transcript | `dcc-ai-tracking show-prompt <id>` |
 
 ## Workflow Patterns
 
@@ -38,13 +38,13 @@ Understand what AI assistance was used in a specific commit:
 
 ```bash
 # See a summary of AI sessions in the commit
-git-ai search --commit abc1234
+dcc-ai-tracking search --commit abc1234
 
 # View the full conversations
-git-ai search --commit abc1234 --verbose
+dcc-ai-tracking search --commit abc1234 --verbose
 
 # Get JSON for programmatic processing
-git-ai search --commit abc1234 --json | jq '.prompts | keys[]'
+dcc-ai-tracking search --commit abc1234 --json | jq '.prompts | keys[]'
 ```
 
 ### 2. Understand a Code Region
@@ -53,13 +53,13 @@ Find what AI sessions contributed to specific lines:
 
 ```bash
 # Search by file
-git-ai search --file src/main.rs
+dcc-ai-tracking search --file src/main.rs
 
 # Search specific lines
-git-ai search --file src/main.rs --lines 100-150
+dcc-ai-tracking search --file src/main.rs --lines 100-150
 
 # Multiple line ranges
-git-ai search --file src/main.rs --lines 50-75 --lines 200-250
+dcc-ai-tracking search --file src/main.rs --lines 50-75 --lines 200-250
 ```
 
 ### 3. Continue Someone's Work
@@ -68,16 +68,16 @@ Pick up where a teammate left off:
 
 ```bash
 # See what they were working on
-git-ai search --commit abc1234 --verbose
+dcc-ai-tracking search --commit abc1234 --verbose
 
 # Restore context and continue in your shell
-git-ai continue --commit abc1234
+dcc-ai-tracking continue --commit abc1234
 
 # Or launch directly into Claude Code
-git-ai continue --commit abc1234 --launch
+dcc-ai-tracking continue --commit abc1234 --launch
 
 # Or copy context to clipboard to paste elsewhere
-git-ai continue --commit abc1234 --clipboard
+dcc-ai-tracking continue --commit abc1234 --clipboard
 ```
 
 ### 4. Review a Pull Request
@@ -91,13 +91,13 @@ COMMITS=$(gh pr view 123 --json commits -q '.commits[].oid')
 # Search each commit
 for sha in $COMMITS; do
   echo "=== $sha ==="
-  git-ai search --commit $sha
+  dcc-ai-tracking search --commit $sha
 done
 
 # Or search the full range
 BASE=$(gh pr view 123 --json baseRefOid -q '.baseRefOid')
 HEAD=$(gh pr view 123 --json headRefOid -q '.headRefOid')
-git-ai search --commit $BASE..$HEAD
+dcc-ai-tracking search --commit $BASE..$HEAD
 ```
 
 ### 5. Audit AI Involvement in a File
@@ -106,13 +106,13 @@ See all AI sessions that touched a file:
 
 ```bash
 # Full file history
-git-ai search --file src/auth/login.rs
+dcc-ai-tracking search --file src/auth/login.rs
 
 # Filter by author
-git-ai search --file src/auth/login.rs --author "Alice"
+dcc-ai-tracking search --file src/auth/login.rs --author "Alice"
 
 # Filter by tool
-git-ai search --file src/auth/login.rs --tool claude
+dcc-ai-tracking search --file src/auth/login.rs --tool claude
 ```
 
 ### 6. Search by Topic
@@ -121,11 +121,11 @@ Find prompts discussing specific topics:
 
 ```bash
 # Search prompt content
-git-ai search --pattern "authentication"
-git-ai search --pattern "error handling"
+dcc-ai-tracking search --pattern "authentication"
+dcc-ai-tracking search --pattern "error handling"
 
 # Combine with filters
-git-ai search --pattern "refactor" --tool cursor
+dcc-ai-tracking search --pattern "refactor" --tool cursor
 ```
 
 ### 7. Pipe to Other Tools
@@ -134,17 +134,17 @@ Integrate with scripts and workflows:
 
 ```bash
 # Get prompt IDs only
-git-ai search --commit abc1234 --porcelain
+dcc-ai-tracking search --commit abc1234 --porcelain
 
 # Count matches
-git-ai search --file src/main.rs --count
+dcc-ai-tracking search --file src/main.rs --count
 
 # JSON for processing
-git-ai search --commit abc1234 --json | jq '.prompts[] | {tool, model, author: .human_author}'
+dcc-ai-tracking search --commit abc1234 --json | jq '.prompts[] | {tool, model, author: .human_author}'
 
 # Find commits with AI-authored code
 git log --oneline | while read sha msg; do
-  count=$(git-ai search --commit $sha --count 2>/dev/null || echo "0")
+  count=$(dcc-ai-tracking search --commit $sha --count 2>/dev/null || echo "0")
   if [ "$count" != "0" ]; then
     echo "$sha ($count sessions): $msg"
   fi
@@ -153,12 +153,12 @@ done
 
 ## Command Reference
 
-### git-ai search
+### dcc-ai-tracking search
 
 Search for AI prompt sessions by various criteria.
 
 ```
-git-ai search [OPTIONS]
+dcc-ai-tracking search [OPTIONS]
 ```
 
 **Context Source (pick one):**
@@ -181,12 +181,12 @@ git-ai search [OPTIONS]
 - `--porcelain` - Machine-readable prompt IDs only
 - `--count` - Just the count of matching prompts
 
-### git-ai continue
+### dcc-ai-tracking continue
 
 Restore AI session context for continuation.
 
 ```
-git-ai continue [OPTIONS]
+dcc-ai-tracking continue [OPTIONS]
 ```
 
 **Context Source (pick one, or none for TUI):**
@@ -208,12 +208,12 @@ git-ai continue [OPTIONS]
 **Options:**
 - `--max-messages <n>` - Limit messages per prompt (default: 50)
 
-### git-ai show-prompt
+### dcc-ai-tracking show-prompt
 
 Display the full transcript of a specific prompt.
 
 ```
-git-ai show-prompt <prompt_id> [OPTIONS]
+dcc-ai-tracking show-prompt <prompt_id> [OPTIONS]
 ```
 
 - `--json` - Output as JSON
@@ -302,7 +302,7 @@ Filters use AND semantics - prompts must match ALL specified filters:
 
 ```bash
 # Claude prompts by Alice in the last 7 days
-git-ai search --commit HEAD~10..HEAD --tool claude --author "Alice" --since 7d
+dcc-ai-tracking search --commit HEAD~10..HEAD --tool claude --author "Alice" --since 7d
 ```
 
 ### Using with Git Commands
@@ -312,12 +312,12 @@ Combine with git log to explore history:
 ```bash
 # Find commits with high AI involvement
 git log --oneline --since="1 week ago" | while read sha msg; do
-  git-ai search --commit $sha --count 2>/dev/null
+  dcc-ai-tracking search --commit $sha --count 2>/dev/null
 done
 
 # Search AI context for files changed in a commit
 git diff-tree --no-commit-id --name-only -r abc1234 | while read file; do
-  git-ai search --file "$file"
+  dcc-ai-tracking search --file "$file"
 done
 ```
 
@@ -327,10 +327,10 @@ The `--agent` flag controls context formatting:
 
 ```bash
 # For Claude Code
-git-ai continue --commit abc1234 --agent claude --launch
+dcc-ai-tracking continue --commit abc1234 --agent claude --launch
 
 # For other tools, copy to clipboard
-git-ai continue --commit abc1234 --clipboard
+dcc-ai-tracking continue --commit abc1234 --clipboard
 ```
 
 ### Inspecting Specific Prompts
@@ -339,10 +339,10 @@ If search returns many results, drill down:
 
 ```bash
 # Get the IDs
-git-ai search --commit abc1234 --porcelain
+dcc-ai-tracking search --commit abc1234 --porcelain
 
 # View a specific one
-git-ai show-prompt a1b2c3d4
+dcc-ai-tracking show-prompt a1b2c3d4
 ```
 
 ### Performance Tips
@@ -358,32 +358,32 @@ git-ai show-prompt a1b2c3d4
 
 ```bash
 # Any AI in this commit?
-git-ai search --commit HEAD --count
+dcc-ai-tracking search --commit HEAD --count
 
 # What tools were used?
-git-ai search --commit abc1234 --json | jq '.prompts[].tool' | sort -u
+dcc-ai-tracking search --commit abc1234 --json | jq '.prompts[].tool' | sort -u
 
 # Who used AI in this file?
-git-ai search --file src/main.rs --json | jq '.prompts[].author' | sort -u
+dcc-ai-tracking search --file src/main.rs --json | jq '.prompts[].author' | sort -u
 ```
 
 ### Detailed exploration
 
 ```bash
 # Full context of the most recent AI session
-git-ai search --commit HEAD --verbose | head -100
+dcc-ai-tracking search --commit HEAD --verbose | head -100
 
 # Continue the exact session that wrote these lines
-git-ai continue --file src/main.rs --lines 50-100 --launch
+dcc-ai-tracking continue --file src/main.rs --lines 50-100 --launch
 ```
 
 ### Integration with CI/CD
 
 ```bash
 # In a PR check, report AI involvement
-PROMPT_COUNT=$(git-ai search --commit $PR_HEAD --count 2>/dev/null || echo "0")
+PROMPT_COUNT=$(dcc-ai-tracking search --commit $PR_HEAD --count 2>/dev/null || echo "0")
 if [ "$PROMPT_COUNT" -gt 0 ]; then
   echo "This PR includes $PROMPT_COUNT AI-assisted session(s)"
-  git-ai search --commit $PR_HEAD
+  dcc-ai-tracking search --commit $PR_HEAD
 fi
 ```

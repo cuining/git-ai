@@ -9,7 +9,7 @@ if ($args.Count -gt 0 -and $args[0] -eq '--release') {
 
 $InstallDir = Join-Path $HOME '.dcc-ai-tracking\bin'
 $ConfigPath = Join-Path $HOME '.dcc-ai-tracking\config.json'
-$GitAiExe = Join-Path $InstallDir 'git-ai.exe'
+$GitAiExe = Join-Path $InstallDir 'dcc-ai-tracking.exe'
 $GitShim = Join-Path $InstallDir 'git.exe'
 
 function Test-FileAvailable {
@@ -122,7 +122,7 @@ if ($needsInstall) {
     Write-Host 'Installing local git-ai build...'
     $previousLocalBinary = $env:GIT_AI_LOCAL_BINARY
     try {
-        $env:GIT_AI_LOCAL_BINARY = (Resolve-Path "target\$BuildType\git-ai.exe").Path
+        $env:GIT_AI_LOCAL_BINARY = (Resolve-Path "target\$BuildType\dcc-ai-tracking.exe").Path
         & (Join-Path $PSScriptRoot '..\install.ps1')
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     } finally {
@@ -132,7 +132,7 @@ if ($needsInstall) {
 
 # Replace git-ai.exe, stopping the daemon first if it is running
 Write-Host "Installing binary to $GitAiExe..."
-Install-Binary -SrcPath "target\$BuildType\git-ai.exe" -DstPath $GitAiExe -GitAiExe $GitAiExe
+Install-Binary -SrcPath "target\$BuildType\dcc-ai-tracking.exe" -DstPath $GitAiExe -GitAiExe $GitAiExe
 
 # Keep the git.exe shim in sync with the updated binary
 if (Test-Path -LiteralPath $GitShim) {

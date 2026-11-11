@@ -5,14 +5,14 @@
 //! variables and stores credentials in ~/.dcc-ai-tracking/internal/credentials.
 //!
 //! On failure, exits with code 1 silently so the install script can fall back
-//! to running `git-ai login`. Errors are recorded server-side for debugging.
+//! to running `dcc-ai-tracking login`. Errors are recorded server-side for debugging.
 
 use crate::auth::CredentialStore;
 use crate::auth::client::OAuthClient;
 
 /// Handle the exchange-nonce command (internal - called by install scripts)
 ///
-/// Exits with code 1 on failure (silently) so install script can run `git-ai login`.
+/// Exits with code 1 on failure (silently) so install script can run `dcc-ai-tracking login`.
 /// Exits with code 0 on success.
 pub fn handle_exchange_nonce(_args: &[String]) {
     // Read from environment variables (injected by install script)

@@ -230,9 +230,9 @@ fn plain_install_hooks_preserves_the_invoking_user_home() {
     fs::create_dir_all(&installed_bin_dir).unwrap();
 
     #[cfg(windows)]
-    let installed_binary = installed_bin_dir.join("git-ai.exe");
+    let installed_binary = installed_bin_dir.join("dcc-ai-tracking.exe");
     #[cfg(not(windows))]
-    let installed_binary = installed_bin_dir.join("git-ai");
+    let installed_binary = installed_bin_dir.join("dcc-ai-tracking");
     fs::copy(get_binary_path(), &installed_binary).unwrap();
 
     let test_db = repo.path().join("install-hooks.db");
@@ -538,23 +538,109 @@ fn test_run_install_hooks_with_dry_run_false() {
 }
 
 #[test]
-fn test_run_install_hooks_ignores_unknown_args() {
-    // Unknown arguments should be ignored
-    let args = vec![
-        "--unknown-flag".to_string(),
-        "random-arg".to_string(),
-        "--dry-run".to_string(),
-    ];
-    let result = run(&args);
+fn test_run_install_hooks_rejects_unknown_args() {
+    let result = run(&["--unknown-flag".into()]);
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("unknown install-hooks argument")
+    );
+}
 
-    match result {
-        Ok(_statuses) => {
-            // Success is valid
-        }
-        Err(_e) => {
-            // May fail on CI or systems without binary path
-        }
-    }
+#[test]
+fn standalone_install_hooks_reports_optional_agent_failure() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let codex_home = repo.test_home_path().join("codex-broken");
+    fs::create_dir_all(&codex_home).unwrap();
+    let config_path = codex_home.join("config.toml");
+    fs::write(&config_path, "invalid = [").unwrap();
+
+    let output = repo
+        .git_ai_command_without_pre_sync_for_test(
+            &["install-hooks", "--env"],
+            &[("CODEX_HOME", codex_home.to_str().unwrap())],
+        )
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Failed to parse Codex config.toml"),
+        "{stderr}"
+    );
+    assert!(output.status.success(), "{stderr}");
+    assert_eq!(fs::read_to_string(&config_path).unwrap(), "invalid = [");
+}
+
+#[test]
+fn standalone_install_hooks_preserves_trace2_conflict_and_installs_hooks() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let codex_home = repo.test_home_path().join("codex-managed");
+    fs::create_dir_all(&codex_home).unwrap();
+    repo.git_ai(&["config", "set", "codex_hooks_format", "hooks_json"])
+        .unwrap();
+    let git_config = repo.test_home_path().join(".gitconfig");
+    let conflicting_config = "[trace2]\n\teventTarget = 2\n";
+    fs::write(&git_config, conflicting_config).unwrap();
+    let env = [("CODEX_HOME", codex_home.to_str().unwrap())];
+
+    let managed = repo
+        .git_ai_command_without_pre_sync_for_test(&["install-hooks", "--agents=codex"], &env)
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&managed.stderr);
+    assert!(!managed.status.success(), "{stderr}");
+    assert!(stderr.contains("trace2-conflict"), "{stderr}");
+    assert!(!codex_home.join("hooks.json").exists());
+
+    let standalone = repo
+        .git_ai_command_without_pre_sync_for_test(&["install-hooks", "--env"], &env)
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&standalone.stderr);
+    assert!(standalone.status.success(), "{stderr}");
+    assert!(stderr.contains("trace2-conflict"), "{stderr}");
+    assert!(codex_home.join("hooks.json").is_file());
+    assert_eq!(fs::read_to_string(git_config).unwrap(), conflicting_config);
+}
+
+#[test]
+fn npm_managed_agent_install_cli_isolated() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let codex_home = repo.test_home_path().join("codex-managed");
+    fs::create_dir_all(&codex_home).unwrap();
+    repo.git_ai(&["config", "set", "codex_hooks_format", "hooks_json"])
+        .unwrap();
+    let env = [("CODEX_HOME", codex_home.to_str().unwrap())];
+    repo.git_ai_with_env(&["install-hooks", "--agents=codex"], &env)
+        .unwrap();
+    assert!(codex_home.join("hooks.json").is_file());
+    assert!(
+        fs::read_to_string(codex_home.join("config.toml"))
+            .unwrap()
+            .contains("trusted_hash")
+    );
+    assert!(!repo.test_home_path().join(".claude/settings.json").exists());
+    assert!(
+        !repo
+            .test_home_path()
+            .join(".config/opencode/plugins/git-ai.ts")
+            .exists()
+    );
+    assert!(
+        repo.git_ai_with_env(&["install-hooks", "--unknown"], &env)
+            .is_err()
+    );
+    let broken = "invalid = [";
+    fs::write(codex_home.join("config.toml"), broken).unwrap();
+    assert!(
+        repo.git_ai_with_env(&["install-hooks", "--agents=codex"], &env)
+            .is_err()
+    );
+    assert_eq!(
+        fs::read_to_string(codex_home.join("config.toml")).unwrap(),
+        broken
+    );
 }
 
 // ==============================================================================

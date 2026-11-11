@@ -227,6 +227,10 @@ impl MockApiServer {
             while !stop_thread.load(Ordering::SeqCst) {
                 match listener.accept() {
                     Ok((stream, _)) => {
+                        // Accepted sockets can inherit the listener's nonblocking mode.
+                        stream
+                            .set_nonblocking(false)
+                            .expect("failed to set blocking mock API stream");
                         handle_http_connection(stream, &tx);
                     }
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
@@ -494,6 +498,8 @@ struct DaemonGuard {
     trace_socket_path: PathBuf,
     repo_working_dir: String,
     stderr_log_path: PathBuf,
+    #[cfg(windows)]
+    runtime_log_path: PathBuf,
 }
 
 impl DaemonGuard {
@@ -544,6 +550,11 @@ impl DaemonGuard {
         loop {
             let child = command.spawn().expect("failed to spawn git-ai subprocess");
             let mut daemon = Self {
+                #[cfg(windows)]
+                runtime_log_path: git_ai::config::internal_dir_for_home(&daemon_home)
+                    .join("daemon")
+                    .join("logs")
+                    .join(format!("{}.log", child.id())),
                 child,
                 control_socket_path: control_socket_path.clone(),
                 trace_socket_path: trace_socket_path.clone(),
@@ -639,7 +650,13 @@ impl DaemonGuard {
     }
 
     fn stderr_contents(&self) -> String {
-        fs::read_to_string(&self.stderr_log_path).unwrap_or_default()
+        let stderr = fs::read_to_string(&self.stderr_log_path).unwrap_or_default();
+        // Windows redirects stderr to the per-process log even in test mode.
+        #[cfg(windows)]
+        if let Ok(runtime_log) = fs::read_to_string(&self.runtime_log_path) {
+            return stderr + &runtime_log;
+        }
+        stderr
     }
 }
 
@@ -5249,12 +5266,6 @@ fn daemon_pure_trace_socket_checkout_tracks_success_failure_and_new_branch() {
 #[serial]
 fn daemon_pure_trace_socket_pull_fast_forward_tracks_pull_command() {
     let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
-    let _daemon = DaemonGuard::start(&repo);
-    let trace_socket = daemon_trace_socket_path(&repo);
-    let env = git_trace_env(&trace_socket);
-    let env_refs = [(env[0].0, env[0].1.as_str()), (env[1].0, env[1].1.as_str())];
-    let default_branch = repo.current_branch();
-
     let run_git = |args: &[&str]| -> String {
         let output = Command::new(real_git_executable())
             .args(args)
@@ -5269,12 +5280,6 @@ fn daemon_pure_trace_socket_pull_fast_forward_tracks_pull_command() {
         String::from_utf8_lossy(&output.stdout).trim().to_string()
     };
 
-    fs::write(repo.path().join("pull-case.txt"), "base\n").expect("failed to write base");
-    repo.git_og_with_env(&["add", "pull-case.txt"], &env_refs)
-        .expect("add should succeed");
-    repo.git_og_with_env(&["commit", "-m", "base"], &env_refs)
-        .expect("base commit should succeed");
-
     let remote_root = tempfile::tempdir().expect("remote tempdir should be created");
     let bare_remote = remote_root.path().join("origin.git");
     let remote_clone = remote_root.path().join("origin-work");
@@ -5284,16 +5289,23 @@ fn daemon_pure_trace_socket_pull_fast_forward_tracks_pull_command() {
     let _ = fs::remove_dir_all(&remote_clone);
 
     run_git(&["init", "--bare", bare_remote_str.as_str()]);
-    repo.git_og_with_env(
-        &["remote", "add", "origin", bare_remote_str.as_str()],
-        &env_refs,
-    )
-    .expect("adding origin remote should succeed");
-    repo.git_og_with_env(
-        &["push", "-u", "origin", default_branch.as_str()],
-        &env_refs,
-    )
-    .expect("pushing base branch should succeed");
+    // Finish writing .git/config before the daemon starts reading it.
+    repo.git_og(&["remote", "add", "origin", bare_remote_str.as_str()])
+        .expect("adding origin remote should succeed");
+
+    let _daemon = DaemonGuard::start(&repo);
+    let trace_socket = daemon_trace_socket_path(&repo);
+    let env = git_trace_env(&trace_socket);
+    let env_refs = [(env[0].0, env[0].1.as_str()), (env[1].0, env[1].1.as_str())];
+    let default_branch = repo.current_branch();
+
+    fs::write(repo.path().join("pull-case.txt"), "base\n").expect("failed to write base");
+    repo.git_og_with_env(&["add", "pull-case.txt"], &env_refs)
+        .expect("add should succeed");
+    repo.git_og_with_env(&["commit", "-m", "base"], &env_refs)
+        .expect("base commit should succeed");
+    repo.git_og_with_env(&["push", "origin", default_branch.as_str()], &env_refs)
+        .expect("pushing base branch should succeed");
 
     run_git(&[
         "clone",
@@ -5340,7 +5352,7 @@ fn daemon_pure_trace_socket_pull_fast_forward_tracks_pull_command() {
     )
     .expect("fast-forward pull should succeed");
 
-    wait_for_expected_top_level_completions(&repo, 0, 5);
+    wait_for_expected_top_level_completions(&repo, 0, 4);
 
     let pull_entries = completion_entries_for_command(&repo, "pull");
     let saw_pull_success = pull_entries.iter().any(|entry| entry.exit_code == Some(0));
@@ -6383,11 +6395,31 @@ fn daemon_memory_threshold_logs_uploads_and_aborts_without_draining() {
         "checkpoint should be accepted before emergency shutdown: {checkpoint_response:?}"
     );
     let started = std::time::Instant::now();
-    let status = daemon.child.wait().expect("wait for emergency daemon stop");
+    let status = loop {
+        if let Some(status) = daemon
+            .child
+            .try_wait()
+            .expect("poll for emergency daemon stop")
+        {
+            break status;
+        }
+        if started.elapsed() >= Duration::from_secs(20) {
+            let _ = daemon.child.kill();
+            let _ = daemon.child.wait();
+            panic!(
+                "daemon did not abort within 20s:\n{}",
+                daemon.stderr_contents()
+            );
+        }
+        thread::sleep(Duration::from_millis(50));
+    };
     assert!(!status.success(), "85% threshold should abort the daemon");
     assert!(
-        started.elapsed() < Duration::from_secs(5),
-        "memory emergency shutdown waited for the delayed checkpoint"
+        repo.current_working_logs()
+            .read_all_checkpoints()
+            .expect("working log should be readable after abort")
+            .is_empty(),
+        "memory emergency shutdown must leave the acknowledged checkpoint unprocessed"
     );
     let logs = daemon.stderr_contents();
     assert!(
@@ -6501,6 +6533,57 @@ fn bg_command_with_env(
 }
 
 use std::process::Output;
+
+#[test]
+#[serial]
+#[cfg(unix)]
+fn npm_managed_shutdown_waits_for_daemon_process_exit() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let mut guard = DaemonGuard::start_with_env(
+        &repo,
+        &[
+            ("GIT_AI_TEST_SHUTDOWN_HANG_SECS", "2"),
+            ("GIT_AI_DAEMON_SHUTDOWN_DEADLINE_SECS", "10"),
+        ],
+    );
+    let output = bg_command(&repo, "shutdown", &[]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        guard.child.try_wait().unwrap().is_some(),
+        "successful shutdown must mean the process has exited"
+    );
+}
+
+#[test]
+#[serial]
+#[cfg(unix)]
+fn daemon_soft_shutdown_allows_daemon_deadline_to_force_exit() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let mut daemon = DaemonGuard::start_with_env(
+        &repo,
+        &[
+            ("GIT_AI_TEST_SHUTDOWN_HANG_SECS", "30"),
+            ("GIT_AI_DAEMON_SHUTDOWN_DEADLINE_SECS", "8"),
+        ],
+    );
+
+    let output = bg_command(&repo, "shutdown", &[]);
+    assert!(
+        output.status.success(),
+        "soft shutdown failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let status = daemon
+        .child
+        .try_wait()
+        .unwrap()
+        .expect("daemon must exit before soft shutdown succeeds");
+    assert_eq!(status.code(), Some(70), "unexpected daemon exit: {status}");
+}
 
 #[test]
 #[serial]

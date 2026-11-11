@@ -257,7 +257,7 @@ fn maybe_show_async_post_commit_stats(parsed: &ParsedGitInvocation, repo: &Repos
 
     if !note_found {
         eprintln!(
-            "[git-ai] still processing commit {}... run `git ai stats` to see stats.",
+            "[git-ai] still processing commit {}... run `dcc-ai-tracking stats` to see stats.",
             &commit_sha[..std::cmp::min(8, commit_sha.len())]
         );
         return;
@@ -285,7 +285,7 @@ fn maybe_show_async_post_commit_stats(parsed: &ParsedGitInvocation, repo: &Repos
     ) && estimate.should_skip()
     {
         eprintln!(
-            "[git-ai] Skipped git-ai stats for large commit. Run `git ai stats {}` to compute stats on demand.",
+            "[git-ai] Skipped git-ai stats for large commit. Run `dcc-ai-tracking stats {}` to compute stats on demand.",
             commit_sha
         );
         return;

@@ -81,5 +81,22 @@ class DaemonRuntimeTests(unittest.TestCase):
         self.check_runtime(modes)
 
 
+    def test_real_git_lookup_rejects_tracking_symlink(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            binary = root / "dcc-ai-tracking"
+            binary.touch()
+            proxy = root / "git"
+            proxy.symlink_to(binary)
+            for benchmark in (modes, nasty):
+                with (
+                    self.subTest(benchmark=benchmark.__name__),
+                    patch.object(benchmark.os, "access", return_value=False),
+                    patch.object(benchmark.shutil, "which", return_value=str(proxy)),
+                    self.assertRaises(benchmark.BenchmarkError),
+                ):
+                    benchmark.resolve_real_git_binary(root)
+
+
 if __name__ == "__main__":
     unittest.main()

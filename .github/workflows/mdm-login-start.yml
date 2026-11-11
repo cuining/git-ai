@@ -53,7 +53,7 @@ jobs:
           toolchain: stable
 
       - name: Build git-ai
-        run: cargo build --release --bin git-ai
+        run: cargo build --release --bin dcc-ai-tracking
 
       - name: Ensure a systemd user manager is running
         if: runner.os == 'Linux'
@@ -76,7 +76,7 @@ jobs:
       - name: Run lifecycle scenario
         env:
           BINARY_SOURCE: local
-          GIT_AI_LOCAL_BINARY: ${{ github.workspace }}/target/release/git-ai
+          GIT_AI_LOCAL_BINARY: ${{ github.workspace }}/target/release/dcc-ai-tracking
           MDM_TEST_LOG_DIR: ${{ runner.temp }}/mdm-logs
         run: bash scripts/mdm/test-login-start.sh lifecycle
 
@@ -106,13 +106,13 @@ jobs:
           toolchain: stable
 
       - name: Build git-ai
-        run: cargo build --release --bin git-ai
+        run: cargo build --release --bin dcc-ai-tracking
 
       - name: Run lifecycle scenario
         shell: pwsh
         env:
           BINARY_SOURCE: local
-          GIT_AI_LOCAL_BINARY: ${{ github.workspace }}\target\release\git-ai.exe
+          GIT_AI_LOCAL_BINARY: ${{ github.workspace }}\target\release\dcc-ai-tracking.exe
           MDM_TEST_LOG_DIR: ${{ runner.temp }}\mdm-logs
         run: ./scripts/mdm/test-login-start.ps1 -Scenario lifecycle
 

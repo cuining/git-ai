@@ -179,6 +179,7 @@ pub struct Config {
     update_channel: UpdateChannel,
     feature_flags: FeatureFlags,
     api_base_url: String,
+    remote_api_enabled: bool,
     prompt_storage: String,
     default_prompt_storage: Option<String>,
     #[serde(serialize_with = "serialize_masked_api_key")]
@@ -257,6 +258,8 @@ pub struct FileConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_base_url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_api_enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_storage: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_prompt_storage: Option<String>,
@@ -331,6 +334,8 @@ pub struct ConfigPatch {
     pub untraced_fixup_ignored_paths: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub telemetry_oss_disabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_api_enabled: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disable_version_checks: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -563,7 +568,13 @@ impl Config {
         &self.feature_flags
     }
 
-    /// Returns the API base URL
+    /// Whether git-ai may contact remote services. File configuration cannot be
+    /// overridden by API keys, OAuth credentials, or telemetry environment values.
+    pub fn remote_api_enabled(&self) -> bool {
+        self.remote_api_enabled
+    }
+
+    /// Returns the API base URL.
     pub fn api_base_url(&self) -> &str {
         &self.api_base_url
     }
@@ -1080,6 +1091,11 @@ fn build_config() -> Config {
     // Build feature flags from file config
     let feature_flags = build_feature_flags(&file_cfg);
 
+    let remote_api_enabled = file_cfg
+        .as_ref()
+        .and_then(|c| c.remote_api_enabled)
+        .unwrap_or(true);
+
     // Get API base URL from config, env var, or default
     let api_base_url = file_cfg
         .as_ref()
@@ -1208,9 +1224,15 @@ fn build_config() -> Config {
     };
 
     let notes_backend = NotesBackendConfig {
-        kind: kind_from_env
-            .or_else(|| file_backend.as_ref().map(|b| b.kind))
-            .unwrap_or(default_kind),
+        kind: if remote_api_enabled {
+            kind_from_env
+                .or_else(|| file_backend.as_ref().map(|b| b.kind))
+                .unwrap_or(default_kind)
+        } else {
+            // Local mode must keep checkpoint/commit notes local even when an
+            // API key or environment override normally selects HTTP storage.
+            NotesBackendKind::GitNotes
+        },
         backend_url: Some(resolve_notes_backend_url(
             url_from_env,
             file_backend.as_ref(),
@@ -1278,6 +1300,7 @@ fn build_config() -> Config {
             update_channel,
             feature_flags,
             api_base_url,
+            remote_api_enabled,
             prompt_storage,
             default_prompt_storage,
             api_key,
@@ -1313,6 +1336,7 @@ fn build_config() -> Config {
         update_channel,
         feature_flags,
         api_base_url,
+        remote_api_enabled,
         prompt_storage,
         default_prompt_storage,
         api_key,
@@ -1636,6 +1660,9 @@ pub fn load_file_config_public() -> Result<FileConfig, String> {
 
 /// Save the file config
 pub fn save_file_config(config: &FileConfig) -> Result<(), String> {
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+
     let path =
         config_file_path().ok_or_else(|| "Could not determine config file path".to_string())?;
 
@@ -1643,12 +1670,22 @@ pub fn save_file_config(config: &FileConfig) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(|e| format!("Failed to create config directory: {}", e))?;
+        #[cfg(unix)]
+        fs::set_permissions(parent, fs::Permissions::from_mode(0o700))
+            .map_err(|e| format!("Failed to protect config directory: {}", e))?;
     }
 
     let json = serde_json::to_string_pretty(config)
         .map_err(|e| format!("Failed to serialize config: {}", e))?;
 
-    fs::write(&path, json).map_err(|e| format!("Failed to write config file: {}", e))
+    // Readers (including the daemon's remote policy) must never see a truncated
+    // document and fall back to defaults while another command saves a field.
+    crate::mdm::utils::write_atomic(&path, json.as_bytes())
+        .map_err(|e| format!("Failed to write config file: {}", e))?;
+    #[cfg(unix)]
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
+        .map_err(|e| format!("Failed to protect config file: {}", e))?;
+    Ok(())
 }
 
 fn is_executable(path: &Path) -> bool {
@@ -1692,7 +1729,12 @@ fn path_is_git_ai_binary(path: &Path) -> bool {
         && let Some(name) = canonical.file_name().and_then(|n| n.to_str())
     {
         let stem = name.strip_suffix(".exe").unwrap_or(name);
-        if stem == "git-ai" || stem.starts_with("git-ai-") || stem.starts_with("git_ai") {
+        if stem == "dcc-ai-tracking"
+            || stem.starts_with("dcc-ai-tracking-")
+            || stem == "git-ai"
+            || stem.starts_with("git-ai-")
+            || stem.starts_with("git_ai")
+        {
             return true;
         }
     }
@@ -1706,18 +1748,21 @@ fn path_is_git_ai_binary(path: &Path) -> bool {
     // a real git binary legitimately coexists with a git-ai symlink (e.g.
     // Docker images that compile git from source into /usr/local/bin).
     if let Some(parent) = path.parent() {
-        #[cfg(windows)]
-        let sibling = parent.join("git-ai.exe");
-        #[cfg(not(windows))]
-        let sibling = parent.join("git-ai");
-
-        #[cfg(windows)]
-        if sibling.exists() {
-            return true;
-        }
-        #[cfg(not(windows))]
-        if sibling.exists() && same_file(path, &sibling) {
-            return true;
+        let binary_names = if cfg!(windows) {
+            ["dcc-ai-tracking.exe", "git-ai.exe"]
+        } else {
+            ["dcc-ai-tracking", "git-ai"]
+        };
+        for binary_name in binary_names {
+            let sibling = parent.join(binary_name);
+            #[cfg(windows)]
+            if sibling.exists() {
+                return true;
+            }
+            #[cfg(not(windows))]
+            if sibling.exists() && same_file(path, &sibling) {
+                return true;
+            }
         }
     }
 
@@ -1776,6 +1821,9 @@ fn apply_test_config_patch(config: &mut Config) {
         if let Some(patterns) = patch.untraced_fixup_ignored_paths {
             config.untraced_fixup_ignored_paths =
                 parse_path_patterns("untraced_fixup_ignored_paths", patterns);
+        }
+        if let Some(remote_api_enabled) = patch.remote_api_enabled {
+            config.remote_api_enabled = remote_api_enabled;
         }
         if let Some(telemetry_oss_disabled) = patch.telemetry_oss_disabled {
             config.telemetry_oss_disabled = telemetry_oss_disabled;
@@ -1845,6 +1893,9 @@ fn apply_test_config_patch(config: &mut Config) {
             config.daemon_memory_limit_mb = normalize_daemon_memory_limit_mb(limit_mb);
         }
     }
+    if !config.remote_api_enabled {
+        config.notes_backend.kind = NotesBackendKind::GitNotes;
+    }
 }
 
 #[cfg(test)]
@@ -1875,6 +1926,7 @@ mod tests {
             update_channel: UpdateChannel::Latest,
             feature_flags: FeatureFlags::default(),
             api_base_url: DEFAULT_API_BASE_URL.to_string(),
+            remote_api_enabled: true,
             prompt_storage: "default".to_string(),
             default_prompt_storage: None,
             api_key: None,
@@ -2143,6 +2195,7 @@ mod tests {
             update_channel: UpdateChannel::Latest,
             feature_flags: FeatureFlags::default(),
             api_base_url: DEFAULT_API_BASE_URL.to_string(),
+            remote_api_enabled: true,
             prompt_storage: "default".to_string(),
             default_prompt_storage: None,
             api_key: None,
@@ -2293,6 +2346,7 @@ mod tests {
             update_channel: UpdateChannel::Latest,
             feature_flags: FeatureFlags::default(),
             api_base_url: DEFAULT_API_BASE_URL.to_string(),
+            remote_api_enabled: true,
             prompt_storage: prompt_storage.to_string(),
             default_prompt_storage: default_prompt_storage.map(|s| s.to_string()),
             api_key: None,
@@ -2653,7 +2707,7 @@ mod tests {
     fn test_path_is_git_ai_binary_symlink_to_git_ai() {
         // A symlink `git → git-ai` should be detected as git-ai.
         let dir = tempfile::tempdir().unwrap();
-        let git_ai = dir.path().join("git-ai");
+        let git_ai = dir.path().join("dcc-ai-tracking");
         fs::write(&git_ai, "fake-binary").unwrap();
         #[cfg(unix)]
         std::os::unix::fs::symlink(&git_ai, dir.path().join("git")).unwrap();
@@ -2669,10 +2723,10 @@ mod tests {
         let real_git = dir.path().join("git");
         fs::write(&real_git, "real-git-binary").unwrap();
         // git-ai is a different file (or symlink to a different file)
-        let git_ai_target = dir.path().join("git-ai-actual");
+        let git_ai_target = dir.path().join("dcc-ai-tracking-actual");
         fs::write(&git_ai_target, "git-ai-binary").unwrap();
         #[cfg(unix)]
-        std::os::unix::fs::symlink(&git_ai_target, dir.path().join("git-ai")).unwrap();
+        std::os::unix::fs::symlink(&git_ai_target, dir.path().join("dcc-ai-tracking")).unwrap();
         #[cfg(unix)]
         assert!(!path_is_git_ai_binary(&real_git));
     }
@@ -2681,7 +2735,7 @@ mod tests {
     fn test_path_is_git_ai_binary_hardlink() {
         // A hard-linked shim (same inode) should be detected as git-ai.
         let dir = tempfile::tempdir().unwrap();
-        let git_ai = dir.path().join("git-ai");
+        let git_ai = dir.path().join("dcc-ai-tracking");
         fs::write(&git_ai, "fake-binary").unwrap();
         #[cfg(unix)]
         {

@@ -18,7 +18,7 @@ Options:
   --lines-per-file <n>         Lines per generated file (default: 3000)
   --burst-every <n>            Every Nth feature commit rewrites all generated files (default: 25)
   --git-bin <path>             Git binary to use (default: wrapper next to git-ai, else PATH git)
-  --git-ai-bin <path>          git-ai binary (default: PATH git-ai)
+  --git-ai-bin <path>          tracking binary (default: dcc-ai-tracking on PATH)
   --hook-mode <mode>           wrapper | daemon (default: wrapper)
   --skip-clone                 Reuse existing clone in <work-root>/repo
   -h, --help                   Show help
@@ -62,11 +62,11 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$GIT_AI_BIN" ]]; then
-  GIT_AI_BIN="$(command -v git-ai || true)"
+  GIT_AI_BIN="$(command -v dcc-ai-tracking || true)"
 fi
 
 if [[ -z "$GIT_AI_BIN" ]]; then
-  echo "error: git-ai not found in PATH" >&2
+  echo "error: dcc-ai-tracking not found in PATH" >&2
   exit 1
 fi
 

@@ -10,7 +10,7 @@
 #   6. At least one prompt has agent_id.tool matching this agent (fuzzy)
 #   7. At least one transcript message was recorded
 #   8. utils/math_utils.py appears in the attestation section (line attribution)
-#   9. git-ai blame shows AI attribution on fibonacci lines
+#   9. dcc-ai-tracking blame shows AI attribution on fibonacci lines
 #
 # Usage: verify-attribution.sh <agent>
 # Expects: TEST_REPO_DIR (default /tmp/test-repo) with agent commit
@@ -154,22 +154,22 @@ else
   warn "utils/math_utils.py not found in attestation section of note — line-level attribution may be missing"
 fi
 
-# ── 10. git-ai blame ──────────────────────────────────────────────────────────
-if git-ai blame utils/math_utils.py > "$BLAME_OUT" 2>/dev/null; then
+# ── 10. dcc-ai-tracking blame ──────────────────────────────────────────────────────────
+if dcc-ai-tracking blame utils/math_utils.py > "$BLAME_OUT" 2>/dev/null; then
   if grep -q "fibonacci" "$BLAME_OUT" 2>/dev/null; then
-    pass "git-ai blame output covers fibonacci function lines"
+    pass "dcc-ai-tracking blame output covers fibonacci function lines"
 
     # Check for AI attribution markers in blame output (ai_human_author name or agent name)
     if grep -qiE "ai-generated|${AGENT}|generated" "$BLAME_OUT" 2>/dev/null; then
-      pass "AI attribution visible in git-ai blame output for fibonacci lines"
+      pass "AI attribution visible in dcc-ai-tracking blame output for fibonacci lines"
     else
-      warn "git-ai blame does not show explicit AI attribution for fibonacci lines (agent_id may not be present in note)"
+      warn "dcc-ai-tracking blame does not show explicit AI attribution for fibonacci lines (agent_id may not be present in note)"
     fi
   else
-    warn "fibonacci lines not visible in git-ai blame output — file may not be tracked yet"
+    warn "fibonacci lines not visible in dcc-ai-tracking blame output — file may not be tracked yet"
   fi
 else
-  warn "git-ai blame command failed — blame verification skipped"
+  warn "dcc-ai-tracking blame command failed — blame verification skipped"
 fi
 
 echo "" | tee -a "$LOG"

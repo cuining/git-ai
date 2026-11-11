@@ -28,7 +28,7 @@ fn installed_git_ai_path(repo: &TestRepo) -> PathBuf {
     repo.test_home_path()
         .join(".dcc-ai-tracking")
         .join("bin")
-        .join("git-ai.exe")
+        .join("dcc-ai-tracking.exe")
 }
 
 fn installed_git_wrapper_path(repo: &TestRepo) -> PathBuf {
@@ -238,8 +238,16 @@ fn run_installed_git_ai(repo: &TestRepo, args: &[&str], timeout: Duration) -> Co
 }
 
 fn run_installed_git_wrapper(repo: &TestRepo, args: &[&str], timeout: Duration) -> CommandResult {
-    let mut command = Command::new(installed_git_wrapper_path(repo));
-    command.args(args).current_dir(repo.path());
+    let wrapper = installed_git_wrapper_path(repo);
+    let mut command = Command::new(&wrapper);
+    command
+        .args(args)
+        .current_dir(repo.path())
+        // The test installer skips PATH updates, so point Git to the fixture extension.
+        .env(
+            "GIT_EXEC_PATH",
+            wrapper.parent().expect("wrapper install dir"),
+        );
     configure_install_env(&mut command, repo);
     run_command_with_timeout(&mut command, timeout)
 }
@@ -339,7 +347,7 @@ fn windows_install_script_reinstall_stops_running_daemon() {
     let installed_git_ai = installed_git_ai_path(&repo);
     assert!(
         installed_git_ai.exists(),
-        "git-ai.exe should be installed at {}",
+        "dcc-ai-tracking.exe should be installed at {}",
         installed_git_ai.display()
     );
 
@@ -393,13 +401,14 @@ fn windows_daemon_creates_log_file() {
 fn seed_existing_wrapper(repo: &TestRepo) {
     let bin_dir = repo.test_home_path().join(".dcc-ai-tracking").join("bin");
     fs::create_dir_all(&bin_dir).expect("failed to create install dir");
-    fs::write(bin_dir.join("git-ai.exe"), b"").expect("failed to create git-ai.exe stub");
+    fs::write(bin_dir.join("dcc-ai-tracking.exe"), b"")
+        .expect("failed to create dcc-ai-tracking.exe stub");
     fs::write(bin_dir.join("git.exe"), b"").expect("failed to create git.exe stub");
 }
 
 #[test]
 #[serial]
-fn windows_git_extension_upgrade_requires_direct_git_ai_binary() {
+fn windows_git_extension_rejects_the_retired_executable_name() {
     let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
 
     // Pre-seed wrapper state so the installer treats this as an existing-user
@@ -414,6 +423,11 @@ fn windows_git_extension_upgrade_requires_direct_git_ai_binary() {
         initial_install.stderr
     );
 
+    // Git resolves `git ai` through the legacy extension filename.
+    let installed = installed_git_ai_path(&repo);
+    fs::copy(&installed, installed.with_file_name("git-ai.exe"))
+        .expect("failed to seed the legacy Git extension executable");
+
     let result = run_installed_git_wrapper(
         &repo,
         &["ai", "upgrade", "--force"],
@@ -423,18 +437,19 @@ fn windows_git_extension_upgrade_requires_direct_git_ai_binary() {
 
     assert!(
         !result.status.success(),
-        "`git ai upgrade` should fail fast on Windows\nstdout:\n{}\nstderr:\n{}",
+        "`git ai upgrade` should reject the retired executable name\nstdout:\n{}\nstderr:\n{}",
         result.stdout,
         result.stderr
     );
     assert!(
-        combined.contains("`git ai upgrade` is not supported on Windows"),
-        "expected Windows upgrade guard message, got:\n{}",
+        combined.contains("Unsupported executable name 'git-ai'.")
+            || combined.contains("Unsupported executable name 'git-ai.exe'."),
+        "expected the retired executable name to be rejected, got:\n{}",
         combined
     );
     assert!(
-        combined.contains("git-ai upgrade"),
-        "expected direct command hint, got:\n{}",
+        combined.contains("Use dcc-ai-tracking."),
+        "expected the canonical executable hint, got:\n{}",
         combined
     );
 }
@@ -454,7 +469,7 @@ fn windows_install_script_skips_wrapper_for_new_users() {
 
     assert!(
         installed_git_ai_path(&repo).exists(),
-        "git-ai.exe should be installed at {}",
+        "dcc-ai-tracking.exe should be installed at {}",
         installed_git_ai_path(&repo).display()
     );
 
