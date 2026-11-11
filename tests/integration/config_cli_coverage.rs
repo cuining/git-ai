@@ -5,7 +5,7 @@
 //! These run the real binary against an isolated test HOME, so `config set`
 //! writes land in the sandboxed `~/.git-ai/config.json` rather than the user's.
 
-use crate::repos::test_repo::TestRepo;
+use crate::repos::test_repo::{DaemonTestScope, TestRepo, get_binary_path};
 use git_ai::config::{AuthorConfig, FileConfig, NotesBackendConfig};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -14,6 +14,110 @@ fn run_config(repo: &TestRepo, args: &[&str]) -> std::process::Output {
     repo.git_ai_command_without_pre_sync_for_test(args, &[])
         .output()
         .unwrap_or_else(|e| panic!("git-ai {args:?} failed to run: {e}"))
+}
+
+#[test]
+fn test_enterprise_binary_name_dispatches_direct_commands() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let expected = if cfg!(windows) {
+        "git-ai.exe"
+    } else {
+        "git-ai"
+    };
+    assert_eq!(get_binary_path().file_name().unwrap(), expected);
+
+    let version = run_config(&repo, &["--version"]);
+    assert!(version.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&version.stdout)
+            .split_whitespace()
+            .next(),
+        Some(env!("CARGO_PKG_VERSION"))
+    );
+
+    let help = run_config(&repo, &["--help"]);
+    assert!(help.status.success());
+    assert!(String::from_utf8_lossy(&help.stderr).contains("Usage: git-ai"));
+}
+
+#[test]
+fn test_unsupported_binary_name_is_rejected() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let unsupported_path = repo.path().join(if cfg!(windows) {
+        "git-ai-unsupported.exe"
+    } else {
+        "git-ai-unsupported"
+    });
+    let binary = get_binary_path();
+    std::fs::hard_link(binary, &unsupported_path)
+        .or_else(|_| std::fs::copy(binary, &unsupported_path).map(|_| ()))
+        .expect("stage the current binary under an unsupported executable name");
+
+    let output = std::process::Command::new(unsupported_path)
+        .current_dir(repo.path())
+        .env_remove("GIT_AI")
+        .arg("--version")
+        .output()
+        .expect("invoke the executable under an unsupported name");
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Use git-ai"));
+}
+
+#[cfg(unix)]
+#[test]
+fn test_mixed_case_git_binary_name_dispatches_git() {
+    use std::os::unix::process::CommandExt;
+
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let expected = repo.git_og(&["--version"]).expect("run real Git");
+    let output = repo
+        .git_ai_command_without_pre_sync_for_test(&["--version"], &[])
+        .env_remove("GIT_AI")
+        .arg0("Git")
+        .output()
+        .expect("invoke the proxy with a mixed-case executable name");
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        expected.trim()
+    );
+}
+
+#[test]
+fn test_config_uses_git_ai_directory() {
+    let repo = TestRepo::new();
+    repo.git_ai(&["config", "set", "custom_attributes.team", "platform"])
+        .expect("set config in the default directory");
+
+    let config_path = repo.test_home_path().join(".git-ai/config.json");
+    let contents = std::fs::read_to_string(config_path).expect("config in .git-ai");
+    let config: Value = serde_json::from_str(&contents).unwrap();
+    assert_eq!(config["custom_attributes"]["team"], "platform");
+}
+
+#[test]
+fn test_config_save_does_not_use_a_shared_temporary_file() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let config_dir = repo.test_home_path().join(".git-ai");
+    let occupied_path = config_dir.join("config.tmp");
+    std::fs::create_dir_all(&occupied_path).unwrap();
+
+    let output = run_config(&repo, &["config", "set", "remote_api_enabled", "false"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let contents = std::fs::read_to_string(config_dir.join("config.json")).unwrap();
+    let config: Value = serde_json::from_str(&contents).unwrap();
+    assert_eq!(config["remote_api_enabled"], false);
+    assert!(occupied_path.is_dir());
 }
 
 #[test]
@@ -444,6 +548,7 @@ fn fully_populated_file_config() -> FileConfig {
         update_channel: Some("latest".to_string()),
         feature_flags: Some(serde_json::json!({"transcript_sweep": true})),
         api_base_url: Some("https://usegitai.com".to_string()),
+        remote_api_enabled: Some(false),
         prompt_storage: Some("default".to_string()),
         default_prompt_storage: Some("local".to_string()),
         api_key: Some("secret-key".to_string()),
@@ -555,4 +660,76 @@ fn test_every_file_config_field_has_cli_unset_coverage() {
          (add them to set_config_value and unset_config_value, or document them \
          in is_nested_only_for_mutation): {unknown_to_unset:?}"
     );
+}
+
+#[test]
+fn test_remote_api_enabled_config_round_trip() {
+    let repo = TestRepo::new();
+    assert_eq!(get_json(&repo, "remote_api_enabled"), Value::Bool(true));
+    repo.git_ai(&["config", "set", "remote_api_enabled", "false"])
+        .expect("disable remote services");
+    assert_eq!(get_json(&repo, "remote_api_enabled"), Value::Bool(false));
+    let all: Value = serde_json::from_str(&repo.git_ai(&["config"]).unwrap()).unwrap();
+    assert_eq!(all["remote_api_enabled"], false);
+    repo.git_ai(&["config", "unset", "remote_api_enabled"])
+        .expect("restore remote default");
+    assert_eq!(get_json(&repo, "remote_api_enabled"), Value::Bool(true));
+}
+
+#[test]
+fn test_remote_api_disabled_preserves_local_checkpoint_and_commit() {
+    use crate::repos::test_file::ExpectedLineExt;
+    let mut repo = TestRepo::new();
+    repo.patch_git_ai_config(|patch| patch.remote_api_enabled = Some(false));
+    let mut human_file = repo.filename("human.txt");
+    human_file.set_contents(lines!["existing human code".human()]);
+    repo.stage_all_and_commit("base").unwrap();
+    human_file.assert_committed_lines(lines!["existing human code".human()]);
+    let mut ai_file = repo.filename("local-only.txt");
+    ai_file.set_contents(lines!["new AI code".ai()]);
+    repo.stage_all_and_commit("local attribution").unwrap();
+    human_file.assert_committed_lines(lines!["existing human code".human()]);
+    ai_file.assert_committed_lines(lines!["new AI code".ai()]);
+}
+
+#[test]
+fn test_remote_api_disabled_overrides_http_notes_backend_and_keeps_local_attribution() {
+    use crate::repos::test_file::ExpectedLineExt;
+    use git_ai::config::NotesBackendKind;
+    let cases: &[&[(&str, &str)]] = &[
+        &[("GIT_AI_API_KEY", "fixture-environment-key")],
+        &[
+            ("GIT_AI_API_KEY", "fixture-environment-key"),
+            ("GIT_AI_NOTES_BACKEND_KIND", "http"),
+        ],
+    ];
+    for (index, envs) in cases.iter().enumerate() {
+        let mut repo = TestRepo::new();
+        repo.patch_git_ai_config(|patch| {
+            patch.remote_api_enabled = Some(false);
+            if index == 1 {
+                patch.notes_backend = Some(NotesBackendConfig {
+                    kind: NotesBackendKind::Http,
+                    backend_url: Some("http://127.0.0.1:9".to_string()),
+                });
+            }
+        });
+        assert_eq!(
+            get_json_with_env(&repo, "notes_backend.kind", envs),
+            Value::String("git_notes".to_string()),
+            "local mode must override both implicit and configured HTTP notes",
+        );
+        let mut human_file = repo.filename("human.txt");
+        human_file.set_contents(lines!["existing human code".human()]);
+        repo.stage_all_and_commit("base").unwrap();
+        human_file.assert_committed_lines(lines!["existing human code".human()]);
+        let ai_path = repo.path().join("local-only.txt");
+        std::fs::write(&ai_path, "new AI code\n").unwrap();
+        repo.git_ai_with_env(&["checkpoint", "mock_ai", ai_path.to_str().unwrap()], envs)
+            .expect("local checkpoint with environment credentials");
+        repo.stage_all_and_commit("local attribution").unwrap();
+        human_file.assert_committed_lines(lines!["existing human code".human()]);
+        repo.filename("local-only.txt")
+            .assert_committed_lines(lines!["new AI code".ai()]);
+    }
 }

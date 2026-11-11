@@ -8,9 +8,9 @@ namespace GitAiVS.Services
     /// <summary>
     /// Locates the git-ai binary on the system.
     /// Search order:
-    ///   1. %USERPROFILE%\.git-ai\bin\git-ai.exe  (production install)
-    ///   2. %USERPROFILE%\.git-ai-local-dev\gitwrap\bin\git-ai.exe  (nix dev)
-    ///   3. PATH lookup via "where git-ai"
+    ///   1. %USERPROFILE%\.git-ai\bin\  (production install)
+    ///   2. %USERPROFILE%\.git-ai-local-dev\gitwrap\bin\  (nix dev)
+    ///   3. PATH lookup
     ///
     /// Modeled after IntelliJ's GitAiService.findGitAiBinary().
     /// </summary>
@@ -41,7 +41,7 @@ namespace GitAiVS.Services
                 var searched = _lastSearchedPaths != null ? string.Join(", ", _lastSearchedPaths) : "(none)";
                 Trace.WriteLine("[git-ai] git-ai not found");
                 Trace.WriteLine($"[git-ai]   Searched locations: {searched}");
-                Trace.WriteLine("[git-ai]   To fix: Install git-ai from https://usegitai.com");
+                Trace.WriteLine("[git-ai]   Install Git AI and ensure git-ai is in your PATH.");
                 return null;
             }
 
@@ -74,18 +74,15 @@ namespace GitAiVS.Services
         {
             var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             var isWindows = Environment.OSVersion.Platform == PlatformID.Win32NT;
+            var executable = isWindows ? "git-ai.exe" : "git-ai";
+            var installDirectory = Path.Combine(home, ".git-ai", "bin");
+            var devDirectory = Path.Combine(home, ".git-ai-local-dev", "gitwrap", "bin");
 
-            _lastSearchedPaths = isWindows
-                ? new[]
-                {
-                    Path.Combine(home, ".git-ai", "bin", "git-ai.exe"),
-                    Path.Combine(home, ".git-ai-local-dev", "gitwrap", "bin", "git-ai.exe"),
-                }
-                : new[]
-                {
-                    Path.Combine(home, ".git-ai", "bin", "git-ai"),
-                    Path.Combine(home, ".git-ai-local-dev", "gitwrap", "bin", "git-ai"),
-                };
+            _lastSearchedPaths = new[]
+            {
+                Path.Combine(installDirectory, executable),
+                Path.Combine(devDirectory, executable),
+            };
 
             foreach (var candidate in _lastSearchedPaths)
             {
@@ -104,7 +101,9 @@ namespace GitAiVS.Services
                 var psi = new ProcessStartInfo
                 {
                     FileName = isWindows ? "cmd" : "/bin/sh",
-                    Arguments = isWindows ? "/c where git-ai" : "-l -c \"which git-ai\"",
+                    Arguments = isWindows
+                        ? "/d /c where git-ai"
+                        : "-l -c \"command -v git-ai\"",
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,

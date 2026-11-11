@@ -7,7 +7,7 @@ This document describes the design of a Visual Studio (VSIX) extension that dete
 ### Goals
 
 - Detect when GitHub Copilot (inline completions or chat edits) modifies code in Visual Studio
-- Record AI-authored edits by calling `git ai checkpoint agent-v1 --hook-input stdin`
+- Record AI-authored edits by calling `git-ai checkpoint agent-v1 --hook-input stdin`
 - Record human edits as `known_human` checkpoints so git-ai can distinguish the before/after boundary
 - Auto-install via `git ai install-hooks`
 
@@ -87,7 +87,7 @@ Because Visual Studio runs Copilot extensions in-process on the UI thread (like 
 │                    ▼                                     │
 │  ┌──────────────────────────────────────────────┐       │
 │  │  CheckpointService                           │       │
-│  │  Spawns: git-ai checkpoint agent-v1          │       │
+│  │  Spawns: git-ai checkpoint agent-v1  │       │
 │  │          --hook-input stdin                   │       │
 │  │  Writes JSON to stdin, reads exit code       │       │
 │  └──────────────────────────────────────────────┘       │
@@ -162,9 +162,9 @@ Locates the `git-ai` (or `git-ai.exe`) binary. Search order:
 
 1. `%USERPROFILE%\.git-ai\bin\git-ai.exe` (standard install location on Windows)
 2. `%USERPROFILE%\.git-ai-local-dev\gitwrap\bin\git-ai.exe` (nix dev path)
-3. `PATH` lookup via `where git-ai` (Windows) or `which git-ai` (Mac/Linux)
+3. `PATH` lookup for `git-ai`
 
-After finding the binary, runs `git-ai version` to verify it meets the minimum version requirement (currently `1.0.23`, matching IntelliJ). Caches the resolved path for the session. Logs structured error messages when the binary is not found or version is too old, matching IntelliJ's `GitAiService.findGitAiBinary()` pattern.
+After finding the binary, runs its `version` command to verify it meets the minimum version requirement (currently `1.0.23`, matching IntelliJ). Caches the resolved path for the session. Logs structured error messages when the binary is not found or version is too old, matching IntelliJ's `GitAiService.findGitAiBinary()` pattern.
 
 ### 4.3 GitRepoResolver
 

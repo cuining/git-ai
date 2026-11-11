@@ -7,7 +7,7 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use glob::Pattern;
-use serde::{Deserialize, Serialize, Serializer};
+use serde::{Deserialize, Serialize, Serializer, de::DeserializeOwned};
 
 use crate::feature_flags::FeatureFlags;
 use crate::git::repository::Repository;
@@ -179,6 +179,7 @@ pub struct Config {
     update_channel: UpdateChannel,
     feature_flags: FeatureFlags,
     api_base_url: String,
+    remote_api_enabled: bool,
     prompt_storage: String,
     default_prompt_storage: Option<String>,
     #[serde(serialize_with = "serialize_masked_api_key")]
@@ -257,6 +258,8 @@ pub struct FileConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_base_url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_api_enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_storage: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_prompt_storage: Option<String>,
@@ -331,6 +334,8 @@ pub struct ConfigPatch {
     pub untraced_fixup_ignored_paths: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub telemetry_oss_disabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_api_enabled: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disable_version_checks: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -563,7 +568,13 @@ impl Config {
         &self.feature_flags
     }
 
-    /// Returns the API base URL
+    /// Whether git-ai may contact remote services. File configuration cannot be
+    /// overridden by API keys, OAuth credentials, or telemetry environment values.
+    pub fn remote_api_enabled(&self) -> bool {
+        self.remote_api_enabled
+    }
+
+    /// Returns the API base URL.
     pub fn api_base_url(&self) -> &str {
         &self.api_base_url
     }
@@ -1080,6 +1091,11 @@ fn build_config() -> Config {
     // Build feature flags from file config
     let feature_flags = build_feature_flags(&file_cfg);
 
+    let remote_api_enabled = file_cfg
+        .as_ref()
+        .and_then(|c| c.remote_api_enabled)
+        .unwrap_or(true);
+
     // Get API base URL from config, env var, or default
     let api_base_url = file_cfg
         .as_ref()
@@ -1208,9 +1224,15 @@ fn build_config() -> Config {
     };
 
     let notes_backend = NotesBackendConfig {
-        kind: kind_from_env
-            .or_else(|| file_backend.as_ref().map(|b| b.kind))
-            .unwrap_or(default_kind),
+        kind: if remote_api_enabled {
+            kind_from_env
+                .or_else(|| file_backend.as_ref().map(|b| b.kind))
+                .unwrap_or(default_kind)
+        } else {
+            // Local mode must keep checkpoint/commit notes local even when an
+            // API key or environment override normally selects HTTP storage.
+            NotesBackendKind::GitNotes
+        },
         backend_url: Some(resolve_notes_backend_url(
             url_from_env,
             file_backend.as_ref(),
@@ -1278,6 +1300,7 @@ fn build_config() -> Config {
             update_channel,
             feature_flags,
             api_base_url,
+            remote_api_enabled,
             prompt_storage,
             default_prompt_storage,
             api_key,
@@ -1313,6 +1336,7 @@ fn build_config() -> Config {
         update_channel,
         feature_flags,
         api_base_url,
+        remote_api_enabled,
         prompt_storage,
         default_prompt_storage,
         api_key,
@@ -1525,15 +1549,15 @@ fn load_file_config() -> Option<FileConfig> {
     parse_file_config_bytes(&data).ok()
 }
 
-fn parse_file_config_bytes(data: &[u8]) -> Result<FileConfig, serde_json::Error> {
+fn parse_file_config_bytes<T: DeserializeOwned>(data: &[u8]) -> Result<T, serde_json::Error> {
     // Windows PowerShell 5.1 writes UTF-8 with BOM by default for `Out-File -Encoding UTF8`.
     // Tolerate BOM-prefixed config files so upgrades/installers don't brick config parsing.
     let data = data.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(data);
-    serde_json::from_slice::<FileConfig>(data)
+    serde_json::from_slice(data)
 }
 
 fn config_file_path() -> Option<PathBuf> {
-    Some(home_dir().join(".git-ai").join("config.json"))
+    git_ai_dir_path().map(|dir| dir.join("config.json"))
 }
 
 /// Public accessor for config file path
@@ -1544,7 +1568,17 @@ pub fn config_file_path_public() -> Option<PathBuf> {
 
 /// Returns the path to the git-ai base directory (~/.git-ai)
 pub fn git_ai_dir_path() -> Option<PathBuf> {
-    Some(home_dir().join(".git-ai"))
+    Some(git_ai_dir_for_home(&home_dir()))
+}
+
+/// Resolve git-ai's storage directory for an explicit home (including daemon/test homes).
+pub fn git_ai_dir_for_home(home: &Path) -> PathBuf {
+    home.join(".git-ai")
+}
+
+/// Resolve internal state for the same home used by the caller.
+pub fn internal_dir_for_home(home: &Path) -> PathBuf {
+    git_ai_dir_for_home(home).join("internal")
 }
 
 /// Returns the path to the internal state directory (~/.git-ai/internal)
@@ -1611,12 +1645,16 @@ pub fn update_check_path() -> Option<PathBuf> {
 
 /// Load the raw file config
 pub fn load_file_config_public() -> Result<FileConfig, String> {
+    load_config_document()
+}
+
+pub(crate) fn load_config_document<T: DeserializeOwned + Default>() -> Result<T, String> {
     let path =
         config_file_path().ok_or_else(|| "Could not determine config file path".to_string())?;
 
     if !path.exists() {
         // Return empty config if file doesn't exist
-        return Ok(FileConfig::default());
+        return Ok(T::default());
     }
 
     let data = fs::read(&path).map_err(|e| format!("Failed to read config file: {}", e))?;
@@ -1626,6 +1664,13 @@ pub fn load_file_config_public() -> Result<FileConfig, String> {
 
 /// Save the file config
 pub fn save_file_config(config: &FileConfig) -> Result<(), String> {
+    save_config_document(config)
+}
+
+pub(crate) fn save_config_document(config: &impl Serialize) -> Result<(), String> {
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+
     let path =
         config_file_path().ok_or_else(|| "Could not determine config file path".to_string())?;
 
@@ -1633,12 +1678,22 @@ pub fn save_file_config(config: &FileConfig) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(|e| format!("Failed to create config directory: {}", e))?;
+        #[cfg(unix)]
+        fs::set_permissions(parent, fs::Permissions::from_mode(0o700))
+            .map_err(|e| format!("Failed to protect config directory: {}", e))?;
     }
 
     let json = serde_json::to_string_pretty(config)
         .map_err(|e| format!("Failed to serialize config: {}", e))?;
 
-    fs::write(&path, json).map_err(|e| format!("Failed to write config file: {}", e))
+    // Readers (including the daemon's remote policy) must never see a truncated
+    // document and fall back to defaults while another command saves a field.
+    crate::mdm::utils::write_atomic(&path, json.as_bytes())
+        .map_err(|e| format!("Failed to write config file: {}", e))?;
+    #[cfg(unix)]
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
+        .map_err(|e| format!("Failed to protect config file: {}", e))?;
+    Ok(())
 }
 
 fn is_executable(path: &Path) -> bool {
@@ -1767,6 +1822,9 @@ fn apply_test_config_patch(config: &mut Config) {
             config.untraced_fixup_ignored_paths =
                 parse_path_patterns("untraced_fixup_ignored_paths", patterns);
         }
+        if let Some(remote_api_enabled) = patch.remote_api_enabled {
+            config.remote_api_enabled = remote_api_enabled;
+        }
         if let Some(telemetry_oss_disabled) = patch.telemetry_oss_disabled {
             config.telemetry_oss_disabled = telemetry_oss_disabled;
         }
@@ -1835,6 +1893,9 @@ fn apply_test_config_patch(config: &mut Config) {
             config.daemon_memory_limit_mb = normalize_daemon_memory_limit_mb(limit_mb);
         }
     }
+    if !config.remote_api_enabled {
+        config.notes_backend.kind = NotesBackendKind::GitNotes;
+    }
 }
 
 #[cfg(test)]
@@ -1865,6 +1926,7 @@ mod tests {
             update_channel: UpdateChannel::Latest,
             feature_flags: FeatureFlags::default(),
             api_base_url: DEFAULT_API_BASE_URL.to_string(),
+            remote_api_enabled: true,
             prompt_storage: "default".to_string(),
             default_prompt_storage: None,
             api_key: None,
@@ -2133,6 +2195,7 @@ mod tests {
             update_channel: UpdateChannel::Latest,
             feature_flags: FeatureFlags::default(),
             api_base_url: DEFAULT_API_BASE_URL.to_string(),
+            remote_api_enabled: true,
             prompt_storage: "default".to_string(),
             default_prompt_storage: None,
             api_key: None,
@@ -2283,6 +2346,7 @@ mod tests {
             update_channel: UpdateChannel::Latest,
             feature_flags: FeatureFlags::default(),
             api_base_url: DEFAULT_API_BASE_URL.to_string(),
+            remote_api_enabled: true,
             prompt_storage: prompt_storage.to_string(),
             default_prompt_storage: default_prompt_storage.map(|s| s.to_string()),
             api_key: None,
@@ -2624,7 +2688,8 @@ mod tests {
         let mut data = vec![0xEF, 0xBB, 0xBF];
         data.extend_from_slice(br#"{"git_path":"C:\\Program Files\\Git\\cmd\\git.exe"}"#);
 
-        let parsed = parse_file_config_bytes(&data).expect("BOM-prefixed config should parse");
+        let parsed: FileConfig =
+            parse_file_config_bytes(&data).expect("BOM-prefixed config should parse");
         assert_eq!(
             parsed.git_path.as_deref(),
             Some(r"C:\Program Files\Git\cmd\git.exe")
@@ -2635,7 +2700,8 @@ mod tests {
     fn test_parse_file_config_bytes_without_bom_still_parses() {
         let data = br#"{"git_path":"/usr/bin/git"}"#;
 
-        let parsed = parse_file_config_bytes(data).expect("regular config should parse");
+        let parsed: FileConfig =
+            parse_file_config_bytes(data).expect("regular config should parse");
         assert_eq!(parsed.git_path.as_deref(), Some("/usr/bin/git"));
     }
 

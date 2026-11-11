@@ -55,7 +55,7 @@ When opening a PR, make sure to monitor the ubuntu-based CI jobs first. They are
 
 A single binary serves two roles based on `argv[0]`:
 - **`argv[0] == "git"`** --> `commands::git_handlers::handle_git()` -- proxies to real git with pre/post hooks per subcommand
-- **`argv[0] == "git-ai"`** --> `commands::git_ai_handlers::handle_git_ai()` -- direct subcommands (checkpoint, blame, diff, status, search, etc.)
+- **`argv[0]` basename `git-ai` or `git-ai.exe`** --> `commands::git_ai_handlers::handle_git_ai()` -- direct subcommands (checkpoint, blame, diff, status, search, etc.)
 - **Debug-only shortcut**: When `cfg!(debug_assertions)` and `GIT_AI=git` env var is set, forces git proxy mode regardless of binary name. Most integration tests no longer rely on this: they run the real git binary with trace2 wired to a per-test daemon (production-like), using the proxy env only in a few special cases.
 
 ### Core data flow: checkpoint --> working log --> authorship note

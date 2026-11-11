@@ -1,4 +1,4 @@
-name: Nightly Upgrade Validation
+name: Nightly Upstream Upgrade Validation
 
 permissions:
   contents: read
@@ -10,7 +10,7 @@ on:
 
 jobs:
   upgrade-from-older:
-    name: Upgrade from older versions on ${{ matrix.os }}
+    name: Upgrade older upstream git-ai on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -60,16 +60,23 @@ jobs:
               if not match:
                   continue
               version_tuple = tuple(int(part) for part in match.groups())
-              normalized = "v" + ".".join(match.groups())
-              versions[version_tuple] = normalized
+              assets = {asset["name"] for asset in release.get("assets", [])}
+              if {"install.sh", "install.ps1"} <= assets:
+                  versions[version_tuple] = tag
 
           if not versions:
               raise SystemExit("No semver releases found")
 
           min_upgrade_tuple = (1, 0, 26)
 
-          latest_tuple = max(versions)
-          latest_tag = versions[latest_tuple]
+          # The latest upgrade channel can lag the newest GitHub release.
+          with urllib.request.urlopen("https://usegitai.com/worker/releases") as response:
+              channel_version = json.load(response)["channels"]["latest"]["version"]
+          latest = pattern.fullmatch(channel_version)
+          if not latest:
+              raise SystemExit(f"Unexpected upstream upgrade version: {channel_version!r}")
+          latest_tuple = tuple(int(part) for part in latest.groups())
+          latest_tag = "v" + ".".join(latest.groups())
           older = [
               tag
               for ver, tag in versions.items()
@@ -130,16 +137,23 @@ jobs:
               if not match:
                   continue
               version_tuple = tuple(int(part) for part in match.groups())
-              normalized = "v" + ".".join(match.groups())
-              versions[version_tuple] = normalized
+              assets = {asset["name"] for asset in release.get("assets", [])}
+              if {"install.sh", "install.ps1"} <= assets:
+                  versions[version_tuple] = tag
 
           if not versions:
               raise SystemExit("No semver releases found")
 
           min_upgrade_tuple = (1, 0, 26)
 
-          latest_tuple = max(versions)
-          latest_tag = versions[latest_tuple]
+          # The latest upgrade channel can lag the newest GitHub release.
+          with urllib.request.urlopen("https://usegitai.com/worker/releases") as response:
+              channel_version = json.load(response)["channels"]["latest"]["version"]
+          latest = pattern.fullmatch(channel_version)
+          if not latest:
+              raise SystemExit(f"Unexpected upstream upgrade version: {channel_version!r}")
+          latest_tuple = tuple(int(part) for part in latest.groups())
+          latest_tag = "v" + ".".join(latest.groups())
           older = [
               tag
               for ver, tag in versions.items()
@@ -166,20 +180,22 @@ jobs:
           '@
           python -c $script
 
-      - name: Install older versions and upgrade (non-Windows)
+      - name: Install older upstream versions and upgrade (non-Windows)
         if: runner.os != 'Windows'
         shell: bash
         run: |
           set -euo pipefail
-          export PATH="$HOME/.git-ai/bin:$PATH"
+          binary="$HOME/.git-ai/bin/git-ai"
+          installer="$RUNNER_TEMP/install-upstream.sh"
           latest="${{ steps.versions.outputs.latest }}"
           latest="${latest#v}"
           for version in ${{ steps.versions.outputs.versions }}; do
             echo "Installing ${version}"
-            GIT_AI_RELEASE_TAG="$version" ./install.sh
-            git-ai --version
-            git-ai upgrade
-            installed=$(git-ai --version | awk '{print $NF}')
+            curl -fsSL "https://github.com/git-ai-project/git-ai/releases/download/$version/install.sh" -o "$installer"
+            bash "$installer"
+            "$binary" --version
+            "$binary" upgrade
+            installed=$("$binary" --version | awk '{print $NF}')
             installed="${installed#v}"
             if [ "$installed" != "$latest" ]; then
               echo "Expected ${latest}, got ${installed}"
@@ -187,7 +203,7 @@ jobs:
             fi
           done
 
-      - name: Install older versions and upgrade (Windows)
+      - name: Install older upstream versions and upgrade (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
@@ -195,18 +211,21 @@ jobs:
           $latest = "${{ steps.versions-windows.outputs.latest }}"
           $latest = $latest.TrimStart('v')
           $versions = "${{ steps.versions-windows.outputs.versions }}".Split(' ', [System.StringSplitOptions]::RemoveEmptyEntries)
-          $env:PATH = "$HOME\.git-ai\bin;$env:PATH"
+          $binary = Join-Path $HOME '.git-ai\bin\git-ai.exe'
+          $installer = Join-Path $env:RUNNER_TEMP 'install-upstream.ps1'
           foreach ($version in $versions) {
             Write-Host "Installing $version"
-            $env:GIT_AI_RELEASE_TAG = $version
-            pwsh -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
-            & "$HOME\.git-ai\bin\git-ai" --version | Out-Host
-            & "$HOME\.git-ai\bin\git-ai" upgrade
-            $installed = (& "$HOME\.git-ai\bin\git-ai" --version).Trim().Split()[-1].TrimStart('v')
+            Invoke-WebRequest -Uri "https://github.com/git-ai-project/git-ai/releases/download/$version/install.ps1" -OutFile $installer
+            pwsh -NoProfile -ExecutionPolicy Bypass -File $installer
+            if ($LASTEXITCODE -ne 0) { throw "Upstream installer exited with code $LASTEXITCODE" }
+            & $binary --version | Out-Host
+            & $binary upgrade
+            if ($LASTEXITCODE -ne 0) { throw "Upstream upgrade exited with code $LASTEXITCODE" }
+            $installed = (& $binary --version).Trim().Split()[-1].TrimStart('v')
             $deadline = (Get-Date).AddMinutes(3)
             while ($installed -ne $latest -and (Get-Date) -lt $deadline) {
               Start-Sleep -Seconds 5
-              $installed = (& "$HOME\.git-ai\bin\git-ai" --version).Trim().Split()[-1].TrimStart('v')
+              $installed = (& $binary --version).Trim().Split()[-1].TrimStart('v')
             }
             if ($installed -ne $latest) {
               throw "Expected $latest after upgrade, got $installed"

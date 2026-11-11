@@ -396,7 +396,7 @@ impl DaemonConfig {
     }
 
     pub fn from_home(home: &Path) -> Self {
-        let internal_dir = home.join(".git-ai").join("internal");
+        let internal_dir = crate::config::internal_dir_for_home(home);
         Self::from_internal_dir(internal_dir)
     }
 
@@ -2626,7 +2626,7 @@ fn prune_stale_daemon_logs(log_dir: &Path) {
 /// count as gone: they have finished writing. Processes we may not signal
 /// (another user's) count as alive.
 #[cfg(unix)]
-fn process_alive(pid: u32) -> bool {
+pub(crate) fn process_alive(pid: u32) -> bool {
     // kill(pid, 0) checks existence without sending a signal.
     let exists = unsafe { libc::kill(pid as libc::pid_t, 0) } == 0
         || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM);
@@ -2649,13 +2649,29 @@ fn process_is_zombie(pid: u32) -> bool {
         .unwrap_or(false)
 }
 
-#[cfg(all(unix, not(target_os = "linux")))]
+#[cfg(target_os = "macos")]
+fn process_is_zombie(pid: u32) -> bool {
+    // proc_pidinfo excludes zombies even while kill(pid, 0) finds them.
+    let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::uninit();
+    let bytes = unsafe {
+        libc::proc_pidinfo(
+            pid as libc::pid_t,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            info.as_mut_ptr().cast(),
+            std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int,
+        )
+    };
+    bytes == 0 && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
+}
+
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
 fn process_is_zombie(_pid: u32) -> bool {
     false
 }
 
 #[cfg(windows)]
-fn process_alive(pid: u32) -> bool {
+pub(crate) fn process_alive(pid: u32) -> bool {
     use windows_sys::Win32::Foundation::{
         CloseHandle, ERROR_ACCESS_DENIED, GetLastError, STILL_ACTIVE,
     };
@@ -8899,7 +8915,12 @@ impl ActorDaemonCoordinator {
                         "checkpoint acceptance closed for graceful shutdown"
                     );
                     match self.drain_accepted_checkpoints().await {
-                        Ok(()) => Ok(ControlResponse::ok(None, None)),
+                        Ok(()) => Ok(ControlResponse::ok(
+                            None,
+                            Some(serde_json::json!({
+                                "shutdown_deadline_secs": daemon_shutdown_deadline().as_secs(),
+                            })),
+                        )),
                         Err(error) => {
                             if let Err(reopen_error) = self.set_checkpoint_acceptance(true) {
                                 tracing::error!(
@@ -10984,6 +11005,7 @@ pub(crate) async fn run_daemon(config: DaemonConfig) -> Result<DaemonExitAction,
 }
 
 const DAEMON_SHUTDOWN_DEADLINE_SECS: u64 = 5;
+const DAEMON_SHUTDOWN_REPORT_TIMEOUT: Duration = Duration::from_millis(500);
 
 fn daemon_shutdown_deadline() -> Duration {
     std::env::var("GIT_AI_DAEMON_SHUTDOWN_DEADLINE_SECS")
@@ -10991,6 +11013,17 @@ fn daemon_shutdown_deadline() -> Duration {
         .and_then(|v| v.parse::<u64>().ok())
         .map(Duration::from_secs)
         .unwrap_or(Duration::from_secs(DAEMON_SHUTDOWN_DEADLINE_SECS))
+}
+
+pub(crate) fn shutdown_wait_timeout(response: &ControlResponse) -> Duration {
+    let deadline_secs = response
+        .data
+        .as_ref()
+        .and_then(|data| data["shutdown_deadline_secs"].as_u64())
+        .unwrap_or(DAEMON_SHUTDOWN_DEADLINE_SECS);
+    Duration::from_secs(deadline_secs)
+        .saturating_add(DAEMON_SHUTDOWN_REPORT_TIMEOUT)
+        .saturating_add(Duration::from_secs(1))
 }
 
 /// Terminal backstop for invariant "git is never blocked": once shutdown is
@@ -11036,7 +11069,7 @@ fn spawn_shutdown_deadline_enforcer(
             // to guarantee (the DB's busy_timeout alone is 5s).
             let report_coordinator = coordinator.clone();
             let report = std::thread::spawn(move || report_ingest_losses(&report_coordinator));
-            let report_deadline = std::time::Instant::now() + Duration::from_millis(500);
+            let report_deadline = std::time::Instant::now() + DAEMON_SHUTDOWN_REPORT_TIMEOUT;
             while !report.is_finished() && std::time::Instant::now() < report_deadline {
                 std::thread::sleep(Duration::from_millis(10));
             }

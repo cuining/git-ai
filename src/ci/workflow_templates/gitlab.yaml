@@ -1,5 +1,6 @@
 # Git AI - GitLab CI Configuration
 # Add this job to your .gitlab-ci.yml file
+# Use a runner image with git-ai or add a provisioning step before this script.
 #
 # SETUP: Create a GITLAB_TOKEN variable with api and write_repository scopes.
 #
@@ -21,8 +22,12 @@ git-ai:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"
       when: always
   script:
-    - curl -fsSL https://usegitai.com/install.sh | bash
-    - export PATH="$HOME/.git-ai/bin:$PATH"
+    - |
+      export PATH="$HOME/.git-ai/bin:$PATH"
+      if ! command -v git-ai >/dev/null 2>&1; then
+        echo "Provision git-ai from the approved DCC Linux package and place it in ~/.git-ai/bin or a directory on PATH." >&2
+        exit 1
+      fi
     - git config --global user.name "gitlab-ci[bot]"
     - git config --global user.email "gitlab-ci[bot]@users.noreply.gitlab.com"
     - git-ai ci gitlab run

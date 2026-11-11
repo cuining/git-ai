@@ -131,7 +131,7 @@ impl NotesDatabase {
 
         let home = dirs::home_dir()
             .ok_or_else(|| GitAiError::Generic("Could not determine home directory".to_string()))?;
-        Ok(home.join(".git-ai").join("internal").join("notes-db"))
+        Ok(crate::config::internal_dir_for_home(&home).join("notes-db"))
     }
 
     /// Apply schema migrations until the DB is at `SCHEMA_VERSION`.
@@ -955,7 +955,7 @@ mod tests {
         let path = NotesDatabase::database_path().unwrap();
         let path_str = path.to_string_lossy();
         assert!(
-            path_str.contains(".git-ai"),
+            path.components().any(|part| part.as_os_str() == ".git-ai"),
             "path should contain .git-ai: {}",
             path_str
         );

@@ -32,7 +32,7 @@ pub fn handle_notes_migrate(args: &[String]) {
             }
             other => {
                 eprintln!("error: unknown option '{}'", other);
-                eprintln!("Run 'git ai notes migrate --help' for usage");
+                eprintln!("Run 'git-ai notes migrate --help' for usage");
                 std::process::exit(1);
             }
         }
@@ -397,9 +397,9 @@ fn cat_file_batch(
 }
 
 fn print_help() {
-    eprintln!("git ai notes migrate - Bulk-upload existing git notes to the HTTP backend");
+    eprintln!("git-ai notes migrate - Bulk-upload existing git notes to the HTTP backend");
     eprintln!();
-    eprintln!("Usage: git ai notes migrate [options]");
+    eprintln!("Usage: git-ai notes migrate [options]");
     eprintln!();
     eprintln!("Options:");
     eprintln!("  --force, --all  Re-upload all notes even if already cached locally.");

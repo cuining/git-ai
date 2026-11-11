@@ -47,6 +47,8 @@ fn main() {
                 .map(|s| s.to_string())
         })
         .unwrap_or("git-ai".to_string());
+    #[cfg(windows)]
+    let binary_name = binary_name.to_ascii_lowercase();
 
     if commands::git_hook_handlers::is_git_hook_binary_name(&binary_name) {
         eprintln!(
@@ -68,10 +70,10 @@ fn main() {
         }
     }
 
-    if binary_name == "git-ai" || binary_name == "git-ai.exe" {
+    if matches!(binary_name.as_str(), "git-ai" | "git-ai.exe") {
         // Block elevated privileges to prevent creating root-owned files
         // that break normal-user daemon startup. Only applies to direct
-        // `git-ai` commands (not the git proxy, which must stay transparent).
+        // `git-ai` commands. The git proxy must stay transparent.
         // Exempt commands that must work regardless (upgrade, daemon run, help, etc.).
         if !is_superuser_exempt_command(&cli.args) {
             match check_superuser_guard() {
@@ -88,5 +90,10 @@ fn main() {
         std::process::exit(0);
     }
 
-    commands::git_handlers::handle_git(&cli.args);
+    if binary_name.eq_ignore_ascii_case("git") || binary_name.eq_ignore_ascii_case("git.exe") {
+        commands::git_handlers::handle_git(&cli.args);
+    } else {
+        eprintln!("Unsupported executable name '{binary_name}'. Use git-ai.");
+        std::process::exit(1);
+    }
 }

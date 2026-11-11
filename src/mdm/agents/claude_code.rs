@@ -3,7 +3,7 @@ use crate::mdm::hook_installer::{HookCheckResult, HookInstaller, HookInstallerPa
 use crate::mdm::utils::{
     MIN_CLAUDE_VERSION, binary_exists, claude_config_dir, generate_diff, get_binary_version,
     is_git_ai_checkpoint_command, normalize_windows_path_for_shell, parse_version,
-    version_meets_requirement, write_atomic,
+    shell_quote_path, version_meets_requirement, write_atomic,
 };
 use serde_json::{Value, json};
 use std::fs;
@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 const CLAUDE_PRE_TOOL_CMD: &str = "checkpoint claude --hook-input stdin";
 const CLAUDE_POST_TOOL_CMD: &str = "checkpoint claude --hook-input stdin";
 const CLAUDE_CATCH_ALL_MATCHER: &str = "*";
+const CLAUDE_HOOK_SOURCE: &str = "dcc-git-ai";
 
 pub struct ClaudeCodeInstaller;
 
@@ -23,7 +24,7 @@ impl ClaudeCodeInstaller {
 
     /// Returns `(hooks_installed, hooks_up_to_date)` from a parsed settings value.
     /// `hooks_installed` = git-ai checkpoint command exists in ANY matcher block.
-    /// `hooks_up_to_date` = git-ai checkpoint command exists in the `"*"` catch-all block.
+    /// `hooks_up_to_date` = git-ai checkpoint exists in its own `"*"` catch-all block.
     fn hook_status(settings: &Value) -> (bool, bool) {
         let pre_tool_blocks = settings
             .get("hooks")
@@ -59,7 +60,9 @@ impl ClaudeCodeInstaller {
 
             if has_git_ai {
                 hooks_installed = true;
-                if is_catch_all {
+                if is_catch_all
+                    && block.get("_source").and_then(Value::as_str) == Some(CLAUDE_HOOK_SOURCE)
+                {
                     hooks_up_to_date = true;
                 }
             }
@@ -90,6 +93,11 @@ impl ClaudeCodeInstaller {
         };
 
         let binary_path_str = normalize_windows_path_for_shell(&params.binary_path);
+        let binary_path_str = if cfg!(windows) {
+            binary_path_str
+        } else {
+            shell_quote_path(&binary_path_str)
+        };
         let pre_tool_cmd = format!("{} {}", binary_path_str, CLAUDE_PRE_TOOL_CMD);
         let post_tool_cmd = format!("{} {}", binary_path_str, CLAUDE_POST_TOOL_CMD);
 
@@ -106,113 +114,28 @@ impl ClaudeCodeInstaller {
                 .cloned()
                 .unwrap_or_default();
 
-            // Step 1: Strip git-ai from every non-catch-all matcher block (migration).
-            // Track which blocks we emptied so we can remove them below.
-            let mut emptied_by_migration = vec![false; hook_type_array.len()];
-            for (i, block) in hook_type_array.iter_mut().enumerate() {
-                let is_catch_all = block
-                    .get("matcher")
-                    .and_then(|m| m.as_str())
-                    .map(|m| m == CLAUDE_CATCH_ALL_MATCHER)
-                    .unwrap_or(false);
-                if !is_catch_all
-                    && let Some(hooks) = block.get_mut("hooks").and_then(|h| h.as_array_mut())
-                {
-                    let before = hooks.len();
-                    hooks.retain(|hook| {
-                        hook.get("command")
-                            .and_then(|c| c.as_str())
-                            .map(|cmd| !is_git_ai_checkpoint_command(cmd))
-                            .unwrap_or(true)
-                    });
-                    if hooks.is_empty() && before > 0 {
-                        emptied_by_migration[i] = true;
-                    }
-                }
-            }
-            // Remove blocks that we emptied; leave pre-existing empty blocks alone.
-            let mut i = 0;
-            hook_type_array.retain(|_| {
-                let remove = emptied_by_migration[i];
-                i += 1;
-                !remove
-            });
-
-            // Step 2: Find or create the "*" catch-all matcher block.
-            let catch_all_idx = hook_type_array
-                .iter()
-                .position(|b| {
-                    b.get("matcher")
-                        .and_then(|m| m.as_str())
-                        .map(|m| m == CLAUDE_CATCH_ALL_MATCHER)
-                        .unwrap_or(false)
-                })
-                .unwrap_or_else(|| {
-                    hook_type_array.push(json!({
-                        "matcher": CLAUDE_CATCH_ALL_MATCHER,
-                        "hooks": []
-                    }));
-                    hook_type_array.len() - 1
+            // Migrate our commands out of shared/legacy blocks without claiming their other hooks.
+            hook_type_array.retain_mut(|block| {
+                let source = block.get("_source").and_then(Value::as_str);
+                let ours = source == Some(CLAUDE_HOOK_SOURCE);
+                let foreign_owned = source.is_some() && !ours;
+                let Some(hooks) = block.get_mut("hooks").and_then(Value::as_array_mut) else {
+                    return true;
+                };
+                let before = hooks.len();
+                hooks.retain(|hook| {
+                    hook.get("command")
+                        .and_then(Value::as_str)
+                        .map(|command| !is_git_ai_checkpoint_command(command))
+                        .unwrap_or(true)
                 });
-
-            // Step 3: Ensure exactly one git-ai command in the catch-all block.
-            let mut hooks_array = hook_type_array[catch_all_idx]
-                .get("hooks")
-                .and_then(|h| h.as_array())
-                .cloned()
-                .unwrap_or_default();
-
-            let mut found_idx: Option<usize> = None;
-            let mut needs_update = false;
-
-            for (idx, hook) in hooks_array.iter().enumerate() {
-                if let Some(cmd) = hook.get("command").and_then(|c| c.as_str())
-                    && is_git_ai_checkpoint_command(cmd)
-                    && found_idx.is_none()
-                {
-                    found_idx = Some(idx);
-                    if cmd != *desired_cmd {
-                        needs_update = true;
-                    }
-                }
-            }
-
-            match found_idx {
-                Some(idx) => {
-                    if needs_update {
-                        hooks_array[idx] = json!({
-                            "type": "command",
-                            "command": desired_cmd
-                        });
-                    }
-                    // Remove duplicates: keep the first, drop any subsequent git-ai entries.
-                    let keep_idx = idx;
-                    let mut current_idx = 0;
-                    hooks_array.retain(|hook| {
-                        if current_idx == keep_idx {
-                            current_idx += 1;
-                            true
-                        } else if let Some(cmd) = hook.get("command").and_then(|c| c.as_str()) {
-                            let is_dup = is_git_ai_checkpoint_command(cmd);
-                            current_idx += 1;
-                            !is_dup
-                        } else {
-                            current_idx += 1;
-                            true
-                        }
-                    });
-                }
-                None => {
-                    hooks_array.push(json!({
-                        "type": "command",
-                        "command": desired_cmd
-                    }));
-                }
-            }
-
-            if let Some(matcher_block) = hook_type_array[catch_all_idx].as_object_mut() {
-                matcher_block.insert("hooks".to_string(), Value::Array(hooks_array));
-            }
+                foreign_owned || !hooks.is_empty() || (before == 0 && !ours)
+            });
+            hook_type_array.push(json!({
+                "matcher": CLAUDE_CATCH_ALL_MATCHER,
+                "_source": CLAUDE_HOOK_SOURCE,
+                "hooks": [{"type": "command", "command": desired_cmd}]
+            }));
 
             if let Some(obj) = hooks_obj.as_object_mut() {
                 obj.insert(hook_type.to_string(), Value::Array(hook_type_array));
@@ -278,6 +201,15 @@ impl ClaudeCodeInstaller {
                         }
                     }
                 }
+                let before = hook_type_array.len();
+                hook_type_array.retain(|block| {
+                    block.get("_source").and_then(Value::as_str) != Some(CLAUDE_HOOK_SOURCE)
+                        || block
+                            .get("hooks")
+                            .and_then(Value::as_array)
+                            .is_none_or(|hooks| !hooks.is_empty())
+                });
+                changed |= hook_type_array.len() != before;
             }
         }
 
@@ -425,27 +357,97 @@ mod tests {
             .collect()
     }
 
-    fn catch_all_block(hook_type_array: &[Value]) -> Option<&Value> {
-        hook_type_array.iter().find(|b| {
-            b.get("matcher")
-                .and_then(|m| m.as_str())
-                .map(|m| m == CLAUDE_CATCH_ALL_MATCHER)
-                .unwrap_or(false)
-        })
+    fn hooks_in_catch_all<'a>(settings: &'a Value, hook_type: &str) -> Vec<&'a Value> {
+        settings
+            .get("hooks")
+            .and_then(|hooks| hooks.get(hook_type))
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter(|block| {
+                block.get("matcher").and_then(Value::as_str) == Some(CLAUDE_CATCH_ALL_MATCHER)
+            })
+            .filter_map(|block| block.get("hooks").and_then(Value::as_array))
+            .flatten()
+            .collect()
     }
 
-    fn hooks_in_catch_all<'a>(settings: &'a Value, hook_type: &str) -> Vec<&'a Value> {
-        let Some(blocks) = settings
-            .get("hooks")
-            .and_then(|h| h.get(hook_type))
-            .and_then(|v| v.as_array())
-        else {
-            return Vec::new();
-        };
-        catch_all_block(blocks)
-            .and_then(|b| b.get("hooks").and_then(|h| h.as_array()))
-            .map(|v| v.iter().collect())
-            .unwrap_or_default()
+    #[test]
+    fn npm_managed_hooks_do_not_join_dcc_or_user_catch_all_groups() {
+        let (_td, path) = setup_test_env();
+        let dcc = json!({
+            "matcher": "*", "_source": "dcc", "custom": "preserve metadata",
+            "hooks": [{"type": "command", "command": "/usr/local/bin/dcc hook pre-tool-use", "timeout": 20}]
+        });
+        let user =
+            json!({"matcher": "*", "hooks": [{"type": "command", "command": "my-audit-tool"}]});
+        let mut settings = json!({"unrelated": {"keep": true}, "hooks": {}});
+        for event in ["PreToolUse", "PostToolUse"] {
+            settings["hooks"][event] = json!([dcc.clone(), user.clone()]);
+        }
+        fs::write(&path, serde_json::to_string_pretty(&settings).unwrap()).unwrap();
+        ClaudeCodeInstaller::install_hooks_at(&path, &params(), false).unwrap();
+        let installed = read_settings(&path);
+        for event in ["PreToolUse", "PostToolUse"] {
+            let groups = installed["hooks"][event].as_array().unwrap();
+            assert_eq!(
+                groups[0], dcc,
+                "DCC group must remain byte-equivalent as JSON"
+            );
+            assert_eq!(groups[1], user, "user group must retain order and content");
+            assert_eq!(groups.len(), 3);
+            assert_eq!(groups[2]["_source"], "dcc-git-ai");
+            assert_eq!(groups[2]["matcher"], "*");
+            assert_eq!(groups[2]["hooks"].as_array().unwrap().len(), 1);
+            assert_eq!(groups[2]["hooks"][0]["command"], expected_cmd());
+        }
+        assert_eq!(installed["unrelated"], settings["unrelated"]);
+        assert!(
+            ClaudeCodeInstaller::install_hooks_at(&path, &params(), false)
+                .unwrap()
+                .is_none()
+        );
+        ClaudeCodeInstaller::uninstall_hooks_at(&path, false).unwrap();
+        let uninstalled = read_settings(&path);
+        for event in ["PreToolUse", "PostToolUse"] {
+            assert_eq!(uninstalled["hooks"][event][0], dcc);
+            assert_eq!(uninstalled["hooks"][event][1], user);
+            assert!(git_ai_blocks_in(uninstalled["hooks"][event].as_array().unwrap()).is_empty());
+        }
+    }
+
+    #[test]
+    fn npm_managed_install_migrates_checkpoints_out_of_foreign_owned_groups() {
+        let (_td, path) = setup_test_env();
+        let dcc = json!({"matcher": "*", "_source": "dcc", "hooks": [
+            {"type": "command", "command": "/usr/local/bin/dcc hook pre-tool-use"}
+        ]});
+        let mut legacy_dcc = dcc.clone();
+        legacy_dcc["hooks"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"type": "command", "command": expected_cmd()}));
+        let empty_foreign = json!({"matcher": "Bash", "_source": "custom-installer", "note": "keep", "hooks": [
+            {"type": "command", "command": expected_cmd()}
+        ]});
+        let mut settings = json!({"hooks": {}});
+        for event in ["PreToolUse", "PostToolUse"] {
+            settings["hooks"][event] = json!([legacy_dcc.clone(), empty_foreign.clone()]);
+        }
+        assert_eq!(ClaudeCodeInstaller::hook_status(&settings), (true, false));
+        fs::write(&path, serde_json::to_string_pretty(&settings).unwrap()).unwrap();
+        ClaudeCodeInstaller::install_hooks_at(&path, &params(), false).unwrap();
+        let installed = read_settings(&path);
+        for event in ["PreToolUse", "PostToolUse"] {
+            let groups = installed["hooks"][event].as_array().unwrap();
+            assert_eq!(groups[0], dcc);
+            let mut expected_foreign = empty_foreign.clone();
+            expected_foreign["hooks"] = json!([]);
+            assert_eq!(groups[1], expected_foreign);
+            assert_eq!(groups[2]["_source"], "dcc-git-ai");
+            assert_eq!(git_ai_blocks_in(groups).len(), 1);
+        }
+        assert_eq!(ClaudeCodeInstaller::hook_status(&installed), (true, true));
     }
 
     // ---- Install scenarios ----
@@ -478,8 +480,8 @@ mod tests {
             &path,
             serde_json::to_string_pretty(&json!({
                 "hooks": {
-                    "PreToolUse": [{"matcher": "*", "hooks": [{"type":"command","command": cmd}]}],
-                    "PostToolUse": [{"matcher": "*", "hooks": [{"type":"command","command": cmd}]}]
+                    "PreToolUse": [{"matcher": "*", "_source": "dcc-git-ai", "hooks": [{"type":"command","command": cmd}]}],
+                    "PostToolUse": [{"matcher": "*", "_source": "dcc-git-ai", "hooks": [{"type":"command","command": cmd}]}]
                 }
             }))
             .unwrap(),
@@ -690,14 +692,14 @@ mod tests {
         let cmd = expected_cmd();
         let before = json!({
             "hooks": {
-                "PreToolUse": [{"matcher": "*", "hooks": [
-                    {"type":"command","command": "my-audit-tool"},
-                    {"type":"command","command": cmd}
-                ]}],
-                "PostToolUse": [{"matcher": "*", "hooks": [
-                    {"type":"command","command": "my-audit-tool"},
-                    {"type":"command","command": cmd}
-                ]}]
+                "PreToolUse": [
+                    {"matcher": "*", "hooks": [{"type":"command","command": "my-audit-tool"}]},
+                    {"matcher": "*", "_source": "dcc-git-ai", "hooks": [{"type":"command","command": cmd}]}
+                ],
+                "PostToolUse": [
+                    {"matcher": "*", "hooks": [{"type":"command","command": "my-audit-tool"}]},
+                    {"matcher": "*", "_source": "dcc-git-ai", "hooks": [{"type":"command","command": cmd}]}
+                ]
             }
         });
         fs::write(&path, serde_json::to_string_pretty(&before).unwrap()).unwrap();
@@ -1154,7 +1156,7 @@ mod tests {
         let cmd = expected_cmd();
         let settings = json!({
             "hooks": {
-                "PreToolUse": [{"matcher": "*", "hooks": [{"type":"command","command": cmd}]}]
+                "PreToolUse": [{"matcher": "*", "_source": "dcc-git-ai", "hooks": [{"type":"command","command": cmd}]}]
             }
         });
         let (installed, up_to_date) = ClaudeCodeInstaller::hook_status(&settings);

@@ -12,15 +12,17 @@ jobs:
       contents: write
 
     steps:
-      - name: Install git-ai
-        run: |
-          curl -fsSL https://usegitai.com/install.sh | bash
-          echo "$HOME/.git-ai/bin" >> $GITHUB_PATH
-      - name: Run git-ai
+      # Use a runner image with git-ai or add a provisioning step here.
+      - name: Run attribution CLI
         id: run-git-ai
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          export PATH="$HOME/.git-ai/bin:$PATH"
+          if ! command -v git-ai >/dev/null 2>&1; then
+            echo "Provision git-ai from the approved DCC Linux package and place it in ~/.git-ai/bin or a directory on PATH." >&2
+            exit 1
+          fi
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git-ai ci github run

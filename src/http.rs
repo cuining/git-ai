@@ -14,6 +14,13 @@ use ureq::typestate::{WithBody, WithoutBody};
 /// Proxy configuration is read from `ALL_PROXY`, `HTTPS_PROXY`, `HTTP_PROXY`,
 /// and their lowercase variants. `NO_PROXY`/`no_proxy` bypasses matching hosts.
 pub fn build_agent(timeout_secs: Option<u64>) -> ureq::Agent {
+    build_agent_with_redirects(timeout_secs, None)
+}
+
+pub(crate) fn build_agent_with_redirects(
+    timeout_secs: Option<u64>,
+    max_redirects: Option<u32>,
+) -> ureq::Agent {
     let mut builder = Config::builder().http_status_as_error(false).tls_config(
         TlsConfig::builder()
             .provider(TlsProvider::NativeTls)
@@ -23,6 +30,10 @@ pub fn build_agent(timeout_secs: Option<u64>) -> ureq::Agent {
 
     if let Some(secs) = timeout_secs {
         builder = builder.timeout_global(Some(Duration::from_secs(secs)));
+    }
+
+    if let Some(max_redirects) = max_redirects {
+        builder = builder.max_redirects(max_redirects);
     }
 
     builder.build().new_agent()
@@ -60,9 +71,21 @@ fn read_ureq_response(mut response: ureq::http::Response<ureq::Body>) -> Result<
     Ok(Response { status_code, body })
 }
 
+/// Check at the send boundary so existing clients and explicit auth cannot
+/// bypass a newly disabled remote setting. Local Git and daemon IPC do not use
+/// this HTTP module.
+pub fn ensure_remote_api_enabled() -> Result<(), String> {
+    if crate::config::Config::fresh().remote_api_enabled() {
+        Ok(())
+    } else {
+        Err("git-ai remote services are disabled (remote_api_enabled=false)".to_string())
+    }
+}
+
 /// Execute a ureq request, normalizing errors so that HTTP error status codes
 /// are returned as Ok(Response) rather than Err.
 pub fn send(request: ureq::RequestBuilder<WithoutBody>) -> Result<Response, String> {
+    ensure_remote_api_enabled()?;
     request
         .call()
         .map_err(|err| err.to_string())
@@ -74,6 +97,7 @@ pub fn send_with_body(
     request: ureq::RequestBuilder<WithBody>,
     body: &str,
 ) -> Result<Response, String> {
+    ensure_remote_api_enabled()?;
     request
         .send(body)
         .map_err(|err| err.to_string())

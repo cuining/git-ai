@@ -291,7 +291,10 @@ impl ApiContext {
     /// Uses Config::fresh() to support runtime config updates (daemon mode)
     pub fn new(base_url: Option<String>) -> Self {
         let cfg = config::Config::fresh();
-        let api_key = cfg.api_key().map(|s| s.to_string());
+        let api_key = cfg
+            .remote_api_enabled()
+            .then(|| cfg.api_key().map(str::to_string))
+            .flatten();
         let author_identity = if api_key.is_some() {
             resolve_git_identity()
         } else {
@@ -299,7 +302,11 @@ impl ApiContext {
         };
         Self {
             base_url: base_url.unwrap_or_else(Self::default_base_url),
-            auth_token: try_load_auth_token(),
+            auth_token: if cfg.remote_api_enabled() {
+                try_load_auth_token()
+            } else {
+                None
+            },
             api_key,
             author_identity,
             timeout_secs: Some(30),

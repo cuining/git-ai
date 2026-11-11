@@ -11,10 +11,9 @@ before that point are lost.
 | Linux | `linux/install-login-start.sh` | systemd user unit `git-ai-bg.service` | `git-ai-login-start-linux.sh` |
 | Windows | `windows/install-login-start.ps1` | Scheduled Task `\GitAI\Start bg at logon` | `git-ai-login-start-windows.ps1` |
 
-Each release publishes the scripts at
-`https://github.com/git-ai-project/git-ai/releases/latest/download/<asset>`.
-Run them **after** `git-ai` is installed and `git-ai install` has run for the
-user (that step writes the per-user trace2 config the daemon depends on).
+GitHub releases publish these scripts as assets. Run them after installing
+`git-ai` and running `git-ai install-hooks` for the user.
+The install command writes the per-user trace2 configuration.
 
 ## Why the scripts only start the daemon
 
@@ -36,8 +35,8 @@ invariants:
 
 - **macOS**: `AbandonProcessGroup` is `true` (launchd otherwise kills the
   daemon when `bg start` exits), `KeepAlive` is `false`, `RunAtLoad` is `true`.
-  The agent runs the `git-ai` binary directly, so Login Items & Extensions and
-  the "can run in the background" notice name `git-ai`, not `sh`. The one
+  The agent runs `git-ai` directly, so Login Items & Extensions and
+  the "can run in the background" notice name that executable. The one
   exception is `--system` without `--bin`, which needs `/bin/sh` to resolve
   each user's home; pass `--bin` with a shared path to avoid it.
 - **Linux**: `Type=oneshot` with `RemainAfterExit=yes` keeps the unit and its
@@ -67,7 +66,7 @@ install-login-start --uninstall
 - `--no-start` registers without starting now; the daemon starts at next login.
 - `--uninstall` removes the registration. On macOS and Windows the running
   daemon is left alone; on Linux stopping the unit stops its cgroup and thus
-  the daemon (git-ai respawns it lazily on the next checkpoint).
+  the daemon. The next checkpoint starts it again.
 - The `.sh` scripts also take `--system` (run as root) to install for all users
   under `/Library/LaunchAgents` or `/etc/systemd/user`. Per-user is the default
   and needs no elevation.
@@ -78,7 +77,7 @@ Run as the console user, exactly like the install script itself:
 
 ```sh
 su - "$(/usr/bin/stat -f%Su /dev/console)" -c \
-  'curl -fsSL https://github.com/git-ai-project/git-ai/releases/latest/download/git-ai-login-start-macos.sh | sh'
+  'curl -fsSL https://github.com/cuining/git-ai/releases/latest/download/git-ai-login-start-macos.sh | sh'
 ```
 
 The agent's `PATH` is set explicitly (`/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`)
@@ -91,7 +90,7 @@ Run in the user's context from a non-elevated shell, the same requirement as
 the MSI and `install.ps1`:
 
 ```powershell
-irm https://github.com/git-ai-project/git-ai/releases/latest/download/git-ai-login-start-windows.ps1 | iex
+irm https://github.com/cuining/git-ai/releases/latest/download/git-ai-login-start-windows.ps1 | iex
 ```
 
 Piped installs use the defaults. To pass flags, download the file and run it:
@@ -102,7 +101,7 @@ the requested variables and calls `bg start`.
 ### Linux
 
 ```sh
-curl -fsSL https://github.com/git-ai-project/git-ai/releases/latest/download/git-ai-login-start-linux.sh | sh
+curl -fsSL https://github.com/cuining/git-ai/releases/latest/download/git-ai-login-start-linux.sh | sh
 ```
 
 Per-user installs enable and start the unit immediately, which needs a systemd

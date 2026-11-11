@@ -127,6 +127,7 @@ impl OAuthClient {
         expires_in: u32,
     ) -> Result<StoredCredentials, String> {
         let url = format!("{}/worker/oauth/token", self.base_url);
+        http::ensure_remote_api_enabled()?;
         let mut elapsed = 0u32;
         let mut current_interval = interval;
 

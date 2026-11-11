@@ -215,6 +215,11 @@ fi
 # Install into the user's bin directory ~/.git-ai/bin
 INSTALL_DIR="$HOME/.git-ai/bin"
 
+if [ "${GIT_AI_NPM_UPGRADE:-}" = "1" ]; then
+    BINARY_NAME="git-ai"
+    [ -n "${GIT_AI_LOCAL_BINARY:-}" ] || error "npm upgrade requires a verified local binary"
+fi
+
 # Create directory if it doesn't exist
 mkdir -p "$INSTALL_DIR"
 
@@ -243,10 +248,13 @@ fi
 # Verify checksum if embedded (release builds only)
 verify_checksum "$TMP_FILE" "$BINARY_NAME"
 
+chmod +x "$TMP_FILE"
 mv -f "$TMP_FILE" "${INSTALL_DIR}/git-ai"
 
-# Make executable
-chmod +x "${INSTALL_DIR}/git-ai"
+# The upgrade caller owns the daemon restart. First-install actions stay below.
+if [ "${GIT_AI_NPM_UPGRADE:-}" = "1" ]; then
+    exit 0
+fi
 
 # Remove quarantine attribute on macOS
 if [ "$OS" = "macos" ]; then

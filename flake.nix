@@ -96,7 +96,6 @@
           EOF
           fi
 
-          # Execute git-ai with all arguments
           exec ${git-ai-unwrapped}/bin/git-ai "$@"
         '';
 
@@ -688,7 +687,6 @@ GITOGEOF
                   if [ -d "$user_home" ]; then
                     user=$(basename "$user_home")
 
-                    # Create config directory
                     # Create config directory
                     mkdir -p "$user_home/.git-ai"
                     chown "$user" "$user_home/.git-ai" 2>/dev/null || true

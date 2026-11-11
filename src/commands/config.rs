@@ -110,6 +110,7 @@ fn print_config_help() {
     println!("  disable_auto_updates         Disable auto updates (bool)");
     println!("  update_channel               Update channel (latest/next)");
     println!("  feature_flags                Feature flags (object)");
+    println!("  remote_api_enabled           Allow remote services (bool, default: true)");
     println!("  api_base_url                 API base URL (default: https://usegitai.com)");
     println!("  api_key                      API key for X-API-Key header");
     println!("  author.name                  git-ai author display name override");
@@ -328,6 +329,11 @@ fn show_all_config() -> Result<(), String> {
         Value::Bool(runtime_config.auto_updates_disabled()),
     );
 
+    effective_config.insert(
+        "remote_api_enabled".to_string(),
+        Value::Bool(runtime_config.remote_api_enabled()),
+    );
+
     // Optional strings
     if let Some(ref dsn) = file_config.telemetry_enterprise_dsn {
         effective_config.insert(
@@ -516,6 +522,7 @@ fn get_config_value(key: &str) -> Result<(), String> {
                 serde_json::to_value(runtime_config.get_feature_flags())
                     .unwrap_or_else(|_| Value::Object(serde_json::Map::new()))
             }
+            "remote_api_enabled" => Value::Bool(runtime_config.remote_api_enabled()),
             "api_base_url" => Value::String(runtime_config.api_base_url().to_string()),
             "api_key" => {
                 if let Some(ref key) = file_config.api_key {
@@ -779,6 +786,12 @@ fn set_config_value(key: &str, value: &str, add_mode: bool) -> Result<(), String
                 file_config.feature_flags = Some(json_value);
                 crate::config::save_file_config(&file_config)?;
                 println!("[feature_flags]: {}", value);
+            }
+            "remote_api_enabled" => {
+                let enabled = parse_bool(value)?;
+                file_config.remote_api_enabled = Some(enabled);
+                crate::config::save_file_config(&file_config)?;
+                println!("[remote_api_enabled]: {}", enabled);
             }
             "api_base_url" => {
                 file_config.api_base_url = Some(value.to_string());
@@ -1193,6 +1206,12 @@ fn unset_config_value(key: &str) -> Result<(), String> {
                 crate::config::save_file_config(&file_config)?;
                 if let Some(v) = old_value {
                     println!("- [feature_flags]: {}", v);
+                }
+            }
+            "remote_api_enabled" => {
+                if let Some(value) = file_config.remote_api_enabled.take() {
+                    crate::config::save_file_config(&file_config)?;
+                    println!("- [remote_api_enabled]: {}", value);
                 }
             }
             "api_base_url" => {

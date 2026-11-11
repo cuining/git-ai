@@ -478,24 +478,30 @@ pub fn write_atomic(path: &Path, data: &[u8]) -> Result<(), GitAiError> {
     // write_atomic is reached. See #1039.
     ensure_parent_dir(&target_path)?;
 
-    let tmp_path = target_path.with_extension("tmp");
+    let directory = target_path.parent().unwrap_or_else(|| Path::new("."));
+    let mut builder = tempfile::Builder::new();
+    builder.prefix(".git-ai-");
+    #[cfg(unix)]
     {
-        let mut file = fs::File::create(&tmp_path).map_err(|e| {
-            GitAiError::Generic(format!(
-                "Failed to create temp file {}: {}",
-                tmp_path.display(),
-                e
-            ))
-        })?;
-        file.write_all(data)?;
-        file.sync_all()?;
+        use std::os::unix::fs::PermissionsExt;
+        // Preserve the same umask-controlled permissions as File::create.
+        builder.permissions(fs::Permissions::from_mode(0o666));
     }
-    fs::rename(&tmp_path, &target_path).map_err(|e| {
+    let mut file = builder.tempfile_in(directory).map_err(|e| {
+        GitAiError::Generic(format!(
+            "Failed to create temp file in {}: {}",
+            directory.display(),
+            e
+        ))
+    })?;
+    file.write_all(data)?;
+    file.as_file().sync_all()?;
+    file.persist(&target_path).map_err(|e| {
         GitAiError::Generic(format!(
             "Failed to rename {} to {}: {}",
-            tmp_path.display(),
+            e.file.path().display(),
             target_path.display(),
-            e
+            e.error
         ))
     })?;
     Ok(())
@@ -515,9 +521,20 @@ pub fn ensure_parent_dir(path: &Path) -> Result<(), GitAiError> {
     Ok(())
 }
 
+/// Quote a path for a POSIX shell, retaining existing output for safe paths.
+pub fn shell_quote_path(path: &str) -> String {
+    if path
+        .chars()
+        .all(|character| character.is_ascii_alphanumeric() || "-_./:=@".contains(character))
+    {
+        path.to_string()
+    } else {
+        format!("'{}'", path.replace('\'', "'\\''"))
+    }
+}
+
 /// Check if a command is a git-ai checkpoint command
 pub fn is_git_ai_checkpoint_command(cmd: &str) -> bool {
-    // Must contain "git-ai" and "checkpoint"
     cmd.contains("git-ai") && cmd.contains("checkpoint")
 }
 
@@ -883,6 +900,12 @@ mod tests {
 
     #[test]
     fn test_is_git_ai_checkpoint_command() {
+        assert!(is_git_ai_checkpoint_command(
+            "git-ai checkpoint claude --hook-input stdin"
+        ));
+        assert!(is_git_ai_checkpoint_command(
+            "\"/tmp/with space/git-ai\" checkpoint codex --hook-input stdin"
+        ));
         assert!(is_git_ai_checkpoint_command("git-ai checkpoint"));
         assert!(is_git_ai_checkpoint_command(
             "git-ai checkpoint claude --hook-input stdin"

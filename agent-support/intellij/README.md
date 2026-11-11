@@ -19,7 +19,7 @@ When AI agents like GitHub Copilot make edits, Git AI automatically records whic
 - **AI contribution stats** - Track how much of your codebase is AI-generated
 - **Cross-agent tracking** - Works with Copilot, Cursor, Claude Code, and more
 
-Requires the [git-ai CLI](https://github.com/git-ai-project/git-ai) to be installed. Learn more at [usegitai.com](https://usegitai.com).
+Requires the [git-ai CLI](../../README.md#install).
 <!-- Plugin description end -->
 
 If you're still not quite sure what this is all about, read our introduction: [What is the IntelliJ Platform?][docs:intro]

@@ -86,7 +86,10 @@ mod unix {
     }
 
     fn install_dir_string(home: &Path) -> String {
-        format!("{}/.git-ai/bin", home.display())
+        crate::config::git_ai_dir_for_home(home)
+            .join("bin")
+            .to_string_lossy()
+            .into_owned()
     }
 
     /// Detect all shells with existing config files, mirroring
@@ -720,7 +723,7 @@ mod windows {
         if std::env::var("GIT_AI_SKIP_PATH_UPDATE").as_deref() == Ok("1") {
             eprintln!("{YELLOW}Skipping PATH updates because GIT_AI_SKIP_PATH_UPDATE=1{NC}");
         } else {
-            let install_dir = home.join(".git-ai").join("bin");
+            let install_dir = crate::config::git_ai_dir_for_home(&home).join("bin");
             match ensure_user_path_contains(&install_dir) {
                 UserPathStatus::Updated => {
                     println!("{GREEN}Successfully added git-ai to the user PATH.{NC}")

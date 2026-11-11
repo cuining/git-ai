@@ -66,12 +66,12 @@ class GitAiService {
     }
 
     /**
-     * Finds the git-ai binary by checking known installation locations first,
+     * Finds git-ai by checking known installation locations first,
      * then falling back to PATH lookup.
      *
      * Known locations (from install.sh, install.ps1, scripts/dev.sh):
-     * - Production/dev build: ~/.git-ai/bin/git-ai  (dev.sh installs here too)
-     * - Nix development: ~/.git-ai-local-dev/gitwrap/bin/git-ai  (nix develop shellHook)
+     * - Nix development: ~/.git-ai-local-dev/gitwrap/bin/
+     * - Production/dev build: ~/.git-ai/bin/
      *
      * @return The full path to git-ai if found, or null if not found
      */
@@ -85,21 +85,14 @@ class GitAiService {
             resolvedGitAiPath = null
         }
 
-        val homeDir = System.getProperty("user.home")
+        val homeDir = File(System.getProperty("user.home"))
         val isWindows = System.getProperty("os.name").lowercase().contains("win")
+        val suffix = if (isWindows) ".exe" else ""
 
         // Known installation locations from install.sh/install.ps1/scripts/dev.sh
         // Nix dev path checked first so nix develop users can test local builds
-        val knownPaths = if (isWindows) {
-            listOf(
-                "$homeDir\\.git-ai-local-dev\\gitwrap\\bin\\git-ai.exe",  // Nix dev (nix develop shellHook)
-                "$homeDir\\.git-ai\\bin\\git-ai.exe"                      // Production + non-Nix dev (install.ps1 / dev.sh)
-            )
-        } else {
-            listOf(
-                "$homeDir/.git-ai-local-dev/gitwrap/bin/git-ai", // Nix dev (nix develop shellHook)
-                "$homeDir/.git-ai/bin/git-ai"                    // Production + non-Nix dev (install.sh / dev.sh)
-            )
+        val knownPaths = listOf(".git-ai-local-dev/gitwrap/bin", ".git-ai/bin").map {
+            File(homeDir, "$it/git-ai$suffix").path
         }
 
         lastSearchedPaths = knownPaths
@@ -127,9 +120,9 @@ class GitAiService {
         return try {
             val isWindows = System.getProperty("os.name").lowercase().contains("win")
             val command = if (isWindows) {
-                listOf("cmd", "/c", "where git-ai")
+                listOf("cmd", "/d", "/c", "where git-ai")
             } else {
-                listOf("/bin/sh", "-l", "-c", "which git-ai")
+                listOf("/bin/sh", "-l", "-c", "command -v git-ai")
             }
 
             val process = ProcessBuilder(command)
@@ -188,10 +181,7 @@ class GitAiService {
                     Searched locations: ${lastSearchedPaths.joinToString(", ")}
                     PATH: $currentPath
 
-                    To fix: Install git-ai using one of these methods:
-                    - cargo install git-ai
-                    - curl -fsSL https://install.usegitai.com | sh
-                    - Or ensure git-ai is in your PATH
+                    Install Git AI and ensure git-ai is in your PATH.
                 """.trimIndent())
                 TelemetryService.getInstanceOrNull()?.reportGitAiNotFound(
                     exitCode = null,

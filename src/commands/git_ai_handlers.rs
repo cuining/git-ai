@@ -255,18 +255,18 @@ pub(crate) fn handle_notes_subcommand(args: &[String]) {
             handle_notes_serve(&args[1..]);
         }
         "--help" | "-h" | "help" => {
-            eprintln!("git ai notes - Notes backend management commands");
+            eprintln!("git-ai notes - Notes backend management commands");
             eprintln!();
-            eprintln!("Usage: git ai notes <subcommand> [options]");
+            eprintln!("Usage: git-ai notes <subcommand> [options]");
             eprintln!();
             eprintln!("Subcommands:");
             eprintln!("  migrate    Bulk-upload existing git notes to the HTTP backend");
             eprintln!();
-            eprintln!("Run 'git ai notes <subcommand> --help' for details.");
+            eprintln!("Run 'git-ai notes <subcommand> --help' for details.");
         }
         other => {
             eprintln!("Unknown git-ai notes subcommand: {}", other);
-            eprintln!("Run 'git ai notes --help' for usage.");
+            eprintln!("Run 'git-ai notes --help' for usage.");
             std::process::exit(1);
         }
     }
@@ -292,9 +292,9 @@ fn handle_notes_serve(args: &[String]) {
             }
             "--help" | "-h" => {
                 eprintln!(
-                    "git ai notes serve - Run the in-memory notes backend reference server\n\
+                    "git-ai notes serve - Run the in-memory notes backend reference server\n\
                      \n\
-                     Usage: git ai notes serve [--bind <addr:port>] [--port <port>]\n\
+                     Usage: git-ai notes serve [--bind <addr:port>] [--port <port>]\n\
                      \n\
                      This is a reference implementation. All notes are stored in process\n\
                      memory; auth headers are accepted but not validated. It exists to\n\
@@ -304,7 +304,7 @@ fn handle_notes_serve(args: &[String]) {
                 return;
             }
             other => {
-                eprintln!("Unknown argument to `git ai notes serve`: {}", other);
+                eprintln!("Unknown argument to `git-ai notes serve`: {}", other);
                 std::process::exit(1);
             }
         }
@@ -375,7 +375,10 @@ fn print_help() {
         "    --env                  Also add git-ai to shell PATH configs (used by the install scripts)"
     );
     eprintln!(
-        "    --wsl                  Also install git-ai in eligible WSL distributions (Windows only)"
+        "    --wsl                  Install the matching DCC Linux npm package in eligible WSL distributions"
+    );
+    eprintln!(
+        "    --agents <list>        Only install claude,codex,opencode hooks (no IDE extras)"
     );
     eprintln!("    --skills               Also install agent skill files");
     eprintln!("    --visual-studio-extension");

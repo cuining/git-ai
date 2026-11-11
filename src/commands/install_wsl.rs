@@ -1,10 +1,12 @@
 //! Best-effort installation of Git AI into Windows Subsystem for Linux distros.
 
 #[cfg(windows)]
-use crate::authorship::authorship_log_serialization::GIT_AI_VERSION;
+use std::os::windows::process::CommandExt;
+#[cfg(windows)]
+use std::process::{Command, Stdio};
 
 #[cfg(any(windows, test))]
-const INSTALL_SCRIPT: &str = "curl -fsSL https://usegitai.com/install.sh | bash";
+const INSTALL_SCRIPT: &str = include_str!("install_wsl.sh");
 
 pub struct InstallConfig<'a> {
     pub api_base: Option<&'a str>,
@@ -18,7 +20,13 @@ pub fn install(config: InstallConfig<'_>, dry_run: bool) {
     }
 
     #[cfg(windows)]
-    install_on_windows(config);
+    {
+        if let Err(error) = crate::http::ensure_remote_api_enabled() {
+            eprintln!("[git-ai] warning: {error}; skipping WSL installation.");
+            return;
+        }
+        install_on_windows(config);
+    }
 
     #[cfg(not(windows))]
     {
@@ -31,16 +39,7 @@ pub fn install(config: InstallConfig<'_>, dry_run: bool) {
 
 #[cfg(windows)]
 fn install_on_windows(config: InstallConfig<'_>) {
-    use std::os::windows::process::CommandExt;
-    use std::process::{Command, Stdio};
-
-    use crate::utils::CREATE_NO_WINDOW;
-
-    let output = match Command::new("wsl.exe")
-        .args(["--list", "--quiet"])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-    {
+    let output = match wsl_command().args(["--list", "--quiet"]).output() {
         Ok(output) if output.status.success() => output,
         Ok(output) => {
             eprintln!(
@@ -63,42 +62,20 @@ fn install_on_windows(config: InstallConfig<'_>) {
         return;
     }
 
-    let release_tag = release_tag(
-        std::env::var("GIT_AI_RELEASE_TAG").ok().as_deref(),
-        GIT_AI_VERSION,
-        cfg!(debug_assertions),
+    let env = forwarded_env(
+        config.api_base,
+        config.api_key,
+        std::env::var("WSLENV").ok().as_deref(),
     );
+    let mut packages = std::collections::HashMap::new();
     let failures = install_in_distros(&distros, |distro| {
         println!("Installing Git AI in WSL distribution: {distro}");
-        let args = install_args(distro);
-        let env = forwarded_env(
-            config.api_base,
-            config.api_key,
-            release_tag.as_deref(),
-            std::env::var("WSLENV").ok().as_deref(),
-        );
-        let mut command = Command::new("wsl.exe");
-        command
-            .args(&args)
-            .envs(env)
-            .stdin(Stdio::null())
-            .creation_flags(CREATE_NO_WINDOW);
-        let status = command.status();
-        match status {
-            Ok(status) if status.success() => true,
-            Ok(status) => {
-                eprintln!(
-                    "[git-ai] warning: Git AI installation failed in WSL distribution '{distro}' ({status})."
-                );
-                false
-            }
-            Err(error) => {
-                eprintln!(
-                    "[git-ai] warning: could not start Git AI installation in WSL distribution '{distro}': {error}"
-                );
-                false
-            }
-        }
+        let arch = distro_architecture(distro)?;
+        let package = packages.entry(arch).or_insert_with_key(|arch| {
+            super::upgrade::npm::fetch_wsl_package(arch, env!("CARGO_PKG_VERSION"))
+        });
+        let (binary, installer) = package.as_ref().map_err(Clone::clone)?;
+        install_package(distro, &env, binary, installer)
     });
 
     if failures.is_empty() {
@@ -143,45 +120,87 @@ fn eligible_distros(output: &str) -> Vec<String> {
         .collect()
 }
 
-#[cfg(any(windows, test))]
-fn release_tag(env_release_tag: Option<&str>, binary_version: &str, debug: bool) -> Option<String> {
-    if let Some(tag) = env_release_tag
-        .map(str::trim)
-        .filter(|tag| !tag.is_empty() && *tag != "latest")
-    {
-        return Some(tag.to_owned());
+#[cfg(windows)]
+fn wsl_command() -> Command {
+    let mut command = Command::new("wsl.exe");
+    command.creation_flags(crate::utils::CREATE_NO_WINDOW);
+    command
+}
+
+#[cfg(windows)]
+fn distro_architecture(distro: &str) -> Result<String, String> {
+    let output = wsl_command()
+        .args(["--distribution", distro, "--exec", "uname", "-m"])
+        .output()
+        .map_err(|error| format!("cannot probe Linux architecture: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "Linux architecture probe failed ({})",
+            output.status
+        ));
     }
-    if debug || binary_version.starts_with("development") {
-        None
-    } else {
-        Some(format!("v{}", binary_version.trim_start_matches('v')))
-    }
+    Ok(decode_wsl_output(&output.stdout).trim().to_owned())
 }
 
 #[cfg(any(windows, test))]
-fn install_args(distro: &str) -> Vec<String> {
-    vec![
-        "--distribution".to_owned(),
-        distro.to_owned(),
-        "--exec".to_owned(),
-        "bash".to_owned(),
-        "-c".to_owned(),
-        INSTALL_SCRIPT.to_owned(),
+fn install_args(distro: &str) -> [&str; 6] {
+    [
+        "--distribution",
+        distro,
+        "--exec",
+        "bash",
+        "-c",
+        INSTALL_SCRIPT,
     ]
+}
+
+#[cfg(windows)]
+fn install_package(
+    distro: &str,
+    env: &[(String, String)],
+    binary: &[u8],
+    installer: &str,
+) -> Result<(), String> {
+    let mut child = wsl_command()
+        .args(install_args(distro))
+        .envs(env.iter().map(|(name, value)| (name, value)))
+        .stdin(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("cannot start installer: {error}"))?;
+    let stdin = child.stdin.take().expect("piped WSL stdin");
+    let transfer = write_install_archive(stdin, binary, installer);
+    let status = child
+        .wait()
+        .map_err(|error| format!("cannot wait for installer: {error}"))?;
+    if !status.success() {
+        return Err(format!("Linux installer failed ({status})"));
+    }
+    transfer.map_err(|error| format!("cannot transfer Linux package: {error}"))
+}
+
+#[cfg(any(windows, all(test, unix)))]
+fn write_install_archive(
+    writer: impl std::io::Write,
+    binary: &[u8],
+    installer: &str,
+) -> std::io::Result<()> {
+    let mut archive = tar::Builder::new(writer);
+    for (name, contents) in [("git-ai", binary), ("install.sh", installer.as_bytes())] {
+        let mut header = tar::Header::new_ustar();
+        header.set_mode(0o600);
+        header.set_size(contents.len() as u64);
+        archive.append_data(&mut header, name, contents)?;
+    }
+    archive.finish()
 }
 
 #[cfg(any(windows, test))]
 fn forwarded_env(
     api_base: Option<&str>,
     api_key: Option<&str>,
-    release_tag: Option<&str>,
     inherited_wslenv: Option<&str>,
 ) -> Vec<(String, String)> {
-    let values = [
-        ("API_BASE", api_base),
-        ("API_KEY", api_key),
-        ("GIT_AI_RELEASE_TAG", release_tag),
-    ];
+    let values = [("API_BASE", api_base), ("API_KEY", api_key)];
     let mut env = values
         .into_iter()
         .filter_map(|(name, value)| value.map(|value| (name.to_owned(), value.to_owned())))
@@ -215,11 +234,12 @@ fn forwarded_env(
 #[cfg(any(windows, test))]
 fn install_in_distros<F>(distros: &[String], mut install_one: F) -> Vec<&str>
 where
-    F: FnMut(&str) -> bool,
+    F: FnMut(&str) -> Result<(), String>,
 {
     let mut failures = Vec::new();
     for distro in distros {
-        if !install_one(distro) {
+        if let Err(error) = install_one(distro) {
+            eprintln!("[git-ai] warning: WSL installation failed in '{distro}': {error}");
             failures.push(distro.as_str());
         }
     }
@@ -267,13 +287,71 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn wsl_installs_the_verified_linux_payload() {
+        use sha2::{Digest, Sha256};
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+        use std::process::{Command, Stdio};
+
+        let scratch = tempfile::tempdir().unwrap();
+        let bin_dir = scratch.path().join("bin");
+        std::fs::create_dir(&bin_dir).unwrap();
+        let curl = bin_dir.join("curl");
+        std::fs::write(&curl, "#!/bin/sh\nexit 99\n").unwrap();
+        std::fs::set_permissions(&curl, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        let binary = b"#!/bin/sh\nset -eu\n\
+            [ \"$*\" = 'install-hooks --env' ]\n\
+            [ \"$API_BASE\" = 'https://enterprise.example' ]\n\
+            [ \"$API_KEY\" = 'fixture secret' ]\n\
+            touch \"$HOME/hooks-initialized\"\n";
+        let checksum = Sha256::digest(binary);
+        let installer = include_str!("../../install.sh").replacen(
+            "EMBEDDED_CHECKSUMS=\"__CHECKSUMS_PLACEHOLDER__\"",
+            &format!("EMBEDDED_CHECKSUMS=\"{checksum:x}  git-ai\""),
+            1,
+        );
+        let mut archive = Vec::new();
+        write_install_archive(&mut archive, binary, &installer).unwrap();
+
+        let mut path = vec![bin_dir];
+        path.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
+        let path = std::env::join_paths(path).unwrap();
+        let run_guest = |payload: &[u8]| {
+            let mut child = Command::new("bash")
+                .args(["-c", INSTALL_SCRIPT])
+                .env("HOME", scratch.path())
+                .env("API_BASE", "https://enterprise.example")
+                .env("API_KEY", "fixture secret")
+                .env("PATH", &path)
+                .stdin(Stdio::piped())
+                .spawn()
+                .unwrap();
+            let transfer = child.stdin.take().unwrap().write_all(payload);
+            child.wait().unwrap().success() && transfer.is_ok()
+        };
+
+        let installed = scratch.path().join(".git-ai/bin/git-ai");
+        assert!(!run_guest(&archive[..archive.len() - 512]));
+        assert!(!installed.exists());
+        assert!(run_guest(&archive));
+        assert_eq!(std::fs::read(&installed).unwrap(), binary);
+        assert!(scratch.path().join("hooks-initialized").exists());
+
+        let mut invalid_archive = Vec::new();
+        write_install_archive(&mut invalid_archive, b"tampered binary", &installer).unwrap();
+        assert!(!run_guest(&invalid_archive));
+        assert_eq!(std::fs::read(&installed).unwrap(), binary);
+    }
+
     #[test]
     fn forwarded_configuration_uses_wslenv_without_overwriting_existing_entries() {
         assert_eq!(
             forwarded_env(
                 Some("https://enterprise.example/path?a=b"),
                 Some("key with spaces; untouched"),
-                Some("v1.2.3"),
                 Some("EXISTING/p:API_KEY/u")
             ),
             [
@@ -285,26 +363,12 @@ mod tests {
                     "API_KEY".to_owned(),
                     "key with spaces; untouched".to_owned()
                 ),
-                ("GIT_AI_RELEASE_TAG".to_owned(), "v1.2.3".to_owned()),
                 (
                     "WSLENV".to_owned(),
-                    "EXISTING/p:API_KEY/u:API_BASE:GIT_AI_RELEASE_TAG".to_owned()
+                    "EXISTING/p:API_KEY/u:API_BASE".to_owned()
                 ),
             ]
         );
-    }
-
-    #[test]
-    fn explicit_release_tag_wins_and_latest_falls_back() {
-        assert_eq!(
-            release_tag(Some("v9.8.7"), "1.2.3", false).as_deref(),
-            Some("v9.8.7")
-        );
-        assert_eq!(
-            release_tag(Some("latest"), "1.2.3", false).as_deref(),
-            Some("v1.2.3")
-        );
-        assert_eq!(release_tag(None, "development:1.2.3", true), None);
     }
 
     #[test]
@@ -318,7 +382,11 @@ mod tests {
 
         let failures = install_in_distros(&distros, |distro| {
             attempted.push(distro.to_owned());
-            distro != "Debian"
+            if distro == "Debian" {
+                Err("fixture installation failure".to_owned())
+            } else {
+                Ok(())
+            }
         });
 
         assert_eq!(attempted, distros);
