@@ -16,6 +16,16 @@ on:
         required: false
         default: false
         type: boolean
+      enterprise_npm:
+        description: 'Build five enterprise npm packages for macOS, Linux musl, and Windows x64'
+        required: false
+        default: false
+        type: boolean
+      publish_npm:
+        description: 'Publish enterprise npm artifacts after approval (requires enterprise_npm and dry_run=false)'
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   release-prod-approval:
@@ -52,31 +62,34 @@ jobs:
       version: ${{ steps.get-version.outputs.version }}
     strategy:
       matrix:
-        include:
-          - os: ubuntu-22.04
-            target: x86_64-unknown-linux-musl
-            artifact_name: git-ai-linux-x64
-            use_docker: true
-            docker_image: ubuntu:22.04@sha256:4f838adc7181d9039ac795a7d0aba05a9bd9ecd480d294483169c5def983b64d
-          - os: ubuntu-22.04-arm
-            target: aarch64-unknown-linux-musl
-            artifact_name: git-ai-linux-arm64
-            use_docker: true
-            docker_image: ubuntu:22.04@sha256:4f838adc7181d9039ac795a7d0aba05a9bd9ecd480d294483169c5def983b64d
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            artifact_name: git-ai-windows-x64
-            use_docker: false
-          - os: windows-11-arm
-            target: aarch64-pc-windows-msvc
-            artifact_name: git-ai-windows-arm64
-            use_docker: false
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            artifact_name: git-ai-macos-arm64
-            use_docker: false
+        include: >-
+          ${{ fromJSON(inputs.enterprise_npm && '[
+            {"os":"ubuntu-22.04","target":"x86_64-unknown-linux-musl","artifact_name":"git-ai-linux-x64","use_docker":true,"docker_image":"ubuntu:22.04@sha256:4f838adc7181d9039ac795a7d0aba05a9bd9ecd480d294483169c5def983b64d"},
+            {"os":"ubuntu-22.04-arm","target":"aarch64-unknown-linux-musl","artifact_name":"git-ai-linux-arm64","use_docker":true,"docker_image":"ubuntu:22.04@sha256:4f838adc7181d9039ac795a7d0aba05a9bd9ecd480d294483169c5def983b64d"},
+            {"os":"macos-latest","target":"aarch64-apple-darwin","artifact_name":"git-ai-macos-arm64","use_docker":false},
+            {"os":"windows-latest","target":"x86_64-pc-windows-msvc","artifact_name":"git-ai-windows-x64","use_docker":false}
+          ]' || '[
+            {"os":"ubuntu-22.04","target":"x86_64-unknown-linux-musl","artifact_name":"git-ai-linux-x64","use_docker":true,"docker_image":"ubuntu:22.04@sha256:4f838adc7181d9039ac795a7d0aba05a9bd9ecd480d294483169c5def983b64d"},
+            {"os":"ubuntu-22.04-arm","target":"aarch64-unknown-linux-musl","artifact_name":"git-ai-linux-arm64","use_docker":true,"docker_image":"ubuntu:22.04@sha256:4f838adc7181d9039ac795a7d0aba05a9bd9ecd480d294483169c5def983b64d"},
+            {"os":"windows-latest","target":"x86_64-pc-windows-msvc","artifact_name":"git-ai-windows-x64","use_docker":false},
+            {"os":"windows-11-arm","target":"aarch64-pc-windows-msvc","artifact_name":"git-ai-windows-arm64","use_docker":false},
+            {"os":"macos-latest","target":"aarch64-apple-darwin","artifact_name":"git-ai-macos-arm64","use_docker":false}
+          ]') }}
 
     steps:
+      - name: Validate npm release mode
+        shell: bash
+        env:
+          ENTERPRISE_NPM: ${{ inputs.enterprise_npm }}
+          PUBLISH_NPM: ${{ inputs.publish_npm }}
+          RELEASE_PRODUCTION: ${{ inputs.release_production }}
+        run: |
+          if [[ "$PUBLISH_NPM" == "true" && "$ENTERPRISE_NPM" != "true" ]] ||
+             [[ "$ENTERPRISE_NPM" == "true" && "$RELEASE_PRODUCTION" == "true" ]]; then
+            echo "::error::Enterprise npm mode cannot publish an OSS release; publish_npm requires enterprise_npm."
+            exit 1
+          fi
+
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -96,9 +109,9 @@ jobs:
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
             -e DEBIAN_FRONTEND=noninteractive \
-            -e SENTRY_OSS="${{ secrets.SENTRY_OSS }}" \
-            -e POSTHOG_API_KEY="${{ secrets.POSTHOG_API_KEY }}" \
-            -e OSS_BUILD="1" \
+            -e SENTRY_OSS="${{ !inputs.enterprise_npm && secrets.SENTRY_OSS || '' }}" \
+            -e POSTHOG_API_KEY="${{ !inputs.enterprise_npm && secrets.POSTHOG_API_KEY || '' }}" \
+            -e OSS_BUILD="${{ inputs.enterprise_npm && '0' || '1' }}" \
             ${{ matrix.docker_image }} \
             bash -c "
               apt-get update && \
@@ -106,6 +119,7 @@ jobs:
               curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.93.0 --target ${{ matrix.target }} && \
               . \$HOME/.cargo/env && \
               cargo build --release --target ${{ matrix.target }} && \
+              if [ '${{ inputs.enterprise_npm }}' = 'true' ] && [ '${{ matrix.target }}' = 'x86_64-unknown-linux-musl' ]; then cargo metadata --locked --format-version=1 > cargo-metadata.json; fi && \
               strip target/${{ matrix.target }}/release/git-ai
             "
 
@@ -133,9 +147,9 @@ jobs:
           cargo build --release --target ${{ matrix.target }}
         env:
           CARGO_INCREMENTAL: 0
-          SENTRY_OSS: ${{ secrets.SENTRY_OSS }}
-          POSTHOG_API_KEY: ${{ secrets.POSTHOG_API_KEY }}
-          OSS_BUILD: "1"
+          SENTRY_OSS: ${{ !inputs.enterprise_npm && secrets.SENTRY_OSS || '' }}
+          POSTHOG_API_KEY: ${{ !inputs.enterprise_npm && secrets.POSTHOG_API_KEY || '' }}
+          OSS_BUILD: ${{ inputs.enterprise_npm && '0' || '1' }}
 
       - name: Build release binary (Windows ARM64 with LLVM strip)
         if: matrix.os == 'windows-11-arm'
@@ -143,9 +157,9 @@ jobs:
           cargo build --release --target ${{ matrix.target }}
         env:
           CARGO_INCREMENTAL: 0
-          SENTRY_OSS: ${{ secrets.SENTRY_OSS }}
-          POSTHOG_API_KEY: ${{ secrets.POSTHOG_API_KEY }}
-          OSS_BUILD: "1"
+          SENTRY_OSS: ${{ !inputs.enterprise_npm && secrets.SENTRY_OSS || '' }}
+          POSTHOG_API_KEY: ${{ !inputs.enterprise_npm && secrets.POSTHOG_API_KEY || '' }}
+          OSS_BUILD: ${{ inputs.enterprise_npm && '0' || '1' }}
           RUSTFLAGS: "-C strip=symbols"
 
       - name: Verify binary architecture (Linux)
@@ -196,11 +210,17 @@ jobs:
         shell: bash
         env:
           DRY_RUN: ${{ inputs.dry_run }}
+          ENTERPRISE_NPM: ${{ inputs.enterprise_npm }}
           APPLE_DEVELOPER_ID_APPLICATION_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_P12_BASE64 }}
           APPLE_DEVELOPER_ID_APPLICATION_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_P12_PASSWORD }}
         run: |
           set -euo pipefail
           if [[ -z "${APPLE_DEVELOPER_ID_APPLICATION_P12_BASE64}" || -z "${APPLE_DEVELOPER_ID_APPLICATION_P12_PASSWORD}" ]]; then
+            if [[ "$ENTERPRISE_NPM" == "true" ]]; then
+              codesign --force --sign - "release/${{ matrix.artifact_name }}"
+              codesign --verify --strict --verbose=2 "release/${{ matrix.artifact_name }}"
+              exit 0
+            fi
             if [[ "$DRY_RUN" == "true" ]]; then
               echo "Skipping macOS binary signing for dry run because signing secrets are not configured."
               exit 0
@@ -232,6 +252,30 @@ jobs:
         with:
           name: ${{ matrix.artifact_name }}
           path: release/${{ matrix.artifact_name }}.exe
+          retention-days: 30
+
+      - name: Verify npm binary version
+        if: inputs.enterprise_npm
+        shell: bash
+        env:
+          EXPECTED_VERSION: ${{ steps.get-version.outputs.version }}
+        run: |
+          smoke_dir="$(mktemp -d)"
+          trap 'rm -rf "$smoke_dir"' EXIT
+          suffix=''
+          if [[ '${{ matrix.os }}' == windows-* ]]; then suffix='.exe'; fi
+          cp "release/${{ matrix.artifact_name }}$suffix" "$smoke_dir/git-ai$suffix"
+          test "$("$smoke_dir/git-ai$suffix" --version)" = "${EXPECTED_VERSION#v}"
+          if [[ '${{ matrix.os }}' == macos-* ]]; then
+            codesign --verify --strict "release/${{ matrix.artifact_name }}"
+          fi
+
+      - name: Upload npm Cargo license metadata
+        if: inputs.enterprise_npm && matrix.target == 'x86_64-unknown-linux-musl'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: npm-cargo-metadata
+          path: cargo-metadata.json
           retention-days: 30
 
       - name: Upload artifact (non-Windows)
@@ -289,9 +333,9 @@ jobs:
           cargo build --release --target x86_64-apple-darwin
         env:
           CARGO_INCREMENTAL: 0
-          SENTRY_OSS: ${{ secrets.SENTRY_OSS }}
-          POSTHOG_API_KEY: ${{ secrets.POSTHOG_API_KEY }}
-          OSS_BUILD: "1"
+          SENTRY_OSS: ${{ !inputs.enterprise_npm && secrets.SENTRY_OSS || '' }}
+          POSTHOG_API_KEY: ${{ !inputs.enterprise_npm && secrets.POSTHOG_API_KEY || '' }}
+          OSS_BUILD: ${{ inputs.enterprise_npm && '0' || '1' }}
 
       - name: Verify binary architecture
         run: |
@@ -314,11 +358,17 @@ jobs:
         shell: bash
         env:
           DRY_RUN: ${{ inputs.dry_run }}
+          ENTERPRISE_NPM: ${{ inputs.enterprise_npm }}
           APPLE_DEVELOPER_ID_APPLICATION_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_P12_BASE64 }}
           APPLE_DEVELOPER_ID_APPLICATION_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_P12_PASSWORD }}
         run: |
           set -euo pipefail
           if [[ -z "${APPLE_DEVELOPER_ID_APPLICATION_P12_BASE64}" || -z "${APPLE_DEVELOPER_ID_APPLICATION_P12_PASSWORD}" ]]; then
+            if [[ "$ENTERPRISE_NPM" == "true" ]]; then
+              codesign --force --sign - release/git-ai-macos-x64
+              codesign --verify --strict --verbose=2 release/git-ai-macos-x64
+              exit 0
+            fi
             if [[ "$DRY_RUN" == "true" ]]; then
               echo "Skipping macOS binary signing for dry run because signing secrets are not configured."
               exit 0
@@ -351,10 +401,98 @@ jobs:
           path: release/git-ai-macos-x64
           retention-days: 30
 
+      - name: Verify npm binary version
+        if: inputs.enterprise_npm
+        shell: bash
+        env:
+          EXPECTED_VERSION: ${{ steps.get-version.outputs.version }}
+        run: |
+          smoke_dir="$(mktemp -d)"
+          trap 'rm -rf "$smoke_dir"' EXIT
+          cp release/git-ai-macos-x64 "$smoke_dir/git-ai"
+          test "$("$smoke_dir/git-ai" --version)" = "${EXPECTED_VERSION#v}"
+          codesign --verify --strict release/git-ai-macos-x64
+
+  package-npm:
+    name: Pack enterprise npm platform artifacts
+    needs: [build, build-macos-intel]
+    if: >-
+      !cancelled() && inputs.enterprise_npm &&
+      needs.build.result == 'success' && needs.build-macos-intel.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: git-ai-*
+          path: artifacts
+          merge-multiple: true
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: npm-cargo-metadata
+          path: artifacts
+      - name: Test and pack the final signed bytes
+        env:
+          SOURCE_COMMIT: ${{ github.sha }}
+        run: |
+          python3 scripts/test-pack-npm.py
+          for pair in 'darwin-arm64 macos-arm64' 'darwin-x64 macos-x64' 'linux-arm64-musl linux-arm64' 'linux-x64-musl linux-x64' 'win32-x64 windows-x64.exe'; do
+            read -r platform artifact <<< "$pair"
+            python3 scripts/pack-npm.py --platform "$platform" --binary "artifacts/git-ai-$artifact" \
+              --output npm-packages --source-commit "$SOURCE_COMMIT" --cargo-metadata artifacts/cargo-metadata.json
+          done
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: git-ai-npm-packages
+          path: npm-packages/*.tgz
+          retention-days: 30
+
+  publish-npm:
+    name: Publish approved enterprise npm artifacts
+    needs: package-npm
+    if: >-
+      !cancelled() && inputs.enterprise_npm && inputs.publish_npm &&
+      inputs.dry_run != true && needs.package-npm.result == 'success'
+    runs-on: ubuntu-latest
+    environment: npm-release
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: git-ai-npm-packages
+          path: npm-packages
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version: '22'
+          registry-url: ${{ vars.DCC_NPM_REGISTRY }}
+          scope: '@dcc'
+      - name: Publish and verify registry integrity
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.DCC_NPM_TOKEN }}
+          NPM_CONFIG_REGISTRY: ${{ vars.DCC_NPM_REGISTRY }}
+        run: |
+          test -n "$NODE_AUTH_TOKEN" && test -n "$NPM_CONFIG_REGISTRY"
+          python3 - <<'PY'
+          import base64, hashlib, json, os, pathlib, subprocess, tarfile
+          archives = sorted(pathlib.Path('npm-packages').glob('*.tgz'))
+          if len(archives) != 5:
+              raise SystemExit('Expected exactly five DCC platform packages')
+          registry = os.environ['NPM_CONFIG_REGISTRY']
+          for archive in archives:
+              with tarfile.open(archive) as package:
+                  info = json.load(package.extractfile('package/package.json'))
+              subprocess.run(['npm', 'publish', str(archive), '--registry', registry, '--access', 'restricted', '--tag', 'latest', '--ignore-scripts'], check=True)
+              actual = subprocess.check_output(['npm', 'view', info['name'] + '@latest', 'dist.integrity', '--registry', registry], text=True).strip()
+              expected = 'sha512-' + base64.b64encode(hashlib.sha512(archive.read_bytes()).digest()).decode()
+              if expected not in actual.split():
+                  raise SystemExit('Registry integrity mismatch for ' + info['name'])
+          PY
+
   package-msi:
     name: Build Windows MSI installers
     needs: build
-    if: ${{ !cancelled() && needs.build.result == 'success' }}
+    if: ${{ !inputs.enterprise_npm && !cancelled() && needs.build.result == 'success' }}
     runs-on: windows-latest
     environment: release
     permissions:
@@ -416,7 +554,7 @@ jobs:
     name: Build macOS PKG installers
     needs: [build, build-macos-intel]
     if: >-
-      !cancelled() &&
+      !inputs.enterprise_npm && !cancelled() &&
       needs.build.result == 'success' &&
       needs.build-macos-intel.result == 'success'
     runs-on: macos-latest
@@ -641,8 +779,8 @@ jobs:
             echo '::error::PKG created the retired /opt runtime'
             exit 1
           fi
-          if [ -e /usr/local/bin/git-ai ]; then
-            echo '::error::PKG created a system-wide binary'
+          if [ -e /usr/local/bin/git-ai ] || [ -L /usr/local/bin/git-ai ]; then
+            echo "::error::PKG created a system-wide binary at /usr/local/bin/git-ai"
             exit 1
           fi
 
@@ -651,7 +789,7 @@ jobs:
     needs: [build, build-macos-intel, package-msi, test-msi, release-prod-approval]
     runs-on: ubuntu-latest
     if: >-
-      !cancelled() &&
+      !inputs.enterprise_npm && !cancelled() &&
       inputs.dry_run != true &&
       needs.build.result == 'success' &&
       needs.build-macos-intel.result == 'success' &&

@@ -2,6 +2,96 @@
 
 This directory contains MSI and PKG installer scaffolding for Git AI.
 
+## DCC npm platform packages
+
+The Release Build workflow supports `enterprise_npm=true`. It builds Linux
+musl, macOS, and Windows x64 with `OSS_BUILD=0` and without baked OSS telemetry
+keys. It skips PKG and MSI packaging and GitHub release publication. The five
+packages are
+`@dcc/git-ai-darwin-{arm64,x64}`, `@dcc/git-ai-linux-{arm64,x64}-musl`, and
+`@dcc/git-ai-win32-x64`.
+
+Keep `release_production=false`. Start with `dry_run=true` and
+`publish_npm=false` to inspect the `git-ai-npm-packages` artifact.
+Each package contains `package.json`, `LICENSE`, `THIRD-PARTY-NOTICES`, and
+the executable at `bin/git-ai` on macOS and Linux or
+`bin/git-ai.exe` on Windows. The package also contains `install.sh`
+or `install.ps1` for explicit use by the standalone updater. The packages
+have no dependencies or npm lifecycle scripts.
+The notices list the resolved Cargo dependencies, SPDX licenses and sources.
+Review dependency license obligations before distribution; this inventory
+does not replace upstream license texts where those are required.
+
+`scripts/pack-npm.py` uses Python's standard library, hashes the final signed
+binary, and records `dcc.sourceCommit` and `dcc.binarySha256`. It reads the
+package version from Cargo.toml and verifies matching Cargo metadata. The
+workflow executes `--version` on each native build host before allowing the
+packaging job, so npm, Cargo and binary versions must match. Cross-platform
+packaging itself never executes the input binary or modifies its signature.
+
+To publish, configure the `npm-release` environment with required reviewers,
+`DCC_NPM_REGISTRY` as an environment variable, and `DCC_NPM_TOKEN` as an
+environment secret. Its runner must reach that registry. Explicitly dispatch
+with `enterprise_npm=true`, `dry_run=false`, `publish_npm=true`; publication
+uses only the tgz artifacts produced in that run, sets the `latest` tag, and
+verifies that every tagged package matches the uploaded bytes. Missing registry/token fails
+instead of falling back to the public registry. Merely declaring an
+environment in YAML does not configure its approval rules.
+
+Do not overwrite an existing version. For an enterprise revision, set a new
+Cargo version (for example `1.7.7-dcc.2`) before building, and bind DCC only
+after all five packages have published and passed readback. A partial publish
+is a failed release and must be resolved before DCC adopts it. In enterprise npm
+mode, macOS artifacts use Developer ID signing when both signing secrets are
+configured; otherwise they receive an ad hoc signature. Both paths must pass
+`codesign --verify --strict` and the native version check before packaging.
+OSS installer release signing requirements remain unchanged.
+
+Enterprise installations use the `latest` tag on the internal npm registry for
+`git-ai upgrade` and daemon updates. Daemon updates preserve initialized hooks
+and configuration. After placing a verified binary, DCC runs
+`git-ai install-hooks --profile=local` to enable local attribution and daemon updates.
+
+DCC downloads and extracts these packages without an installer confirmation
+step. This does not guarantee that endpoint security or macOS policy will never
+prompt or block execution. The distribution flow does not remove quarantine
+attributes or disable Gatekeeper.
+
+Local packaging tests do not compile Rust, install hooks or access a registry:
+
+```bash
+python3 scripts/test-pack-npm.py
+```
+
+### Publish from OE master
+
+Use an OE Docker compile task with the DCC builder `:e2e` image to run
+`build.sh`. Set `DCC_OE_BOOTSTRAP_URL` and `DCC_OE_BOOTSTRAP_SHA256` to the
+verified release toolchain archive. It supplies Rust, vendored Cargo
+dependencies, the cross compilers and a `toolchain/release-tools-manifest.json`
+marker. The Windows MSVC build also needs access to the pinned Windows SDK and
+CRT through cargo-xwin.
+
+The compile task runs the Rust library tests, packaging tests, and dated usage
+integration tests (`usage_period::usage_machine_`) before building the five
+binaries from the same checkout. It checks the target format, architecture and
+version, signs the macOS binaries, then stages the verified packages under
+`output/`. A failed test or build prevents package staging.
+
+Run the compile task from `master` and attach its output to a downstream
+**NPM包发布** task. Set
+`BATCH_PUBLISH_DIR=darwin-arm64,darwin-x64,linux-arm64-musl,linux-x64-musl,win32-x64`.
+Set the publish task's default `PUBLISH_DIST_TAG` to `latest` once. npm requires
+an explicit tag for prerelease versions such as `1.7.7-dcc.12`. For each release,
+bump the version in `Cargo.toml` and `Cargo.lock`. Check that all five registry
+entries report the expected version and source commit.
+
+For prebuilt releases, use the test toolchain archive and supply
+`DCC_NPM_BUNDLE_URL` and `DCC_NPM_BUNDLE_SHA256`. The ZIP must contain the five
+flat `pack-npm.py` tarballs from the exact OE checkout and its Cargo version.
+
+## MSI and PKG installers
+
 Package outputs must install `git-ai` only. They must not install a `git`
 wrapper, `git.exe` shim, `git-og`, or any other executable that changes Git
 command routing. Per-user trace2 and editor/agent setup remains the
@@ -18,9 +108,10 @@ The Windows MSI is per-user: it installs under
 owns the user PATH entry and removes it on uninstall; `install-hooks --env`
 additionally configures Git Bash profiles when Git Bash is installed). It has
 no all-users or Administrator install mode. By default, the MSI also installs
-the same Git AI release into every WSL distribution except Docker-managed
-`docker-desktop*` distributions. WSL setup is best-effort and does not fail the
-Windows installation. Disable it for interactive or silent installs by passing
+`git-ai` in eligible WSL distributions. Windows downloads the same
+release from the enterprise npm registry using the distro's x64 or ARM64 Linux
+package. WSL setup is best-effort and excludes Docker-managed `docker-desktop*`
+distributions. Disable it for interactive or silent installs by passing
 `INSTALL_WSL=0` to `msiexec`. The macOS PKG copies its bundled binary into the
 active console user's `~/.git-ai/bin`, then runs setup as that user, including
 adding `~/.git-ai/bin` to the user's shell PATH configs. It fails if no valid

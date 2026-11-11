@@ -261,8 +261,9 @@ jobs:
               }
 
             task test CARGO_TEST_ARGS="$($testTargets -join ' ')" TEST_THREADS="$env:MATRIX_TEST_THREADS"
-            task test CARGO_TEST_ARGS="--doc" TEST_THREADS="$MATRIX_TEST_THREADS"
-            exit 0
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            task test CARGO_TEST_ARGS="--doc" TEST_THREADS="$env:MATRIX_TEST_THREADS"
+            exit $LASTEXITCODE
           }
 
           if ($mode -ne "windows-integration") {
