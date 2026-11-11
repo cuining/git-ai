@@ -63,6 +63,33 @@ Local packaging tests do not compile Rust, install hooks or access a registry:
 python3 scripts/test-pack-npm.py
 ```
 
+### Publish from OE master
+
+Use an OE Docker compile task with the DCC builder `:e2e` image to run
+`build.sh`. Set `DCC_OE_BOOTSTRAP_URL` and `DCC_OE_BOOTSTRAP_SHA256` to the
+verified release toolchain archive. It supplies Rust, vendored Cargo
+dependencies, the cross compilers and a `toolchain/release-tools-manifest.json`
+marker. The Windows MSVC build also needs access to the pinned Windows SDK and
+CRT through cargo-xwin.
+
+The compile task runs the Rust library tests, packaging tests, and dated usage
+integration tests (`usage_period::usage_machine_`) before building the five
+binaries from the same checkout. It checks the target format, architecture and
+version, signs the macOS binaries, then stages the verified packages under
+`output/`. A failed test or build prevents package staging.
+
+Run the compile task from `master` and attach its output to a downstream
+**NPM包发布** task. Set
+`BATCH_PUBLISH_DIR=darwin-arm64,darwin-x64,linux-arm64-musl,linux-x64-musl,win32-x64`.
+Set the publish task's default `PUBLISH_DIST_TAG` to `latest` once. npm requires
+an explicit tag for prerelease versions such as `1.7.7-dcc.12`. For each release,
+bump the version in `Cargo.toml` and `Cargo.lock`. Check that all five registry
+entries report the expected version and source commit.
+
+For prebuilt releases, use the test toolchain archive and supply
+`DCC_NPM_BUNDLE_URL` and `DCC_NPM_BUNDLE_SHA256`. The ZIP must contain the five
+flat `pack-npm.py` tarballs from the exact OE checkout and its Cargo version.
+
 ## MSI and PKG installers
 
 Package outputs must install `dcc-ai-tracking` only. They must not install a `git`
