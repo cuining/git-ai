@@ -212,8 +212,8 @@ else
     DOWNLOAD_URL="https://github.com/${REPO}/releases/latest/download/${BINARY_NAME}"
 fi
 
-# Install into the user's bin directory ~/.git-ai/bin
-INSTALL_DIR="$HOME/.git-ai/bin"
+# Install into the user's bin directory ~/.dcc-ai-tracking/bin
+INSTALL_DIR="$HOME/.dcc-ai-tracking/bin"
 
 # Create directory if it doesn't exist
 mkdir -p "$INSTALL_DIR"
@@ -288,7 +288,7 @@ fi
 
 # Fix file ownership when running as root for a different user (MDM deployments)
 if [ "$(id -u)" = "0" ] && [ -n "$INSTALL_USER" ]; then
-    chown -R "$INSTALL_USER" "$HOME/.git-ai" 2>/dev/null || true
+    chown -R "$INSTALL_USER" "$HOME/.dcc-ai-tracking" 2>/dev/null || true
 fi
 
 echo ""

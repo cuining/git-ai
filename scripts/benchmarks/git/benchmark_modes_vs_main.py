@@ -260,11 +260,15 @@ class VariantRunner:
 
         self.daemon_process: subprocess.Popen[str] | None = None
         self.daemon_started = False
-        self.daemon_socket_dir = self.home_dir / ".git-ai" / "internal" / "daemon"
+        self.daemon_socket_dir = self.home_dir / ".dcc-ai-tracking" / "internal" / "daemon"
         self.daemon_trace_socket = self.daemon_socket_dir / "trace2.sock"
         self.daemon_control_socket = self.daemon_socket_dir / "control.sock"
 
         if self.variant.mode == "daemon":
+            self.base_env["GIT_AI_DAEMON_CONTROL_SOCKET"] = str(
+                self.daemon_control_socket
+            )
+            self.base_env["GIT_AI_DAEMON_TRACE_SOCKET"] = str(self.daemon_trace_socket)
             self.start_daemon()
             self.base_env["GIT_TRACE2_EVENT"] = (
                 f"af_unix:stream:{self.daemon_trace_socket}"
@@ -274,9 +278,6 @@ class VariantRunner:
                 "0",
             )
             self.base_env["GIT_AI_DAEMON_CHECKPOINT_DELEGATE"] = "true"
-            self.base_env["GIT_AI_DAEMON_CONTROL_SOCKET"] = str(
-                self.daemon_control_socket
-            )
 
     def start_daemon(self) -> None:
         self.daemon_socket_dir.mkdir(parents=True, exist_ok=True)
