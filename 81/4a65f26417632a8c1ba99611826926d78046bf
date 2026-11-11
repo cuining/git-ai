@@ -1,0 +1,22 @@
+scripts/test-build-oe-npm.py
+  s_d61d509046732f::t_f0e25bc945f2f0 121-122,124-127,129,133
+packaging/README.md
+  s_d61d509046732f::t_5d14f737cab702 84-87
+  s_d61d509046732f::t_3c7c5220e60a53 75-79,83
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.7-dcc.4",
+  "base_commit_sha": "814a65f26417632a8c1ba99611826926d78046bf",
+  "prompts": {},
+  "sessions": {
+    "s_d61d509046732f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c5a4-1b18-78d2-a32b-5a8c54727ccf",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
