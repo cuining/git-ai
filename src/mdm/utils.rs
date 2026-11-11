@@ -484,8 +484,14 @@ pub fn write_atomic(path: &Path, data: &[u8]) -> Result<(), GitAiError> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        // Preserve the same umask-controlled permissions as File::create.
-        builder.permissions(fs::Permissions::from_mode(0o666));
+        let permissions = match fs::metadata(&target_path) {
+            Ok(metadata) => metadata.permissions(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                fs::Permissions::from_mode(0o666)
+            }
+            Err(error) => return Err(error.into()),
+        };
+        builder.permissions(permissions);
     }
     let mut file = builder.tempfile_in(directory).map_err(|e| {
         GitAiError::Generic(format!(

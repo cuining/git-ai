@@ -61,6 +61,8 @@ pub mod analyzers;
 pub mod bash_history_db;
 pub mod bash_sessions;
 pub mod checkpoint;
+#[cfg(unix)]
+pub(crate) mod claude_trace2_relay;
 pub mod control_api;
 pub mod coordinator;
 pub mod daemon_log_layer;
@@ -10765,6 +10767,15 @@ pub(crate) async fn run_daemon(config: DaemonConfig) -> Result<DaemonExitAction,
     remove_socket_if_exists(&config.trace_socket_path)?;
     remove_socket_if_exists(&config.control_socket_path)?;
 
+    #[cfg(unix)]
+    let claude_trace2_relay = match claude_trace2_relay::start(&config) {
+        Ok(relay) => relay,
+        Err(error) => {
+            tracing::warn!(%error, "could not start Claude Trace2 relay");
+            None
+        }
+    };
+
     let mut coordinator_inner = ActorDaemonCoordinator::new();
 
     // Spawn the telemetry worker inside the daemon's tokio runtime.
@@ -10960,6 +10971,11 @@ pub(crate) async fn run_daemon(config: DaemonConfig) -> Result<DaemonExitAction,
     spawn_shutdown_deadline_enforcer(coordinator.clone(), self_restart_history_path(&config));
 
     coordinator.wait_for_shutdown().await;
+
+    #[cfg(unix)]
+    if let Some(relay) = claude_trace2_relay {
+        relay.stop().await;
+    }
 
     #[cfg(feature = "test-support")]
     if let Ok(raw_hang_secs) = std::env::var("GIT_AI_TEST_SHUTDOWN_HANG_SECS")

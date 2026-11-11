@@ -43,6 +43,9 @@ toml = "0.9"
 unicode-normalization = "0.1"
 tempfile = "3.27"
 
+[target.'cfg(unix)'.dependencies]
+tokio = { version = "1.52", features = ["net", "io-util", "fs"] }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 openssl = { version = "0.10", features = ["vendored"] }
 
