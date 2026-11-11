@@ -1,0 +1,19 @@
+.github/workflows/managed-install-ci-probe.yml
+  s_c9044ad8be93d0::t_233c454113fdf4 72-73
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-dcc.11",
+  "base_commit_sha": "4f9e872ccc1ae51c55423583d78f13ff684ac519",
+  "prompts": {},
+  "sessions": {
+    "s_c9044ad8be93d0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c973-e7a1-7ea2-8472-f0321c82f5e2",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
