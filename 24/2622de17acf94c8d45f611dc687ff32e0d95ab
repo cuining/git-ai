@@ -1,0 +1,35 @@
+Cargo.toml
+  s_d61d509046732f::t_89650a76056517 3
+build.sh
+  s_d61d509046732f::t_bf598f91f868b5 1-103
+scripts/test-build-oe-npm.py
+  s_d61d509046732f::t_b074fb7a33241b 1-120,122-155
+  s_d61d509046732f::t_bf598f91f868b5 121
+packaging/README.md
+  s_d61d509046732f::t_bf598f91f868b5 66-89,92-95
+  s_d61d509046732f::t_85e79d977f9307 96
+Cargo.lock
+  s_d61d509046732f::t_314d66f836ed8a 1069
+scripts/build-oe-npm.py
+  s_d61d509046732f::t_5d27f1cd6c53a3 1-137
+scripts/stage-oe-npm.py
+  s_d61d509046732f::t_d3678861d2d6ca 1-108
+scripts/test-stage-oe-npm.py
+  s_d61d509046732f::t_2fbd85cae8faca 1-135
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.7-dcc.4",
+  "base_commit_sha": "242622de17acf94c8d45f611dc687ff32e0d95ab",
+  "prompts": {},
+  "sessions": {
+    "s_d61d509046732f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c5a4-1b18-78d2-a32b-5a8c54727ccf",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
