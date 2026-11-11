@@ -1255,6 +1255,10 @@ where
 }
 
 fn should_deliver_metric_event(config: &Config, event: &MetricEvent) -> bool {
+    let flags = config.get_feature_flags();
+    if event.is_local_only(flags.transcript_upload, flags.token_usage_metrics) {
+        return false;
+    }
     // Transcript-derived events keep flowing for sessions tracked before a
     // repo was excluded, so they get the same upload-time repo gate.
     let transcript_derived = event.event_id == MetricEventId::SessionEvent as u16
