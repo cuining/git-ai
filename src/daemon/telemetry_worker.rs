@@ -1502,10 +1502,6 @@ fn flush_sentry_and_posthog(
     performances: &[PerformanceEvent],
     messages: &[MessageEvent],
 ) {
-    if !config.remote_api_enabled() {
-        return;
-    }
-
     // Check for Enterprise DSN
     let enterprise_dsn = config
         .telemetry_enterprise_dsn()

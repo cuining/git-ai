@@ -2,7 +2,7 @@ use git_ai::api::client::ApiContext;
 use git_ai::auth::client::OAuthClient;
 /// Tests for config refresh behavior (Config::fresh() vs Config::get())
 /// These tests verify that Config::fresh() reads from disk while Config::get() uses cached values.
-use git_ai::config::{Config, load_file_config_public, save_file_config};
+use git_ai::config::{Config, DEFAULT_API_BASE_URL, load_file_config_public, save_file_config};
 use serial_test::serial;
 use std::env;
 use tempfile::TempDir;
@@ -205,7 +205,7 @@ fn test_config_fresh_respects_env_vars() {
 
     // Without env var, should use default
     let config1 = Config::fresh();
-    assert_eq!(config1.api_base_url(), "https://usegitai.com");
+    assert_eq!(config1.api_base_url(), DEFAULT_API_BASE_URL);
 
     // With env var set, should use env var
     unsafe {
@@ -219,7 +219,7 @@ fn test_config_fresh_respects_env_vars() {
         env::remove_var("GIT_AI_API_BASE_URL");
     }
     let config3 = Config::fresh();
-    assert_eq!(config3.api_base_url(), "https://usegitai.com");
+    assert_eq!(config3.api_base_url(), DEFAULT_API_BASE_URL);
 
     // Restore original GIT_AI_API_BASE_URL (home guard restores home vars via Drop)
     unsafe {
@@ -326,116 +326,16 @@ fn test_api_context_picks_up_api_key_changes() {
     assert!(ctx3.api_key.is_none());
 }
 
-/// Local mode must block read APIs as well as uploads, even with explicit auth.
-#[test]
-#[serial]
-fn test_remote_api_disabled_blocks_get_post_and_oauth_before_connecting() {
-    let temp_dir = TempDir::new().unwrap();
-    let _home_guard = HomeEnvGuard::set(temp_dir.path());
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    listener.set_nonblocking(true).unwrap();
-    let base_url = format!("http://{}", listener.local_addr().unwrap());
-    let path = temp_dir.path().join(".git-ai");
-    std::fs::create_dir_all(&path).unwrap();
-    std::fs::write(
-        path.join("config.json"),
-        serde_json::json!({
-            "remote_api_enabled": false,
-            "api_base_url": base_url,
-            "api_key": "fixture-api-key"
-        })
-        .to_string(),
-    )
-    .unwrap();
-
-    let context =
-        ApiContext::with_auth(Some(base_url.clone()), "fixture-token".to_string()).with_timeout(1);
-    let client = git_ai::api::client::ApiClient::new(context);
-    for error in [
-        client.read_notes(&["abcdef"]).unwrap_err().to_string(),
-        client
-            .read_ca_prompt_store(&["abcdef"])
-            .unwrap_err()
-            .to_string(),
-        client
-            .context()
-            .post_json("/worker/metrics", &serde_json::json!({}))
-            .err()
-            .unwrap()
-            .to_string(),
-        OAuthClient::with_base_url("http://127.0.0.1:9")
-            .unwrap()
-            .start_device_flow()
-            .unwrap_err(),
-    ] {
-        assert!(
-            error.contains("remote_api_enabled=false"),
-            "unexpected error: {error}"
-        );
-    }
-    assert_eq!(
-        listener.accept().unwrap_err().kind(),
-        std::io::ErrorKind::WouldBlock
-    );
-}
-
-#[test]
-#[serial]
-fn test_remote_api_disabled_does_not_load_credentials_or_env_key() {
-    use git_ai::auth::{CredentialStore, types::StoredCredentials};
-    let temp_dir = TempDir::new().unwrap();
-    let _home_guard = HomeEnvGuard::set(temp_dir.path());
-    let path = temp_dir.path().join(".git-ai");
-    std::fs::create_dir_all(&path).unwrap();
-    std::fs::write(
-        path.join("config.json"),
-        serde_json::json!({
-            "remote_api_enabled": false,
-            "api_base_url": "https://api.example.invalid",
-            "feature_flags": { "auth_keyring": false }
-        })
-        .to_string(),
-    )
-    .unwrap();
-    let credentials = StoredCredentials {
-        access_token: "fixture-access".to_string(),
-        refresh_token: "fixture-refresh".to_string(),
-        access_token_expires_at: chrono::Utc::now().timestamp() + 3600,
-        refresh_token_expires_at: chrono::Utc::now().timestamp() + 86400,
-    };
-    CredentialStore::new().store(&credentials).unwrap();
-    let previous_key = env::var_os("GIT_AI_API_KEY");
-    unsafe {
-        env::set_var("GIT_AI_API_KEY", "fixture-environment-key");
-    }
-    let context = ApiContext::new(None);
-    unsafe {
-        match previous_key {
-            Some(value) => env::set_var("GIT_AI_API_KEY", value),
-            None => env::remove_var("GIT_AI_API_KEY"),
-        }
-    }
-    assert!(
-        context.auth_token.is_none(),
-        "local mode must not load OAuth credentials"
-    );
-    assert!(
-        context.api_key.is_none(),
-        "environment API key must not enable uploads"
-    );
-    assert!(context.author_identity.is_none());
-}
-
 #[test]
 #[serial]
 #[cfg(unix)]
-fn test_config_save_atomically_preserves_disabled_remote_and_private_permissions() {
+fn test_config_save_is_atomic_and_private() {
     use std::io::Read;
     use std::os::unix::fs::PermissionsExt;
     let temp_dir = TempDir::new().unwrap();
     let _home_guard = HomeEnvGuard::set(temp_dir.path());
     let mut config = git_ai::config::FileConfig {
-        remote_api_enabled: Some(false),
+        quiet: Some(true),
         ..Default::default()
     };
     save_file_config(&config).unwrap();
@@ -450,7 +350,7 @@ fn test_config_save_atomically_preserves_disabled_remote_and_private_permissions
         observed, original,
         "open readers must retain the complete prior config"
     );
-    assert!(!Config::fresh().remote_api_enabled());
+    assert!(Config::fresh().is_quiet());
     assert_eq!(
         std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
         0o600
