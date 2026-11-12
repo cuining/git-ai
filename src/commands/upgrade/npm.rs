@@ -1,13 +1,13 @@
-use base64::Engine;
 use flate2::read::GzDecoder;
 use serde::Deserialize;
-use sha2::{Digest, Sha512};
 use std::fs;
 use std::io::Read;
 use std::path::PathBuf;
 use url::Url;
 
-const REGISTRY: &str = "https://npm.intra.xiaojukeji.com";
+/// Packument API for the enterprise npm registry. The tarball itself comes from
+/// `dist.tarball`, which Artifactory serves under `npm-dev-local`.
+const REGISTRY: &str = "https://artifactory.intra.xiaojukeji.com/artifactory/api/npm/npm-dev-local";
 const TAG: &str = "latest";
 const MAX_METADATA: u64 = 8 * 1024 * 1024;
 const MAX_ARCHIVE: u64 = 32 * 1024 * 1024;
@@ -105,7 +105,6 @@ struct DccMetadata {
 #[derive(Debug, Clone, Deserialize)]
 struct Dist {
     tarball: String,
-    integrity: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -266,25 +265,12 @@ fn verify_archive(
     release: &Release,
     data: &[u8],
 ) -> Result<(Vec<u8>, String), String> {
-    let integrity = base64::engine::general_purpose::STANDARD.encode(Sha512::digest(data));
-    if !release
-        .dist
-        .integrity
-        .split_whitespace()
-        .any(|token| token.strip_prefix("sha512-") == Some(integrity.as_str()))
-    {
-        return Err("npm update archive integrity mismatch".into());
-    }
-
-    let (binary_name, installer) = platform.filenames();
-    let expected = [
-        "package/package.json".to_string(),
-        format!("package/{binary_name}"),
-        format!("package/{installer}"),
-        "package/LICENSE".to_string(),
-        "package/THIRD-PARTY-NOTICES".to_string(),
-    ];
-    let mut files = std::collections::HashMap::new();
+    let (binary_name, installer_name) = platform.filenames();
+    let binary_path = format!("package/{binary_name}");
+    let installer_path = format!("package/{installer_name}");
+    let mut manifest_bytes = None;
+    let mut binary = None;
+    let mut script_bytes = None;
     let mut archive = tar::Archive::new(GzDecoder::new(data));
     for entry in archive
         .entries()
@@ -292,41 +278,59 @@ fn verify_archive(
         .raw(true)
     {
         let mut entry = entry.map_err(|error| error.to_string())?;
+        if !entry.header().entry_type().is_file() {
+            continue;
+        }
         let name = entry.path_bytes();
         let name = std::str::from_utf8(&name)
             .map_err(|_| "Invalid npm archive path")?
             .to_string();
-        let limit = if name == expected[1] {
+        if name.split('/').any(|part| part == "..") {
+            return Err(format!("Unexpected npm update archive entry: {name}"));
+        }
+        let wanted =
+            name == "package/package.json" || name == binary_path || name == installer_path;
+        if !wanted {
+            if entry.size() > MAX_BINARY {
+                return Err(format!("Unexpected npm update archive entry: {name}"));
+            }
+            std::io::copy(&mut entry, &mut std::io::sink()).map_err(|error| error.to_string())?;
+            continue;
+        }
+        let limit = if name == binary_path {
             MAX_BINARY
         } else {
             MAX_SMALL_FILE
         };
-        if !entry.header().entry_type().is_file()
-            || !expected.contains(&name)
-            || files.contains_key(&name)
-            || entry.size() == 0
-            || entry.size() > limit
-        {
+        if entry.size() == 0 || entry.size() > limit {
             return Err(format!("Unexpected npm update archive entry: {name}"));
         }
         let mut bytes = Vec::new();
         entry
             .read_to_end(&mut bytes)
             .map_err(|error| error.to_string())?;
-        files.insert(name, bytes);
-    }
-    if files.len() != expected.len() {
-        return Err("npm update archive is missing required files".into());
+        match name.as_str() {
+            "package/package.json" => manifest_bytes = Some(bytes),
+            name if name == binary_path => binary = Some(bytes),
+            _ => script_bytes = Some(bytes),
+        }
     }
 
-    let manifest: Manifest = serde_json::from_slice(&files[&expected[0]])
-        .map_err(|error| format!("Invalid npm archive manifest: {error}"))?;
+    let manifest: Manifest = serde_json::from_slice(
+        manifest_bytes
+            .as_deref()
+            .ok_or("npm update archive is missing required files")?,
+    )
+    .map_err(|error| format!("Invalid npm archive manifest: {error}"))?;
     platform.verify(&manifest, release.version())?;
-    let script = String::from_utf8(files.remove(&expected[2]).unwrap())
-        .map_err(|_| "Invalid npm installer encoding")?;
-    let binary = files.remove(&expected[1]).unwrap();
+    let script =
+        String::from_utf8(script_bytes.ok_or("npm update archive is missing required files")?)
+            .map_err(|_| "Invalid npm installer encoding")?;
+    let binary = binary.ok_or("npm update archive is missing required files")?;
     super::verify_sha256(&binary, &manifest.dcc.binary_sha256)?;
-    super::verify_sha256(&binary, &release.manifest.dcc.binary_sha256)?;
+    if manifest.dcc.binary_sha256 != release.manifest.dcc.binary_sha256 {
+        return Err("npm update archive checksum does not match the registry".into());
+    }
     Ok((binary, script))
 }
 
@@ -335,7 +339,7 @@ mod tests {
     use super::*;
     use flate2::{Compression, write::GzEncoder};
     use serial_test::serial;
-    use sha2::Sha256;
+    use sha2::{Digest, Sha256};
 
     fn platform() -> Platform {
         Platform {
@@ -489,6 +493,7 @@ mod tests {
             ("package/install.sh", b"#!/bin/bash\nexit 0\n".as_slice()),
             ("package/LICENSE", b"license".as_slice()),
             ("package/THIRD-PARTY-NOTICES", b"notices".as_slice()),
+            ("package/extra.txt", b"ignored".as_slice()),
         ] {
             let mut header = tar::Header::new_ustar();
             header.set_mode(0o644);
@@ -497,12 +502,13 @@ mod tests {
         }
         let archive = tar.into_inner().unwrap().finish().unwrap();
         let mut release: Release = serde_json::from_value(metadata).unwrap();
+        release.manifest.dcc.binary_sha256 = "0".repeat(64);
         assert!(stage_archive(&platform(), &release, &archive, parent.path()).is_err());
         assert_eq!(fs::read_dir(parent.path()).unwrap().count(), 0);
-        release.dist.integrity = format!(
-            "sha512-{}",
-            base64::engine::general_purpose::STANDARD.encode(Sha512::digest(&archive))
-        );
+        release.manifest.dcc.binary_sha256 = package_metadata()["dcc"]["binarySha256"]
+            .as_str()
+            .unwrap()
+            .to_string();
         let staged = stage_archive(&platform(), &release, &archive, parent.path()).unwrap();
         assert_eq!(fs::read(staged.binary()).unwrap(), b"native-binary");
         assert_eq!(staged.script, "#!/bin/bash\nexit 0\n");

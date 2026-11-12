@@ -579,6 +579,9 @@ fn install_release(
             #[cfg(not(windows))]
             let installed_exe = npm::installed_executable()?;
             let staged = npm::stage(package)?;
+            // The download is verified. Drop the pending marker before replacing
+            // the binary so a restarted daemon does not install the same package again.
+            persist_update_state(channel, None);
             run_install_script(&staged.script, &release.tag, silent, Some(&staged))?;
 
             // PowerShell owns the staged payload until the detached installer exits.
@@ -1051,10 +1054,6 @@ pub fn check_and_install_update_if_available() -> Result<DaemonUpdateCheckResult
         })),
     );
 
-    if npm::enabled() {
-        // A newly started daemon must not inherit the old pending installation.
-        persist_update_state(channel, None);
-    }
     install_release(api_base_url, channel, &release, true)?;
     persist_update_state(channel, None);
 
