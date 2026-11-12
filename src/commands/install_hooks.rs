@@ -6,7 +6,6 @@ use crate::mdm::hook_installer::HookInstallerParams;
 use crate::mdm::skills_installer;
 use crate::mdm::spinner::{Spinner, print_diff};
 use crate::mdm::utils::{clean_path, get_current_binary_path};
-use serde_json::{Map, Value, json};
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, OpenOptions};
 use std::io::ErrorKind;
@@ -28,15 +27,7 @@ struct InstallOptions {
     configure_wsl: bool,
     api_base: Option<String>,
     api_key: Option<String>,
-    agents: Option<HashSet<String>>,
-    local_profile: bool,
     if_missing: bool,
-}
-
-impl InstallOptions {
-    fn hooks_only(&self) -> bool {
-        self.local_profile || self.agents.is_some()
-    }
 }
 
 /// Installation status for a tool
@@ -442,60 +433,12 @@ fn install_if_missing(options: &InstallOptions) -> Result<HashMap<String, String
     Ok(statuses)
 }
 
-fn apply_local_profile() -> Result<(), String> {
-    let fields = [
-        ("remote_api_enabled", json!(false)),
-        ("disable_auto_updates", json!(false)),
-        ("disable_version_checks", json!(false)),
-        ("telemetry_oss", json!("off")),
-        ("prompt_storage", json!("local")),
-        ("codex_hooks_format", json!("config_toml")),
-    ];
-    let load = || {
-        let document = config::load_config_document::<Map<String, Value>>()?;
-        // Keep unrecognized fields intact, but fail closed on malformed known config.
-        serde_json::from_value::<config::FileConfig>(Value::Object(document.clone()))
-            .map_err(|error| format!("Failed to parse config file: {error}"))?;
-        Ok::<_, String>(document)
-    };
-    let current = load()?;
-    if fields
-        .iter()
-        .any(|(key, value)| current.get(*key) != Some(value))
-    {
-        crate::commands::daemon::with_stopped_daemon(|| {
-            // Re-read after a potentially slow shutdown to preserve intervening edits.
-            let mut document = load()?;
-            document.extend(fields.map(|(key, value)| (key.to_string(), value)));
-            config::save_config_document(&document)
-        })?;
-    }
-
-    let effective = config::Config::fresh();
-    if effective.remote_api_enabled()
-        || effective.auto_updates_disabled()
-        || effective.version_checks_disabled()
-        || !effective.is_telemetry_oss_disabled()
-        || effective.prompt_storage() != "local"
-        || effective.codex_hooks_format() != config::CodexHooksFormat::ConfigToml
-    {
-        return Err("local profile settings are not effective".into());
-    }
-    Ok(())
-}
-
 fn run_hooks_install(
     options: &InstallOptions,
     installed_exe: Option<&Path>,
 ) -> Result<HashMap<String, String>, GitAiError> {
     check_git_version(config::Config::fresh().git_cmd())?;
-    // Package installer environment is only inherited by the standalone installer.
-    let hooks_only = options.hooks_only();
-    let fallback = if hooks_only {
-        InstallConfig::default()
-    } else {
-        install_config_from_environment()
-    };
+    let fallback = install_config_from_environment();
     let install_config = InstallConfig {
         api_base: options.api_base.clone().or(fallback.api_base),
         api_key: options.api_key.clone().or(fallback.api_key),
@@ -506,29 +449,15 @@ fn run_hooks_install(
         Some(path) => path.to_path_buf(),
         None => get_current_binary_path()?,
     };
-    let config_changed = if options.local_profile {
-        if !options.dry_run {
-            // Preserve the current configuration and daemon if Trace2 has a conflict.
-            configure_daemon_trace2(true)?;
-            apply_local_profile().map_err(GitAiError::Generic)?;
-        }
-        false
-    } else {
-        persist_install_config_with_values(&binary_path, options.dry_run, &install_config)?
-    };
+    let config_changed =
+        persist_install_config_with_values(&binary_path, options.dry_run, &install_config)?;
     let params = HookInstallerParams { binary_path };
     if let Err(error) = configure_daemon_trace2(options.dry_run) {
-        if hooks_only {
-            return Err(error);
-        }
         eprintln!("Warning: could not configure Git trace2: {error}");
     }
     // The package installers pass --env after installing a new executable.
     let restart_daemon = config_changed || options.configure_env;
-    if let Err(error) = ensure_daemon(options.dry_run, restart_daemon, hooks_only, installed_exe) {
-        if hooks_only {
-            return Err(error);
-        }
+    if let Err(error) = ensure_daemon(options.dry_run, restart_daemon, false, installed_exe) {
         eprintln!("Warning: could not start the background service: {error}");
     }
 
@@ -538,11 +467,6 @@ fn run_hooks_install(
 
     // Run async operations and convert result.
     let statuses = crate::tokio_runtime::block_on(async_run_install(&params, options))?;
-    if options.local_profile && !skip_install_daemon(options.dry_run) {
-        let daemon_config = DaemonConfig::from_env_or_default_paths()?;
-        crate::commands::daemon::check_daemon_health(&daemon_config)
-            .map_err(GitAiError::Generic)?;
-    }
 
     // Clean up legacy envelope logs directory and related artifacts.
     // These are no longer used — all telemetry now routes through the daemon.
@@ -562,7 +486,6 @@ fn parse_install_options(args: &[String]) -> Result<InstallOptions, GitAiError> 
             "--dry-run" | "--dry-run=true" => options.dry_run = true,
             "--dry-run=false" => options.dry_run = false,
             "--verbose" | "-v" => options.verbose = true,
-            "--profile=local" => options.local_profile = true,
             "--if-missing" => options.if_missing = true,
             "--skills" => options.install_skills = true,
             "--visual-studio-extension" => options.include_visual_studio_extension = true,
@@ -586,41 +509,12 @@ fn parse_install_options(args: &[String]) -> Result<InstallOptions, GitAiError> 
                 })?;
                 options.api_key = non_empty_value(value);
             }
-            value if value.starts_with("--agents=") => {
-                options.agents = Some(parse_agents(&value[9..])?);
-            }
-            "--agents" => {
-                let value = args
-                    .next()
-                    .ok_or_else(|| GitAiError::Generic("missing value for --agents".into()))?;
-                options.agents = Some(parse_agents(value)?);
-            }
             _ => {
                 return Err(GitAiError::Generic(format!(
                     "unknown install-hooks argument: {arg}"
                 )));
             }
         }
-    }
-    if options.hooks_only()
-        && (options.configure_env
-            || options.configure_wsl
-            || options.install_skills
-            || options.include_visual_studio_extension)
-    {
-        return Err(GitAiError::Generic(
-            "Environment, skills, WSL or IDE setup cannot be combined with --agents or --profile=local".into(),
-        ));
-    }
-    if options.local_profile && (options.api_base.is_some() || options.api_key.is_some()) {
-        return Err(GitAiError::Generic(
-            "--profile=local does not accept API credentials".into(),
-        ));
-    }
-    if options.if_missing && !options.local_profile {
-        return Err(GitAiError::Generic(
-            "--if-missing requires --profile=local".into(),
-        ));
     }
     Ok(options)
 }
@@ -630,25 +524,7 @@ fn non_empty_value(value: &str) -> Option<String> {
     (!value.is_empty()).then(|| value.to_string())
 }
 
-fn parse_agents(value: &str) -> Result<HashSet<String>, GitAiError> {
-    value
-        .split(',')
-        .map(|agent| match agent.trim() {
-            "claude" | "claude-code" => Ok("claude-code".into()),
-            "codex" => Ok("codex".into()),
-            "opencode" => Ok("opencode".into()),
-            _ => Err(GitAiError::Generic(
-                "--agents expects claude,codex,opencode".into(),
-            )),
-        })
-        .collect()
-}
-
 fn should_include_installer(id: &str, options: &InstallOptions) -> bool {
-    if let Some(agents) = &options.agents {
-        return agents.contains(id);
-    }
-
     match id {
         VISUAL_STUDIO_INSTALLER_ID => options.include_visual_studio_extension,
         "amp" | "cline" | "droid" | "firebender" | "gemini" | "github-copilot" | "jetbrains"
@@ -785,7 +661,6 @@ async fn async_run_install(
     params: &HookInstallerParams,
     options: &InstallOptions,
 ) -> Result<HashMap<String, InstallStatus>, GitAiError> {
-    let hooks_only = options.hooks_only();
     let mut any_checked = false;
     let mut has_changes = false;
     let mut statuses: HashMap<String, InstallStatus> = HashMap::new();
@@ -872,11 +747,7 @@ async fn async_run_install(
                 }
 
                 // Install extras (extensions, git.path, etc.)
-                match if !hooks_only {
-                    installer.install_extras(params, options.dry_run)
-                } else {
-                    Ok(Vec::new())
-                } {
+                match installer.install_extras(params, options.dry_run) {
                     Ok(results) => {
                         let mut extras_changed = false;
                         for result in results {
@@ -979,8 +850,8 @@ async fn async_run_install(
         {
             has_changes = true;
         }
-    } else if !hooks_only
-        && let Ok(result) = skills_installer::uninstall_skills(options.dry_run, options.verbose)
+    } else if let Ok(result) =
+        skills_installer::uninstall_skills(options.dry_run, options.verbose)
         && result.changed
     {
         has_changes = true;
@@ -1043,26 +914,6 @@ async fn async_run_install(
         emit_install_hooks_metrics(&detailed_results);
     }
 
-    if !hooks_only {
-        return Ok(statuses);
-    }
-
-    let require_detected_agents = options.agents.is_some();
-    let mut failed_agents: Vec<&str> = statuses
-        .iter()
-        .filter_map(|(id, status)| {
-            let failed = *status == InstallStatus::Failed
-                || (require_detected_agents && *status == InstallStatus::NotFound);
-            failed.then_some(id.as_str())
-        })
-        .collect();
-    failed_agents.sort_unstable();
-    if !failed_agents.is_empty() {
-        return Err(GitAiError::Generic(format!(
-            "Agent hook installation or verification failed: {}",
-            failed_agents.join(", ")
-        )));
-    }
     Ok(statuses)
 }
 
@@ -1319,22 +1170,25 @@ mod tests {
 
     #[test]
     fn npm_managed_agent_selection_rejects_unknown_arguments() {
-        assert!(parse_install_options(&["--unknown".into()]).is_err());
-        assert!(parse_install_options(&["--agents=unknown".into()]).is_err());
-        assert!(parse_install_options(&["--agents=".into()]).is_err());
-        assert!(parse_install_options(&["--agents=codex".into(), "--env".into()]).is_err());
+        for argument in ["--unknown", "--agents=codex", "--profile=local"] {
+            let error = parse_install_options(&[argument.into()]).unwrap_err();
+            assert!(
+                error.to_string().contains("unknown install-hooks argument"),
+                "{argument}: {error}"
+            );
+        }
         assert!(
             !parse_install_options(&["--dry-run=false".into()])
                 .unwrap()
                 .dry_run
         );
-        let options = parse_install_options(&["--agents=claude,codex,opencode".into()]).unwrap();
+        let options = parse_install_options(&[]).unwrap();
         assert!(should_include_installer("claude-code", &options));
         assert!(should_include_installer("codex", &options));
         assert!(should_include_installer("opencode", &options));
+        assert!(should_include_installer("cursor", &options));
+        assert!(should_include_installer("deepseek-harness", &options));
         assert!(!should_include_installer("vscode", &options));
-        assert!(!should_include_installer("cursor", &options));
-        assert!(!should_include_installer("deepseek-harness", &options));
     }
 
     #[test]
@@ -1362,20 +1216,21 @@ mod tests {
 
     #[test]
     #[serial]
-    fn npm_managed_explicit_target_missing_or_invalid_fails_install() {
+    fn npm_managed_broken_codex_config_does_not_abort_install() {
         let temp = tempdir().unwrap();
         let codex_home = temp.path().join("codex");
+        fs::create_dir_all(&codex_home).unwrap();
+        fs::write(codex_home.join("config.toml"), "broken = [").unwrap();
         let _home = EnvVarGuard::set("HOME", temp.path().to_str().unwrap());
         let _codex = EnvVarGuard::set("CODEX_HOME", codex_home.to_str().unwrap());
         let _path = EnvVarGuard::set("PATH", "");
-        let options = parse_install_options(&["--agents=codex".into()]).unwrap();
+        let options = parse_install_options(&[]).unwrap();
         let params = HookInstallerParams {
             binary_path: temp.path().join("git-ai"),
         };
-        assert!(crate::tokio_runtime::block_on(async_run_install(&params, &options)).is_err());
-        fs::create_dir_all(&codex_home).unwrap();
-        fs::write(codex_home.join("config.toml"), "broken = [").unwrap();
-        assert!(crate::tokio_runtime::block_on(async_run_install(&params, &options)).is_err());
+        let statuses =
+            crate::tokio_runtime::block_on(async_run_install(&params, &options)).unwrap();
+        assert_eq!(statuses.get("codex"), Some(&InstallStatus::Failed));
     }
 
     fn write_install_git_marker(install_dir: &Path, git_path: &str) {

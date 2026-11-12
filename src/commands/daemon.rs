@@ -721,16 +721,6 @@ fn shutdown_daemon_if_running(config: &DaemonConfig) -> Result<(), String> {
     })
 }
 
-pub(crate) fn with_stopped_daemon(
-    action: impl FnOnce() -> Result<(), String>,
-) -> Result<(), String> {
-    let config = daemon_config_from_env_or_default_paths()?;
-    shutdown_daemon_if_running(&config)?;
-    let _lock = LockFile::try_acquire(&config.lock_path)
-        .ok_or_else(|| "background service started while updating configuration".to_string())?;
-    action()
-}
-
 fn daemon_confirmed_stopped(config: &DaemonConfig) -> Result<bool, String> {
     config
         .ensure_parent_dirs()
@@ -937,7 +927,15 @@ pub(crate) fn restart_daemon_after_install(
     config: &DaemonConfig,
     exe: &Path,
 ) -> Result<(), String> {
-    stop_daemon(config, GRACEFUL_SHUTDOWN_TIMEOUT)?;
+    if daemon_is_up(config) || daemon_startup_is_blocked(config) {
+        let old_pid = read_daemon_pid(config).ok();
+        // Wait until checkpoint drain finishes. stop_daemon's short budget
+        // escalates to SIGKILL while that drain is still running.
+        soft_shutdown_daemon(config, old_pid)?;
+        if let Some(pid) = old_pid {
+            wait_for_process_exit(pid, Duration::from_secs(2));
+        }
+    }
     start_daemon_detached_with_config(config.clone(), Duration::from_secs(5), Some(exe)).map(|_| ())
 }
 

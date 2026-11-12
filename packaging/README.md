@@ -50,7 +50,7 @@ OSS installer release signing requirements remain unchanged.
 Enterprise installations use the `latest` tag on the internal npm registry for
 `git-ai upgrade` and daemon updates. Daemon updates preserve initialized hooks
 and configuration. After placing a verified binary, DCC runs
-`git-ai install-hooks --profile=local` to enable local attribution and daemon updates.
+`git-ai install-hooks` to install hooks for the default agent list.
 
 DCC downloads and extracts these packages without an installer confirmation
 step. This does not guarantee that endpoint security or macOS policy will never

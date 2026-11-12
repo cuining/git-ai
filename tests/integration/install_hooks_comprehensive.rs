@@ -3,9 +3,9 @@
 //! This module tests the git-ai install-hooks and uninstall-hooks commands,
 //! which handle installation of git hooks for various IDEs and coding agents.
 
-use crate::repos::test_repo::{DaemonTestScope, TestRepo, get_binary_path};
+use crate::repos::test_repo::{get_binary_path, DaemonTestScope, TestRepo};
 use git_ai::commands::install_hooks::{
-    InstallResult, InstallStatus, run, run_uninstall, to_hashmap,
+    run, run_uninstall, to_hashmap, InstallResult, InstallStatus,
 };
 use std::collections::HashMap;
 use std::fs;
@@ -600,12 +600,10 @@ fn test_run_install_hooks_with_dry_run_false() {
 #[test]
 fn test_run_install_hooks_rejects_unknown_args() {
     let result = run(&["--unknown-flag".into()]);
-    assert!(
-        result
-            .unwrap_err()
-            .to_string()
-            .contains("unknown install-hooks argument")
-    );
+    assert!(result
+        .unwrap_err()
+        .to_string()
+        .contains("unknown install-hooks argument"));
 }
 
 #[test]
@@ -616,24 +614,23 @@ fn install_hooks_reports_agent_failure_according_to_install_mode() {
     let config_path = codex_home.join("config.toml");
     fs::write(&config_path, "invalid = [").unwrap();
 
-    for (flag, success) in [("--env", true), ("--profile=local", false)] {
-        let output = repo
-            .git_ai_command_without_pre_sync_for_test(
-                &["install-hooks", flag],
-                &[("CODEX_HOME", codex_home.to_str().unwrap())],
-            )
-            .env("CLAUDE_CONFIG_DIR", repo.test_home_path().join(".claude"))
-            .env("DSH_HOME", repo.test_home_path().join(".dsh"))
-            .env_remove("GIT_AI_TEST_CONFIG_PATCH")
-            .output()
-            .unwrap();
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(
-            stderr.contains("Failed to parse Codex config.toml"),
-            "{stderr}"
-        );
-        assert_eq!(output.status.success(), success, "{stderr}");
-    }
+    let mut command = repo.git_ai_command_without_pre_sync_for_test(
+        &["install-hooks", "--env"],
+        &[("CODEX_HOME", codex_home.to_str().unwrap())],
+    );
+    command
+        .env("CLAUDE_CONFIG_DIR", repo.test_home_path().join(".claude"))
+        .env("DSH_HOME", repo.test_home_path().join(".dsh"))
+        .env_remove("GIT_AI_TEST_CONFIG_PATCH");
+    #[cfg(unix)]
+    stub_cursor(&repo, &mut command);
+    let output = command.output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Failed to parse Codex config.toml"),
+        "{stderr}"
+    );
+    assert!(output.status.success(), "{stderr}");
     assert_eq!(fs::read_to_string(&config_path).unwrap(), "invalid = [");
 }
 
@@ -649,24 +646,11 @@ fn standalone_install_hooks_preserves_trace2_conflict_and_installs_hooks() {
     fs::write(&git_config, conflicting_config).unwrap();
     let env = [("CODEX_HOME", codex_home.to_str().unwrap())];
 
-    let engine_config = repo.test_home_path().join(".git-ai/config.json");
-    let original = fs::read(&engine_config).unwrap();
-    for flag in ["--agents=codex", "--profile=local"] {
-        let managed = repo
-            .git_ai_command_without_pre_sync_for_test(&["install-hooks", flag], &env)
-            .output()
-            .unwrap();
-        let stderr = String::from_utf8_lossy(&managed.stderr);
-        assert!(!managed.status.success(), "{stderr}");
-        assert!(stderr.contains("trace2-conflict"), "{stderr}");
-        assert!(!codex_home.join("hooks.json").exists());
-        assert_eq!(fs::read(&engine_config).unwrap(), original);
-    }
-
-    let standalone = repo
-        .git_ai_command_without_pre_sync_for_test(&["install-hooks", "--env"], &env)
-        .output()
-        .unwrap();
+    let mut standalone_command =
+        repo.git_ai_command_without_pre_sync_for_test(&["install-hooks", "--env"], &env);
+    #[cfg(unix)]
+    stub_cursor(&repo, &mut standalone_command);
+    let standalone = standalone_command.output().unwrap();
     let stderr = String::from_utf8_lossy(&standalone.stderr);
     assert!(standalone.status.success(), "{stderr}");
     assert!(stderr.contains("trace2-conflict"), "{stderr}");
@@ -675,136 +659,38 @@ fn standalone_install_hooks_preserves_trace2_conflict_and_installs_hooks() {
 }
 
 #[test]
-fn npm_managed_agent_install_cli_isolated() {
+fn npm_managed_default_install_keeps_codex_hooks_when_config_breaks() {
     let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
     let codex_home = repo.test_home_path().join("codex-managed");
     fs::create_dir_all(&codex_home).unwrap();
     repo.git_ai(&["config", "set", "codex_hooks_format", "hooks_json"])
         .unwrap();
     let env = [("CODEX_HOME", codex_home.to_str().unwrap())];
-    repo.git_ai_with_env(&["install-hooks", "--agents=codex"], &env)
-        .unwrap();
+    let mut install = repo.git_ai_command_without_pre_sync_for_test(&["install-hooks"], &env);
+    #[cfg(unix)]
+    stub_cursor(&repo, &mut install);
+    let installed = install.output().unwrap();
+    assert!(installed.status.success(), "{installed:?}");
     assert!(codex_home.join("hooks.json").is_file());
-    assert!(
-        fs::read_to_string(codex_home.join("config.toml"))
-            .unwrap()
-            .contains("trusted_hash")
-    );
-    assert!(!repo.test_home_path().join(".claude/settings.json").exists());
-    assert!(
-        !repo
-            .test_home_path()
-            .join(".config/opencode/plugins/git-ai.ts")
-            .exists()
-    );
-    assert!(
-        repo.git_ai_with_env(&["install-hooks", "--unknown"], &env)
-            .is_err()
-    );
+    assert!(fs::read_to_string(codex_home.join("config.toml"))
+        .unwrap()
+        .contains("trusted_hash"));
+    assert!(repo
+        .git_ai_with_env(&["install-hooks", "--unknown"], &env)
+        .is_err());
     let broken = "invalid = [";
     fs::write(codex_home.join("config.toml"), broken).unwrap();
-    assert!(
-        repo.git_ai_with_env(&["install-hooks", "--agents=codex"], &env)
-            .is_err()
-    );
+    let mut failed_command =
+        repo.git_ai_command_without_pre_sync_for_test(&["install-hooks"], &env);
+    #[cfg(unix)]
+    stub_cursor(&repo, &mut failed_command);
+    let failed = failed_command.output().unwrap();
+    assert!(failed.status.success(), "{failed:?}");
+    assert!(String::from_utf8_lossy(&failed.stderr).contains("Failed to parse Codex config.toml"));
     assert_eq!(
         fs::read_to_string(codex_home.join("config.toml")).unwrap(),
         broken
     );
-}
-
-#[test]
-fn local_profile_applies_policy_and_preserves_other_config() {
-    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
-    let codex_home = repo.test_home_path().join("codex-managed");
-    fs::create_dir_all(&codex_home).unwrap();
-    let codex_config_path = codex_home.join("config.toml");
-    let codex_hooks_path = codex_home.join("hooks.json");
-    fs::write(
-        &codex_config_path,
-        r#"[[hooks.PreToolUse]]
-[[hooks.PreToolUse.hooks]]
-type = "command"
-command = "echo user-toml"
-"#,
-    )
-    .unwrap();
-    let user_json = serde_json::json!({
-        "hooks": {"PreToolUse": [{"hooks": [{"type": "command", "command": "echo user-json"}]}]}
-    });
-    fs::write(&codex_hooks_path, serde_json::to_vec(&user_json).unwrap()).unwrap();
-    let config_dir = repo.test_home_path().join(".git-ai");
-    fs::create_dir_all(&config_dir).unwrap();
-    let config_path = config_dir.join("config.json");
-    fs::write(
-        &config_path,
-        r#"{"remote_api_enabled":true,"prompt_storage":"notes","codex_hooks_format":"hooks_json","custom_attributes":{"team":"test"},"future_setting":{"value":123}}"#,
-    )
-    .unwrap();
-
-    let env = [("CODEX_HOME", codex_home.to_str().unwrap())];
-    repo.git_ai_with_env(&["install-hooks", "--agents=codex"], &env)
-        .unwrap();
-    assert!(
-        fs::read_to_string(&codex_hooks_path)
-            .unwrap()
-            .contains("checkpoint codex")
-    );
-
-    let output = repo
-        .git_ai_command_without_pre_sync_for_test(
-            &["install-hooks", "--agents=codex", "--profile=local"],
-            &env,
-        )
-        .env_remove("GIT_AI_TEST_CONFIG_PATCH")
-        .output()
-        .unwrap();
-    assert!(output.status.success(), "{output:?}");
-
-    let output = repo
-        .git_ai_command_without_pre_sync_for_test(&["config"], &[])
-        .env_remove("GIT_AI_TEST_CONFIG_PATCH")
-        .output()
-        .unwrap();
-    assert!(output.status.success(), "{output:?}");
-    let effective: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(effective["remote_api_enabled"], false);
-    assert_eq!(effective["disable_auto_updates"], false);
-    assert_eq!(effective["disable_version_checks"], false);
-    assert_eq!(effective["telemetry_oss_disabled"], true);
-    assert_eq!(effective["prompt_storage"], "local");
-    assert_eq!(effective["codex_hooks_format"], "config_toml");
-    let written: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(&config_path).unwrap()).unwrap();
-    assert_eq!(written["custom_attributes"]["team"], "test");
-    assert_eq!(written["future_setting"]["value"], 123);
-    assert_eq!(
-        serde_json::from_slice::<serde_json::Value>(&fs::read(codex_hooks_path).unwrap()).unwrap(),
-        user_json
-    );
-    let codex_config: toml::Value =
-        toml::from_str(&fs::read_to_string(codex_config_path).unwrap()).unwrap();
-    let groups = codex_config["hooks"]["PreToolUse"].as_array().unwrap();
-    assert_eq!(groups.len(), 2);
-    let user_hooks = groups[0]["hooks"].as_array().unwrap();
-    assert_eq!(user_hooks.len(), 1);
-    assert_eq!(user_hooks[0]["command"].as_str(), Some("echo user-toml"));
-    let git_ai_hooks = groups[1]["hooks"].as_array().unwrap();
-    assert_eq!(git_ai_hooks.len(), 1);
-    assert!(
-        git_ai_hooks[0]["command"]
-            .as_str()
-            .unwrap()
-            .contains("checkpoint codex")
-    );
-    let trust = codex_config["hooks"]["state"].as_table().unwrap();
-    assert!(trust.iter().any(|(key, state)| {
-        key.ends_with("config.toml:pre_tool_use:1:0")
-            && state
-                .get("trusted_hash")
-                .and_then(toml::Value::as_str)
-                .is_some()
-    }));
 }
 
 #[cfg(unix)]
@@ -812,10 +698,8 @@ command = "echo user-toml"
 fn self_install_places_engine_and_hooks_at_the_user_installation() {
     let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
     let home = repo.test_home_path();
-    let mut install = repo.git_ai_command_without_pre_sync_for_test(
-        &["install", "--profile=local", "--if-missing"],
-        &[],
-    );
+    let mut install =
+        repo.git_ai_command_without_pre_sync_for_test(&["install", "--if-missing"], &[]);
     install
         .env("CODEX_HOME", home.join(".codex"))
         .env("CLAUDE_CONFIG_DIR", home.join(".claude"))
@@ -842,7 +726,7 @@ fn self_install_places_engine_and_hooks_at_the_user_installation() {
 }
 
 #[test]
-fn self_install_can_retry_after_a_trace2_conflict() {
+fn self_install_continues_after_a_trace2_conflict() {
     let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
     let home = repo.test_home_path();
     let codex_home = home.join(".codex");
@@ -850,30 +734,22 @@ fn self_install_can_retry_after_a_trace2_conflict() {
     let git_config = home.join(".gitconfig");
     let conflicting_config = "[trace2]\n\teventTarget = 2\n";
     fs::write(&git_config, conflicting_config).unwrap();
-    let mut install = repo.git_ai_command_without_pre_sync_for_test(
-        &[
-            "install",
-            "--profile=local",
-            "--if-missing",
-            "--agents=codex",
-        ],
-        &[],
-    );
+    let config_path = home.join(".git-ai/config.json");
+    let config_before = fs::read_to_string(&config_path).ok();
+    let mut install =
+        repo.git_ai_command_without_pre_sync_for_test(&["install", "--if-missing"], &[]);
     install
         .env("CODEX_HOME", &codex_home)
+        .env("CLAUDE_CONFIG_DIR", home.join(".claude"))
+        .env("DSH_HOME", home.join(".dsh"))
         .env_remove("GIT_AI_TEST_CONFIG_PATCH");
+    stub_cursor(&repo, &mut install);
 
-    let blocked = install.output().unwrap();
-    assert!(!blocked.status.success(), "{blocked:?}");
-    assert!(String::from_utf8_lossy(&blocked.stderr).contains("trace2-conflict"));
+    let output = install.output().unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("trace2-conflict"));
     assert_eq!(fs::read_to_string(&git_config).unwrap(), conflicting_config);
-
-    fs::remove_file(git_config).unwrap();
-    let retried = install.output().unwrap();
-    assert!(retried.status.success(), "{retried:?}");
-    let config = fs::read_to_string(home.join(".git-ai/config.json")).unwrap();
-    let config: serde_json::Value = serde_json::from_str(&config).unwrap();
-    assert_eq!(config["remote_api_enabled"], false);
+    assert_eq!(fs::read_to_string(&config_path).ok(), config_before);
 }
 
 #[test]
@@ -889,14 +765,10 @@ fn self_install_preserves_an_independent_installation() {
     fs::write(&config, user_config).unwrap();
     fs::write(home.join(".gitconfig"), "[trace2]\n\teventTarget = 2\n").unwrap();
 
-    let mut install = repo.git_ai_command_without_pre_sync_for_test(
-        &["install", "--profile=local", "--if-missing"],
-        &[],
-    );
-    let mut dry_run = repo.git_ai_command_without_pre_sync_for_test(
-        &["install", "--profile=local", "--if-missing", "--dry-run"],
-        &[],
-    );
+    let mut install =
+        repo.git_ai_command_without_pre_sync_for_test(&["install", "--if-missing"], &[]);
+    let mut dry_run = repo
+        .git_ai_command_without_pre_sync_for_test(&["install", "--if-missing", "--dry-run"], &[]);
 
     let preview = dry_run.output().unwrap();
     assert!(preview.status.success(), "{preview:?}");
@@ -915,54 +787,6 @@ fn self_install_preserves_an_independent_installation() {
         fs::read(executable).unwrap(),
         fs::read(get_binary_path()).unwrap()
     );
-}
-
-#[cfg(unix)]
-#[test]
-fn local_profile_discovers_agents_and_enables_updates() {
-    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
-    let home = repo.test_home_path();
-    let config_dir = home.join(".git-ai");
-    let config_path = config_dir.join("config.json");
-    let codex_home = home.join(".codex");
-    fs::create_dir_all(&config_dir).unwrap();
-    fs::create_dir_all(&codex_home).unwrap();
-    fs::write(
-        &config_path,
-        r#"{"remote_api_enabled":true,"disable_auto_updates":true,"disable_version_checks":true,"future_setting":123}"#,
-    )
-    .unwrap();
-
-    let mut command =
-        repo.git_ai_command_without_pre_sync_for_test(&["install-hooks", "--profile=local"], &[]);
-    command
-        .env("CODEX_HOME", &codex_home)
-        .env("CLAUDE_CONFIG_DIR", home.join(".claude"))
-        .env("DSH_HOME", home.join(".dsh"))
-        .env("API_KEY", "installer-env-key")
-        .env_remove("GIT_AI_TEST_CONFIG_PATCH");
-    stub_cursor(&repo, &mut command);
-    let output = command.output().unwrap();
-    assert!(output.status.success(), "{output:?}");
-
-    let config: serde_json::Value =
-        serde_json::from_slice(&fs::read(&config_path).unwrap()).unwrap();
-    assert_eq!(config["remote_api_enabled"], false);
-    assert_eq!(config["disable_auto_updates"], false);
-    assert_eq!(config["disable_version_checks"], false);
-    assert_eq!(config["telemetry_oss"], "off");
-    assert_eq!(config["prompt_storage"], "local");
-    assert_eq!(config["future_setting"], 123);
-    assert!(config.get("api_key").is_none());
-    assert!(
-        fs::read_to_string(home.join(".cursor/hooks.json"))
-            .unwrap()
-            .contains("checkpoint cursor")
-    );
-    assert!(!codex_home.join("hooks.json").exists());
-    let codex_config = fs::read_to_string(codex_home.join("config.toml")).unwrap();
-    assert!(codex_config.contains("checkpoint codex"));
-    assert!(codex_config.contains("trusted_hash"));
 }
 
 #[test]
@@ -1052,47 +876,6 @@ impl Drop for StopDedicatedDaemon<'_> {
 
 #[cfg(unix)]
 #[test]
-fn local_profile_restarts_only_when_policy_changes_and_shutdown_succeeds() {
-    let repo = TestRepo::new_dedicated_daemon();
-    let _stop = StopDedicatedDaemon(&repo);
-    let codex_home = repo.test_home_path().join("codex-managed");
-    fs::create_dir_all(&codex_home).unwrap();
-    let daemon_config = git_ai::daemon::DaemonConfig::from_home(&repo.daemon_home_path());
-    let pid = || git_ai::daemon::read_daemon_pid(&daemon_config).unwrap();
-    let install = || {
-        repo.git_ai_command_without_pre_sync_for_test(
-            &["install-hooks", "--agents=codex", "--profile=local"],
-            &[("CODEX_HOME", codex_home.to_str().unwrap())],
-        )
-        .env_remove("GIT_AI_TEST_CONFIG_PATCH")
-        .env_remove("GIT_AI_TEST_DB_PATH")
-        .env_remove("GITAI_TEST_DB_PATH")
-        .output()
-        .unwrap()
-    };
-
-    let old_pid = pid();
-    let output = install();
-    assert!(output.status.success(), "{output:?}");
-    let local_pid = pid();
-    assert_ne!(local_pid, old_pid);
-
-    let output = install();
-    assert!(output.status.success(), "{output:?}");
-    assert_eq!(pid(), local_pid);
-
-    let config_path = repo.test_home_path().join(".git-ai/config.json");
-    let existing = r#"{"remote_api_enabled":true}"#;
-    fs::write(&config_path, existing).unwrap();
-    fs::remove_file(repo.daemon_control_socket_path()).unwrap();
-    let output = install();
-    assert!(!output.status.success(), "{output:?}");
-    assert_eq!(pid(), local_pid);
-    assert_eq!(fs::read_to_string(config_path).unwrap(), existing);
-}
-
-#[cfg(unix)]
-#[test]
 fn managed_daemon_repair_restarts_only_when_unhealthy() {
     let repo = TestRepo::new_dedicated_daemon();
     let _stop = StopDedicatedDaemon(&repo);
@@ -1102,7 +885,7 @@ fn managed_daemon_repair_restarts_only_when_unhealthy() {
     let pid = || git_ai::daemon::read_daemon_pid(&config).unwrap();
     let install = || {
         repo.git_ai_command_without_pre_sync_for_test(
-            &["install-hooks", "--agents=codex"],
+            &["install-hooks"],
             &[("CODEX_HOME", codex_home.to_str().unwrap())],
         )
         .env_remove("GIT_AI_TEST_DB_PATH")
@@ -1363,30 +1146,22 @@ fn test_uninstall_workflow_dry_run_does_not_modify_system() {
 
 #[test]
 fn test_all_status_strings_are_lowercase() {
-    assert!(
-        InstallStatus::NotFound
-            .as_str()
-            .chars()
-            .all(|c| !c.is_uppercase())
-    );
-    assert!(
-        InstallStatus::Installed
-            .as_str()
-            .chars()
-            .all(|c| !c.is_uppercase())
-    );
-    assert!(
-        InstallStatus::AlreadyInstalled
-            .as_str()
-            .chars()
-            .all(|c| !c.is_uppercase())
-    );
-    assert!(
-        InstallStatus::Failed
-            .as_str()
-            .chars()
-            .all(|c| !c.is_uppercase())
-    );
+    assert!(InstallStatus::NotFound
+        .as_str()
+        .chars()
+        .all(|c| !c.is_uppercase()));
+    assert!(InstallStatus::Installed
+        .as_str()
+        .chars()
+        .all(|c| !c.is_uppercase()));
+    assert!(InstallStatus::AlreadyInstalled
+        .as_str()
+        .chars()
+        .all(|c| !c.is_uppercase()));
+    assert!(InstallStatus::Failed
+        .as_str()
+        .chars()
+        .all(|c| !c.is_uppercase()));
 }
 
 #[test]
