@@ -1,0 +1,32 @@
+tests/integration/stats.rs
+  s_268d23c8869b26::t_538679d1e3411f 33-35,41,44,48,50,56-58,63-81
+  s_268d23c8869b26::t_1702f3434e3948 36-40,42-43,45-47,49,51-52,54-55,59-62
+  s_268d23c8869b26::t_f8cd6624995efb 53
+src/git/refs.rs
+  s_268d23c8869b26::t_081954a9300418 234
+src/commands/git_ai_handlers.rs
+  s_268d23c8869b26::t_081954a9300418 4,7,10,33-40,987-1008,1012-1014,1019
+  s_268d23c8869b26::t_37656cdea4ad59 362-364,1009-1011,1015-1018
+  s_268d23c8869b26::t_c74beb5754ff4e 1020-1021
+src/authorship/stats.rs
+  s_268d23c8869b26::t_081954a9300418 2-6,9,48-80,85-93,98-99,688-694,696-701,707
+  s_268d23c8869b26::t_37656cdea4ad59 81-84,94-97
+src/commands/diff.rs
+  s_268d23c8869b26::t_081954a9300418 10-14,488-540,554
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.7-dcc.12",
+  "base_commit_sha": "642d0aa09d1ad0836557b558a5c3199216528c2c",
+  "prompts": {},
+  "sessions": {
+    "s_268d23c8869b26": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cfb2-478c-7b20-a801-1446532c7919",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
