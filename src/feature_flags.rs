@@ -85,7 +85,9 @@ define_feature_flags!(
     transcript_sweep: transcript_sweep, debug = true, release = true,
     checkpoint_debug_log: checkpoint_debug_log, debug = false, release = false,
     bash_checkpoints_v2: bash_checkpoints_v2, debug = false, release = false,
-    daemon_log_upload: daemon_log_upload, debug = true, release = true,
+    daemon_log_upload: daemon_log_upload,
+        debug = option_env!("OSS_BUILD") == Some("1"),
+        release = option_env!("OSS_BUILD") == Some("1"),
     rewrite_metrics_events: rewrite_metrics_events, debug = true, release = true,
     token_usage_metrics: token_usage_metrics, debug = false, release = false,
     untraced_commit_fixup: untraced_commit_fixup, debug = true, release = true,
@@ -137,6 +139,10 @@ mod tests {
     #[test]
     fn test_default_feature_flags() {
         let flags = FeatureFlags::default();
+        assert_eq!(
+            flags.daemon_log_upload,
+            option_env!("OSS_BUILD") == Some("1")
+        );
         #[cfg(debug_assertions)]
         {
             assert!(!flags.lite_mode);
@@ -146,7 +152,6 @@ mod tests {
             assert!(flags.transcript_sweep);
             assert!(!flags.checkpoint_debug_log);
             assert!(!flags.bash_checkpoints_v2);
-            assert!(flags.daemon_log_upload);
             assert!(flags.rewrite_metrics_events);
             assert!(!flags.token_usage_metrics);
             assert!(flags.untraced_commit_fixup);
@@ -161,7 +166,6 @@ mod tests {
             assert!(flags.transcript_sweep);
             assert!(!flags.checkpoint_debug_log);
             assert!(!flags.bash_checkpoints_v2);
-            assert!(flags.daemon_log_upload);
             assert!(flags.rewrite_metrics_events);
             assert!(!flags.token_usage_metrics);
             assert!(flags.untraced_commit_fixup);

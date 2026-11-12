@@ -20,13 +20,7 @@ pub fn install(config: InstallConfig<'_>, dry_run: bool) {
     }
 
     #[cfg(windows)]
-    {
-        if let Err(error) = crate::http::ensure_remote_api_enabled() {
-            eprintln!("[git-ai] warning: {error}; skipping WSL installation.");
-            return;
-        }
-        install_on_windows(config);
-    }
+    install_on_windows(config);
 
     #[cfg(not(windows))]
     {

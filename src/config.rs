@@ -16,8 +16,9 @@ use crate::mdm::utils::home_dir;
 #[cfg(any(test, feature = "test-support"))]
 use std::sync::RwLock;
 
-/// Default API base URL for comparison
-pub const DEFAULT_API_BASE_URL: &str = "https://usegitai.com";
+/// Default API base URL for DCC AI Tracking.
+pub const DEFAULT_API_BASE_URL: &str =
+    "https://dcc-service.intra.xiaojukeji.com/api/v1/ai-tracking";
 pub const DEFAULT_MAX_CHECKPOINT_FILE_SIZE_BYTES: usize = 3 * 1024 * 1024;
 pub const DEFAULT_MAX_CHECKPOINT_TOTAL_SIZE_BYTES: usize = 32 * 1024 * 1024;
 pub const DEFAULT_MAX_CHECKPOINT_TOTAL_LINES: usize = 500_000;
@@ -179,7 +180,6 @@ pub struct Config {
     update_channel: UpdateChannel,
     feature_flags: FeatureFlags,
     api_base_url: String,
-    remote_api_enabled: bool,
     prompt_storage: String,
     default_prompt_storage: Option<String>,
     #[serde(serialize_with = "serialize_masked_api_key")]
@@ -258,8 +258,6 @@ pub struct FileConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_base_url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub remote_api_enabled: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_storage: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_prompt_storage: Option<String>,
@@ -336,8 +334,6 @@ pub struct ConfigPatch {
     pub untraced_fixup_ignored_paths: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub telemetry_oss_disabled: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub remote_api_enabled: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disable_version_checks: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -561,12 +557,6 @@ impl Config {
 
     pub fn feature_flags(&self) -> &FeatureFlags {
         &self.feature_flags
-    }
-
-    /// Whether git-ai may contact remote services. File configuration cannot be
-    /// overridden by API keys, OAuth credentials, or telemetry environment values.
-    pub fn remote_api_enabled(&self) -> bool {
-        self.remote_api_enabled
     }
 
     /// Returns the API base URL.
@@ -1043,9 +1033,10 @@ fn build_config() -> Config {
     );
     let telemetry_oss_disabled = file_cfg
         .as_ref()
-        .and_then(|c| c.telemetry_oss.clone())
-        .filter(|s| s == "off")
-        .is_some();
+        .and_then(|c| c.telemetry_oss.as_deref())
+        .map_or(option_env!("OSS_BUILD") != Some("1"), |value| {
+            value == "off"
+        });
     let telemetry_enterprise_dsn = file_cfg
         .as_ref()
         .and_then(|c| c.telemetry_enterprise_dsn.clone())
@@ -1073,11 +1064,6 @@ fn build_config() -> Config {
 
     // Build feature flags from file config
     let feature_flags = build_feature_flags(&file_cfg);
-
-    let remote_api_enabled = file_cfg
-        .as_ref()
-        .and_then(|c| c.remote_api_enabled)
-        .unwrap_or(true);
 
     // Get API base URL from config, env var, or default
     let api_base_url = file_cfg
@@ -1207,15 +1193,9 @@ fn build_config() -> Config {
     };
 
     let notes_backend = NotesBackendConfig {
-        kind: if remote_api_enabled {
-            kind_from_env
-                .or_else(|| file_backend.as_ref().map(|b| b.kind))
-                .unwrap_or(default_kind)
-        } else {
-            // Local mode must keep checkpoint/commit notes local even when an
-            // API key or environment override normally selects HTTP storage.
-            NotesBackendKind::GitNotes
-        },
+        kind: kind_from_env
+            .or_else(|| file_backend.as_ref().map(|b| b.kind))
+            .unwrap_or(default_kind),
         backend_url: Some(resolve_notes_backend_url(
             url_from_env,
             file_backend.as_ref(),
@@ -1283,7 +1263,6 @@ fn build_config() -> Config {
             update_channel,
             feature_flags,
             api_base_url,
-            remote_api_enabled,
             prompt_storage,
             default_prompt_storage,
             api_key,
@@ -1319,7 +1298,6 @@ fn build_config() -> Config {
         update_channel,
         feature_flags,
         api_base_url,
-        remote_api_enabled,
         prompt_storage,
         default_prompt_storage,
         api_key,
@@ -1805,9 +1783,6 @@ fn apply_test_config_patch(config: &mut Config) {
             config.untraced_fixup_ignored_paths =
                 parse_path_patterns("untraced_fixup_ignored_paths", patterns);
         }
-        if let Some(remote_api_enabled) = patch.remote_api_enabled {
-            config.remote_api_enabled = remote_api_enabled;
-        }
         if let Some(telemetry_oss_disabled) = patch.telemetry_oss_disabled {
             config.telemetry_oss_disabled = telemetry_oss_disabled;
         }
@@ -1876,9 +1851,6 @@ fn apply_test_config_patch(config: &mut Config) {
             config.daemon_memory_limit_mb = normalize_daemon_memory_limit_mb(limit_mb);
         }
     }
-    if !config.remote_api_enabled {
-        config.notes_backend.kind = NotesBackendKind::GitNotes;
-    }
 }
 
 #[cfg(test)]
@@ -1909,7 +1881,6 @@ mod tests {
             update_channel: UpdateChannel::Latest,
             feature_flags: FeatureFlags::default(),
             api_base_url: DEFAULT_API_BASE_URL.to_string(),
-            remote_api_enabled: true,
             prompt_storage: "default".to_string(),
             default_prompt_storage: None,
             api_key: None,
@@ -2178,7 +2149,6 @@ mod tests {
             update_channel: UpdateChannel::Latest,
             feature_flags: FeatureFlags::default(),
             api_base_url: DEFAULT_API_BASE_URL.to_string(),
-            remote_api_enabled: true,
             prompt_storage: "default".to_string(),
             default_prompt_storage: None,
             api_key: None,
@@ -2329,7 +2299,6 @@ mod tests {
             update_channel: UpdateChannel::Latest,
             feature_flags: FeatureFlags::default(),
             api_base_url: DEFAULT_API_BASE_URL.to_string(),
-            remote_api_enabled: true,
             prompt_storage: prompt_storage.to_string(),
             default_prompt_storage: default_prompt_storage.map(|s| s.to_string()),
             api_key: None,

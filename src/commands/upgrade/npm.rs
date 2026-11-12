@@ -351,7 +351,6 @@ fn verify_archive(
 mod tests {
     use super::*;
     use flate2::{Compression, write::GzEncoder};
-    use serial_test::serial;
     use sha2::Sha256;
 
     fn platform() -> Platform {
@@ -540,8 +539,7 @@ mod tests {
     }
 
     #[test]
-    #[serial]
-    fn package_http_works_with_remote_api_disabled_and_never_follows_redirects() {
+    fn package_http_sends_no_credentials_and_never_follows_redirects() {
         use mockito::Matcher;
 
         let mut server = mockito::Server::new();
@@ -560,18 +558,9 @@ mod tests {
 
         // The source is loopback only in this transport test. Production callers
         // construct a fixed registry URL or validate the tarball before using get.
-        unsafe {
-            std::env::set_var(
-                "GIT_AI_TEST_CONFIG_PATCH",
-                r#"{"remote_api_enabled":false}"#,
-            )
-        };
-        let gated = crate::http::ensure_remote_api_enabled();
         let body = get(&format!("{}/metadata", server.url()), 3, 128);
         let redirected = get(&format!("{}/redirect", server.url()), 3, 128);
-        unsafe { std::env::remove_var("GIT_AI_TEST_CONFIG_PATCH") };
 
-        assert!(gated.is_err());
         assert_eq!(body.unwrap(), b"metadata");
         assert!(redirected.is_err());
         metadata.assert();

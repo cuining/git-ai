@@ -71,21 +71,9 @@ fn read_ureq_response(mut response: ureq::http::Response<ureq::Body>) -> Result<
     Ok(Response { status_code, body })
 }
 
-/// Check at the send boundary so existing clients and explicit auth cannot
-/// bypass a newly disabled remote setting. Local Git and daemon IPC do not use
-/// this HTTP module.
-pub fn ensure_remote_api_enabled() -> Result<(), String> {
-    if crate::config::Config::fresh().remote_api_enabled() {
-        Ok(())
-    } else {
-        Err("git-ai remote services are disabled (remote_api_enabled=false)".to_string())
-    }
-}
-
 /// Execute a ureq request, normalizing errors so that HTTP error status codes
 /// are returned as Ok(Response) rather than Err.
 pub fn send(request: ureq::RequestBuilder<WithoutBody>) -> Result<Response, String> {
-    ensure_remote_api_enabled()?;
     request
         .call()
         .map_err(|err| err.to_string())
@@ -97,7 +85,6 @@ pub fn send_with_body(
     request: ureq::RequestBuilder<WithBody>,
     body: &str,
 ) -> Result<Response, String> {
-    ensure_remote_api_enabled()?;
     request
         .send(body)
         .map_err(|err| err.to_string())

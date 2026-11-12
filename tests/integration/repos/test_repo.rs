@@ -1305,13 +1305,6 @@ impl TestRepo {
             );
         }
 
-        if let Some(enabled) = patch.remote_api_enabled {
-            config.insert(
-                "remote_api_enabled".to_string(),
-                serde_json::Value::Bool(enabled),
-            );
-        }
-
         let config_dir = git_ai::config::git_ai_dir_for_home(home);
         fs::create_dir_all(&config_dir).expect("failed to create test HOME config directory");
         let config_path = config_dir.join("config.json");

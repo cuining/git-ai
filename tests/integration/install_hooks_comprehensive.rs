@@ -838,7 +838,7 @@ fn self_install_preserves_an_independent_installation() {
     let executable = bin.join(format!("git-ai{}", std::env::consts::EXE_SUFFIX));
     fs::copy(get_binary_path(), &executable).unwrap();
     let config = home.join(".git-ai/config.json");
-    let user_config = r#"{"remote_api_enabled":true}"#;
+    let user_config = r#"{"quiet":true}"#;
     fs::write(&config, user_config).unwrap();
     fs::write(home.join(".gitconfig"), "[trace2]\n\teventTarget = 2\n").unwrap();
 

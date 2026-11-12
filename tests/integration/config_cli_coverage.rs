@@ -107,7 +107,7 @@ fn test_config_save_does_not_use_a_shared_temporary_file() {
     let occupied_path = config_dir.join("config.tmp");
     std::fs::create_dir_all(&occupied_path).unwrap();
 
-    let output = run_config(&repo, &["config", "set", "remote_api_enabled", "false"]);
+    let output = run_config(&repo, &["config", "set", "quiet", "true"]);
     assert!(
         output.status.success(),
         "{}",
@@ -116,7 +116,7 @@ fn test_config_save_does_not_use_a_shared_temporary_file() {
 
     let contents = std::fs::read_to_string(config_dir.join("config.json")).unwrap();
     let config: Value = serde_json::from_str(&contents).unwrap();
-    assert_eq!(config["remote_api_enabled"], false);
+    assert_eq!(config["quiet"], true);
     assert!(occupied_path.is_dir());
 }
 
@@ -164,6 +164,48 @@ fn test_config_tracking_feature_defaults() {
     assert_eq!(flags["rewrite_metrics_events"], true);
     assert_eq!(flags["transcript_upload"], false);
     assert_eq!(flags["token_usage_metrics"], false);
+    assert_eq!(
+        flags["daemon_log_upload"],
+        option_env!("OSS_BUILD") == Some("1")
+    );
+}
+
+#[test]
+fn test_config_oss_telemetry_default_and_overrides() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let key = "telemetry_oss_disabled";
+    let default_disabled = option_env!("OSS_BUILD") != Some("1");
+
+    assert_eq!(get_json(&repo, key), default_disabled);
+
+    repo.git_ai(&["config", "set", "telemetry_oss", "on"])
+        .unwrap();
+    assert_eq!(get_json(&repo, key), false);
+
+    repo.git_ai(&["config", "set", "telemetry_oss", "off"])
+        .unwrap();
+    assert_eq!(get_json(&repo, key), true);
+
+    repo.git_ai(&["config", "unset", "telemetry_oss"]).unwrap();
+    assert_eq!(get_json(&repo, key), default_disabled);
+}
+
+#[test]
+fn test_config_api_base_url_defaults_to_dcc_service() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let expected_url = "https://dcc-service.intra.xiaojukeji.com/api/v1/ai-tracking";
+    let output = repo
+        .git_ai_command_without_pre_sync_for_test(&["config", "api_base_url"], &[])
+        .env_remove("GIT_AI_API_BASE_URL")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let actual_url: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(actual_url, expected_url);
+
+    let help = run_config(&repo, &["config", "--help"]);
+    assert!(help.status.success(), "{help:?}");
+    assert!(String::from_utf8_lossy(&help.stdout).contains(expected_url));
 }
 
 /// Parse the JSON emitted by `git-ai config <key>` into a serde value.
@@ -558,7 +600,6 @@ fn fully_populated_file_config() -> FileConfig {
         update_channel: Some("latest".to_string()),
         feature_flags: Some(serde_json::json!({"transcript_sweep": true})),
         api_base_url: Some("https://usegitai.com".to_string()),
-        remote_api_enabled: Some(false),
         prompt_storage: Some("default".to_string()),
         default_prompt_storage: Some("local".to_string()),
         api_key: Some("secret-key".to_string()),
@@ -673,73 +714,22 @@ fn test_every_file_config_field_has_cli_unset_coverage() {
 }
 
 #[test]
-fn test_remote_api_enabled_config_round_trip() {
-    let repo = TestRepo::new();
-    assert_eq!(get_json(&repo, "remote_api_enabled"), Value::Bool(true));
-    repo.git_ai(&["config", "set", "remote_api_enabled", "false"])
-        .expect("disable remote services");
-    assert_eq!(get_json(&repo, "remote_api_enabled"), Value::Bool(false));
-    let all: Value = serde_json::from_str(&repo.git_ai(&["config"]).unwrap()).unwrap();
-    assert_eq!(all["remote_api_enabled"], false);
-    repo.git_ai(&["config", "unset", "remote_api_enabled"])
-        .expect("restore remote default");
-    assert_eq!(get_json(&repo, "remote_api_enabled"), Value::Bool(true));
-}
+fn test_legacy_remote_api_enabled_is_ignored() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let config_path = repo.test_home_path().join(".git-ai/config.json");
+    std::fs::write(
+        config_path,
+        r#"{"remote_api_enabled":false,"notes_backend":{"kind":"http"}}"#,
+    )
+    .unwrap();
 
-#[test]
-fn test_remote_api_disabled_preserves_local_checkpoint_and_commit() {
-    use crate::repos::test_file::ExpectedLineExt;
-    let mut repo = TestRepo::new();
-    repo.patch_git_ai_config(|patch| patch.remote_api_enabled = Some(false));
-    let mut human_file = repo.filename("human.txt");
-    human_file.set_contents(lines!["existing human code".human()]);
-    repo.stage_all_and_commit("base").unwrap();
-    human_file.assert_committed_lines(lines!["existing human code".human()]);
-    let mut ai_file = repo.filename("local-only.txt");
-    ai_file.set_contents(lines!["new AI code".ai()]);
-    repo.stage_all_and_commit("local attribution").unwrap();
-    human_file.assert_committed_lines(lines!["existing human code".human()]);
-    ai_file.assert_committed_lines(lines!["new AI code".ai()]);
-}
-
-#[test]
-fn test_remote_api_disabled_overrides_http_notes_backend_and_keeps_local_attribution() {
-    use crate::repos::test_file::ExpectedLineExt;
-    use git_ai::config::NotesBackendKind;
-    let cases: &[&[(&str, &str)]] = &[
-        &[("GIT_AI_API_KEY", "fixture-environment-key")],
-        &[
-            ("GIT_AI_API_KEY", "fixture-environment-key"),
-            ("GIT_AI_NOTES_BACKEND_KIND", "http"),
-        ],
-    ];
-    for (index, envs) in cases.iter().enumerate() {
-        let mut repo = TestRepo::new();
-        repo.patch_git_ai_config(|patch| {
-            patch.remote_api_enabled = Some(false);
-            if index == 1 {
-                patch.notes_backend = Some(NotesBackendConfig {
-                    kind: NotesBackendKind::Http,
-                    backend_url: Some("http://127.0.0.1:9".to_string()),
-                });
-            }
-        });
-        assert_eq!(
-            get_json_with_env(&repo, "notes_backend.kind", envs),
-            Value::String("git_notes".to_string()),
-            "local mode must override both implicit and configured HTTP notes",
-        );
-        let mut human_file = repo.filename("human.txt");
-        human_file.set_contents(lines!["existing human code".human()]);
-        repo.stage_all_and_commit("base").unwrap();
-        human_file.assert_committed_lines(lines!["existing human code".human()]);
-        let ai_path = repo.path().join("local-only.txt");
-        std::fs::write(&ai_path, "new AI code\n").unwrap();
-        repo.git_ai_with_env(&["checkpoint", "mock_ai", ai_path.to_str().unwrap()], envs)
-            .expect("local checkpoint with environment credentials");
-        repo.stage_all_and_commit("local attribution").unwrap();
-        human_file.assert_committed_lines(lines!["existing human code".human()]);
-        repo.filename("local-only.txt")
-            .assert_committed_lines(lines!["new AI code".ai()]);
-    }
+    let output = repo
+        .git_ai_command_without_pre_sync_for_test(&["config"], &[])
+        .env_remove("GIT_AI_NOTES_BACKEND_KIND")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let config: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(config["notes_backend"]["kind"], "http");
+    assert!(config.get("remote_api_enabled").is_none());
 }
