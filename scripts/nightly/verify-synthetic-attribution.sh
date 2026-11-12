@@ -7,9 +7,9 @@
 #   3. schema_version = "authorship/3.0.0"
 #   4. prompts dict has at least 1 entry (prompt was stored)
 #   5. Total transcript messages across all prompts > 0
-#   6. dcc-ai-tracking stats HEAD --json reports ai_additions > 0
+#   6. git-ai stats HEAD --json reports ai_additions > 0
 #   7. Test file (agent-test-<agent>.txt) appears in raw note text (WARN)
-#   8. dcc-ai-tracking blame shows AI attribution markers (WARN)
+#   8. git-ai blame shows AI attribution markers (WARN)
 #
 # Usage: verify-synthetic-attribution.sh <agent> [repo-dir]
 set -euo pipefail
@@ -86,7 +86,7 @@ sessions = len(d.get('sessions', {}))
 print(prompts + sessions)
 " "$META_JSON")
 [ "$SESSION_COUNT" -gt 0 ] \
-  || fail "No prompt/session entries in authorship note — synthetic checkpoint data was not stored (check dcc-ai-tracking checkpoint pipeline)"
+  || fail "No prompt/session entries in authorship note — synthetic checkpoint data was not stored (check git-ai checkpoint pipeline)"
 
 pass "$SESSION_COUNT AI session(s) recorded"
 
@@ -103,10 +103,10 @@ else
   warn "No transcript messages in authorship note — sessions format does not embed transcripts inline"
 fi
 
-# ── 6. dcc-ai-tracking stats reports AI additions ──────────────────────────────────────
+# ── 6. git-ai stats reports AI additions ──────────────────────────────────────
 # Capture output separately so pipefail doesn't trip on grep finding no DEBUG lines
-STATS_RAW=$(dcc-ai-tracking stats HEAD --json 2>/dev/null) \
-  || fail "dcc-ai-tracking stats HEAD --json command failed"
+STATS_RAW=$(git-ai stats HEAD --json 2>/dev/null) \
+  || fail "git-ai stats HEAD --json command failed"
 echo "$STATS_RAW" | grep -v '^\[DEBUG\]' > "$STATS_OUT" || true
 
 AI_ADDS=$(python3 -c "
@@ -130,9 +130,9 @@ print(0)
 " "$STATS_OUT" 2>/dev/null || echo "0")
 
 [ "$AI_ADDS" -gt 0 ] \
-  || fail "dcc-ai-tracking stats HEAD reports ai_additions=0 — AI work not tracked in stats (checkpoint data may not have been linked to this commit)"
+  || fail "git-ai stats HEAD reports ai_additions=0 — AI work not tracked in stats (checkpoint data may not have been linked to this commit)"
 
-pass "dcc-ai-tracking stats HEAD: ai_additions=$AI_ADDS"
+pass "git-ai stats HEAD: ai_additions=$AI_ADDS"
 
 # ── 7. Test file in note raw text ─────────────────────────────────────────────
 if grep -qF "$TEST_FILE" "$NOTE_RAW" 2>/dev/null; then
@@ -141,15 +141,15 @@ else
   warn "$TEST_FILE not found in authorship note text — line-level attribution may be missing for this file"
 fi
 
-# ── 8. dcc-ai-tracking blame shows AI attribution ──────────────────────────────────────
-if dcc-ai-tracking blame "$TEST_FILE" > "$BLAME_OUT" 2>/dev/null; then
+# ── 8. git-ai blame shows AI attribution ──────────────────────────────────────
+if git-ai blame "$TEST_FILE" > "$BLAME_OUT" 2>/dev/null; then
   if grep -qiE "ai-generated|${AGENT}|generated|ai_human_author" "$BLAME_OUT" 2>/dev/null; then
-    pass "AI attribution visible in dcc-ai-tracking blame output for $TEST_FILE"
+    pass "AI attribution visible in git-ai blame output for $TEST_FILE"
   else
-    warn "dcc-ai-tracking blame does not show explicit AI attribution for $TEST_FILE — agent_id may not be resolved in blame display"
+    warn "git-ai blame does not show explicit AI attribution for $TEST_FILE — agent_id may not be resolved in blame display"
   fi
 else
-  warn "dcc-ai-tracking blame command failed for $TEST_FILE — blame verification skipped"
+  warn "git-ai blame command failed for $TEST_FILE — blame verification skipped"
 fi
 
 echo "" | tee -a "$LOG"

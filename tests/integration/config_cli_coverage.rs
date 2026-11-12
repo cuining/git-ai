@@ -3,7 +3,7 @@
 //! `custom_attributes` (including its nested `custom_attributes.<key>` form).
 //!
 //! These run the real binary against an isolated test HOME, so `config set`
-//! writes land in the sandboxed `~/.dcc-ai-tracking/config.json` rather than the user's.
+//! writes land in the sandboxed `~/.git-ai/config.json` rather than the user's.
 
 use crate::repos::test_repo::{DaemonTestScope, TestRepo, get_binary_path};
 use git_ai::config::{AuthorConfig, FileConfig, NotesBackendConfig};
@@ -20,9 +20,9 @@ fn run_config(repo: &TestRepo, args: &[&str]) -> std::process::Output {
 fn test_enterprise_binary_name_dispatches_direct_commands() {
     let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
     let expected = if cfg!(windows) {
-        "dcc-ai-tracking.exe"
+        "git-ai.exe"
     } else {
-        "dcc-ai-tracking"
+        "git-ai"
     };
     assert_eq!(get_binary_path().file_name().unwrap(), expected);
 
@@ -37,31 +37,30 @@ fn test_enterprise_binary_name_dispatches_direct_commands() {
 
     let help = run_config(&repo, &["--help"]);
     assert!(help.status.success());
-    assert!(String::from_utf8_lossy(&help.stderr).contains("Usage: dcc-ai-tracking"));
+    assert!(String::from_utf8_lossy(&help.stderr).contains("Usage: git-ai"));
 }
 
 #[test]
-fn test_old_binary_name_is_rejected() {
+fn test_unsupported_binary_name_is_rejected() {
     let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
-    let old_name = if cfg!(windows) {
-        "git-ai.exe"
+    let unsupported_path = repo.path().join(if cfg!(windows) {
+        "git-ai-unsupported.exe"
     } else {
-        "git-ai"
-    };
-    let old_path = repo.path().join(old_name);
+        "git-ai-unsupported"
+    });
     let binary = get_binary_path();
-    std::fs::hard_link(binary, &old_path)
-        .or_else(|_| std::fs::copy(binary, &old_path).map(|_| ()))
-        .expect("stage the current binary under the old executable name");
+    std::fs::hard_link(binary, &unsupported_path)
+        .or_else(|_| std::fs::copy(binary, &unsupported_path).map(|_| ()))
+        .expect("stage the current binary under an unsupported executable name");
 
-    let output = std::process::Command::new(old_path)
+    let output = std::process::Command::new(unsupported_path)
         .current_dir(repo.path())
         .env_remove("GIT_AI")
         .arg("--version")
         .output()
-        .expect("invoke the executable under its old name");
+        .expect("invoke the executable under an unsupported name");
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("Use dcc-ai-tracking"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Use git-ai"));
 }
 
 #[cfg(unix)]
@@ -90,13 +89,13 @@ fn test_mixed_case_git_binary_name_dispatches_git() {
 }
 
 #[test]
-fn test_config_uses_dcc_ai_tracking_directory() {
+fn test_config_uses_git_ai_directory() {
     let repo = TestRepo::new();
     repo.git_ai(&["config", "set", "custom_attributes.team", "platform"])
         .expect("set config in the default directory");
 
-    let config_path = repo.test_home_path().join(".dcc-ai-tracking/config.json");
-    let contents = std::fs::read_to_string(config_path).expect("config in .dcc-ai-tracking");
+    let config_path = repo.test_home_path().join(".git-ai/config.json");
+    let contents = std::fs::read_to_string(config_path).expect("config in .git-ai");
     let config: Value = serde_json::from_str(&contents).unwrap();
     assert_eq!(config["custom_attributes"]["team"], "platform");
 }
@@ -104,7 +103,7 @@ fn test_config_uses_dcc_ai_tracking_directory() {
 #[test]
 fn test_config_save_does_not_use_a_shared_temporary_file() {
     let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
-    let config_dir = repo.test_home_path().join(".dcc-ai-tracking");
+    let config_dir = repo.test_home_path().join(".git-ai");
     let occupied_path = config_dir.join("config.tmp");
     std::fs::create_dir_all(&occupied_path).unwrap();
 
@@ -463,10 +462,7 @@ fn test_config_custom_attributes_set_empty_object_is_omitted() {
     );
 
     // The config file should not carry a `custom_attributes` key at all.
-    let config_path = repo
-        .test_home_path()
-        .join(".dcc-ai-tracking")
-        .join("config.json");
+    let config_path = repo.test_home_path().join(".git-ai").join("config.json");
     if let Ok(contents) = std::fs::read_to_string(&config_path) {
         let parsed: Value = serde_json::from_str(&contents).unwrap_or(Value::Null);
         assert!(

@@ -484,8 +484,14 @@ pub fn write_atomic(path: &Path, data: &[u8]) -> Result<(), GitAiError> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        // Preserve the same umask-controlled permissions as File::create.
-        builder.permissions(fs::Permissions::from_mode(0o666));
+        let permissions = match fs::metadata(&target_path) {
+            Ok(metadata) => metadata.permissions(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                fs::Permissions::from_mode(0o666)
+            }
+            Err(error) => return Err(error.into()),
+        };
+        builder.permissions(permissions);
     }
     let mut file = builder.tempfile_in(directory).map_err(|e| {
         GitAiError::Generic(format!(
@@ -535,8 +541,7 @@ pub fn shell_quote_path(path: &str) -> String {
 
 /// Check if a command is a git-ai checkpoint command
 pub fn is_git_ai_checkpoint_command(cmd: &str) -> bool {
-    // Keep recognizing existing hooks while installing the enterprise binary name.
-    (cmd.contains("dcc-ai-tracking") || cmd.contains("git-ai")) && cmd.contains("checkpoint")
+    cmd.contains("git-ai") && cmd.contains("checkpoint")
 }
 
 /// Generate a diff between old and new content
@@ -704,7 +709,7 @@ pub fn clean_path(path: PathBuf) -> PathBuf {
 }
 
 /// Normalize a Windows path to use forward slashes while preserving the drive letter.
-/// e.g. `C:\Users\Administrator\.dcc-ai-tracking\bin\git-ai.exe` → `C:/Users/Administrator/.dcc-ai-tracking/bin/git-ai.exe`
+/// e.g. `C:\Users\Administrator\.git-ai\bin\git-ai.exe` → `C:/Users/Administrator/.git-ai/bin/git-ai.exe`
 /// Forward-slash paths work in both git bash and PowerShell on Windows.
 /// Non-Windows paths (or paths that don't match `X:\...` pattern) are returned unchanged.
 pub fn normalize_windows_path_for_shell(path: &Path) -> String {
@@ -902,10 +907,10 @@ mod tests {
     #[test]
     fn test_is_git_ai_checkpoint_command() {
         assert!(is_git_ai_checkpoint_command(
-            "dcc-ai-tracking checkpoint claude --hook-input stdin"
+            "git-ai checkpoint claude --hook-input stdin"
         ));
         assert!(is_git_ai_checkpoint_command(
-            "\"/tmp/with space/dcc-ai-tracking\" checkpoint codex --hook-input stdin"
+            "\"/tmp/with space/git-ai\" checkpoint codex --hook-input stdin"
         ));
         assert!(is_git_ai_checkpoint_command("git-ai checkpoint"));
         assert!(is_git_ai_checkpoint_command(
@@ -1268,10 +1273,10 @@ mod tests {
     #[test]
     fn test_normalize_windows_path_for_shell_converts_windows_path() {
         // Fixes #1413: use forward-slash Windows paths that work in both git bash AND PowerShell
-        let path = PathBuf::from(r"C:\Users\Administrator\.dcc-ai-tracking\bin\git-ai.exe");
+        let path = PathBuf::from(r"C:\Users\Administrator\.git-ai\bin\git-ai.exe");
         let result = normalize_windows_path_for_shell(&path);
         assert_eq!(
-            result, "C:/Users/Administrator/.dcc-ai-tracking/bin/git-ai.exe",
+            result, "C:/Users/Administrator/.git-ai/bin/git-ai.exe",
             "should convert Windows path to forward-slash format"
         );
     }
@@ -1299,11 +1304,11 @@ mod tests {
     #[test]
     fn test_normalize_windows_path_for_shell_handles_extended_prefix_after_clean() {
         // After clean_path strips \\?\ prefix, the path looks like C:\...
-        let raw = PathBuf::from(r"\\?\C:\Users\USERNAME\.dcc-ai-tracking\bin\git-ai.exe");
+        let raw = PathBuf::from(r"\\?\C:\Users\USERNAME\.git-ai\bin\git-ai.exe");
         let cleaned = clean_path(raw);
         let result = normalize_windows_path_for_shell(&cleaned);
         assert_eq!(
-            result, "C:/Users/USERNAME/.dcc-ai-tracking/bin/git-ai.exe",
+            result, "C:/Users/USERNAME/.git-ai/bin/git-ai.exe",
             "should convert cleaned Windows path to forward-slash format"
         );
     }
@@ -1321,7 +1326,7 @@ mod tests {
 
     #[test]
     fn test_clean_path_strips_windows_prefix() {
-        let path = PathBuf::from(r"\\?\C:\Users\test\.dcc-ai-tracking\bin\git-ai.exe");
+        let path = PathBuf::from(r"\\?\C:\Users\test\.git-ai\bin\git-ai.exe");
         let cleaned = clean_path(path);
         let s = cleaned.to_string_lossy();
         assert!(
@@ -1338,7 +1343,7 @@ mod tests {
 
     #[test]
     fn test_clean_path_preserves_normal_windows_path() {
-        let path = PathBuf::from(r"C:\Users\test\.dcc-ai-tracking\bin\git-ai.exe");
+        let path = PathBuf::from(r"C:\Users\test\.git-ai\bin\git-ai.exe");
         let cleaned = clean_path(path.clone());
         assert_eq!(cleaned, path);
     }

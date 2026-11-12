@@ -567,7 +567,7 @@ where
                 }
                 Some(StatsSkipReason::Expensive(estimate)) => {
                     eprintln!(
-                        "[git-ai] Skipped git-ai stats for large commit (files_with_additions={}, added_lines={}, deleted_lines={}, hunks={}). Run `dcc-ai-tracking stats {}` to compute stats on demand.",
+                        "[git-ai] Skipped git-ai stats for large commit (files_with_additions={}, added_lines={}, deleted_lines={}, hunks={}). Run `git-ai stats {}` to compute stats on demand.",
                         estimate.files_with_additions,
                         estimate.added_lines,
                         estimate.deleted_lines,

@@ -275,7 +275,7 @@ impl MetricsDatabase {
         Ok(db)
     }
 
-    /// Get database path: ~/.dcc-ai-tracking/internal/metrics-db
+    /// Get database path: ~/.git-ai/internal/metrics-db
     fn database_path() -> Result<PathBuf, GitAiError> {
         // Allow test override via environment variable
         #[cfg(any(test, feature = "test-support"))]
@@ -3301,10 +3301,7 @@ mod tests {
     #[test]
     fn test_database_path() {
         let path = MetricsDatabase::database_path().unwrap();
-        assert!(
-            path.components()
-                .any(|part| part.as_os_str() == ".dcc-ai-tracking")
-        );
+        assert!(path.components().any(|part| part.as_os_str() == ".git-ai"));
         assert!(path.to_string_lossy().contains("internal"));
         assert!(path.to_string_lossy().ends_with("metrics-db"));
     }

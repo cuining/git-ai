@@ -6,9 +6,9 @@ using System.Threading.Tasks;
 namespace GitAiVS.Services
 {
     /// <summary>
-    /// Locates the dcc-ai-tracking binary on the system.
+    /// Locates the git-ai binary on the system.
     /// Search order:
-    ///   1. %USERPROFILE%\.dcc-ai-tracking\bin\  (production install)
+    ///   1. %USERPROFILE%\.git-ai\bin\  (production install)
     ///   2. %USERPROFILE%\.git-ai-local-dev\gitwrap\bin\  (nix dev)
     ///   3. PATH lookup
     ///
@@ -41,7 +41,7 @@ namespace GitAiVS.Services
                 var searched = _lastSearchedPaths != null ? string.Join(", ", _lastSearchedPaths) : "(none)";
                 Trace.WriteLine("[git-ai] git-ai not found");
                 Trace.WriteLine($"[git-ai]   Searched locations: {searched}");
-                Trace.WriteLine("[git-ai]   Install DCC AI Tracking and ensure dcc-ai-tracking is in your PATH.");
+                Trace.WriteLine("[git-ai]   Install Git AI and ensure git-ai is in your PATH.");
                 return null;
             }
 
@@ -74,8 +74,8 @@ namespace GitAiVS.Services
         {
             var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             var isWindows = Environment.OSVersion.Platform == PlatformID.Win32NT;
-            var executable = isWindows ? "dcc-ai-tracking.exe" : "dcc-ai-tracking";
-            var installDirectory = Path.Combine(home, ".dcc-ai-tracking", "bin");
+            var executable = isWindows ? "git-ai.exe" : "git-ai";
+            var installDirectory = Path.Combine(home, ".git-ai", "bin");
             var devDirectory = Path.Combine(home, ".git-ai-local-dev", "gitwrap", "bin");
 
             _lastSearchedPaths = new[]
@@ -102,8 +102,8 @@ namespace GitAiVS.Services
                 {
                     FileName = isWindows ? "cmd" : "/bin/sh",
                     Arguments = isWindows
-                        ? "/d /c where dcc-ai-tracking"
-                        : "-l -c \"command -v dcc-ai-tracking\"",
+                        ? "/d /c where git-ai"
+                        : "-l -c \"command -v git-ai\"",
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,

@@ -89,7 +89,7 @@ fn run_status(json: bool, diff_only: bool) -> Result<(), GitAiError> {
                 "If you've made AI edits recently and don't see them here, you might need to install hooks:"
             );
             eprintln!();
-            eprintln!("  dcc-ai-tracking install-hooks");
+            eprintln!("  git-ai install-hooks");
             eprintln!();
         }
         return Ok(());

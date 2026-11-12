@@ -1,5 +1,5 @@
 #!/bin/sh
-# Register a systemd user unit that runs `dcc-ai-tracking bg start` when the user logs
+# Register a systemd user unit that runs `git-ai bg start` when the user logs
 # in, so the Git AI background service is up before the first git command.
 #
 # The unit only *starts* the daemon. It never supervises it: the daemon
@@ -13,7 +13,7 @@ UNIT="git-ai-bg.service"
 # --bin) or the default install location. `bg start` keeps retrying for
 # RETRY_SECS if a previous daemon is still releasing its lock at login.
 RETRY_SECS=10
-LAUNCH_BIN='"${GIT_AI_LOGIN_START_BIN:-$HOME/.dcc-ai-tracking/bin/dcc-ai-tracking}"'
+LAUNCH_BIN='"${GIT_AI_LOGIN_START_BIN:-$HOME/.git-ai/bin/git-ai}"'
 LAUNCH_START="exec $LAUNCH_BIN bg start --retry-secs $RETRY_SECS"
 LAUNCH_STOP="exec $LAUNCH_BIN bg shutdown"
 
@@ -29,7 +29,7 @@ Usage:
   install-login-start.sh [install] [--env KEY=VALUE]... [--bin PATH] [--no-start] [--system]
   install-login-start.sh --uninstall [--system]
 
-Registers a systemd user unit (git-ai-bg.service) that runs `dcc-ai-tracking bg start`
+Registers a systemd user unit (git-ai-bg.service) that runs `git-ai bg start`
 at login. Per-user by default (~/.config/systemd/user, enabled and started
 now); --system installs to /etc/systemd/user and enables it for every user's
 next login.
@@ -118,8 +118,8 @@ if [ -n "$BIN" ]; then
 "*|*"$(printf '\r')"*) fail "--bin path must not contain a newline or carriage return" ;;
   esac
   add_env "GIT_AI_LOGIN_START_BIN=$BIN"
-elif [ "$SYSTEM" -eq 0 ] && [ ! -x "$HOME/.dcc-ai-tracking/bin/dcc-ai-tracking" ]; then
-  fail "$HOME/.dcc-ai-tracking/bin/dcc-ai-tracking not found; install git-ai first or pass --bin"
+elif [ "$SYSTEM" -eq 0 ] && [ ! -x "$HOME/.git-ai/bin/git-ai" ]; then
+  fail "$HOME/.git-ai/bin/git-ai not found; install git-ai first or pass --bin"
 fi
 
 mkdir -p "$UNIT_DIR"

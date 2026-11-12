@@ -171,7 +171,7 @@ impl InternalDatabase {
         Ok(db)
     }
 
-    /// Get database path: ~/.dcc-ai-tracking/internal/db
+    /// Get database path: ~/.git-ai/internal/db
     /// In test mode, can be overridden via GIT_AI_TEST_DB_PATH environment variable.
     /// We also support GITAI_TEST_DB_PATH because some git hook execution paths
     /// may scrub custom GIT_* variables.
@@ -618,10 +618,7 @@ mod tests {
         if let Some(override_path) = override_path {
             assert_eq!(path, PathBuf::from(override_path));
         } else {
-            assert!(
-                path.components()
-                    .any(|part| part.as_os_str() == ".dcc-ai-tracking")
-            );
+            assert!(path.components().any(|part| part.as_os_str() == ".git-ai"));
             assert!(path.to_string_lossy().contains("internal"));
             assert!(path.to_string_lossy().ends_with("db"));
         }

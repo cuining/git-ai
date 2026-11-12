@@ -21,7 +21,7 @@ class NpmPackageTests(unittest.TestCase):
         (self.root / "LICENSE").write_text("Apache license fixture\n")
         for installer in ("install.sh", "install.ps1"):
             (self.root / installer).write_bytes((SCRIPT.parent.parent / installer).read_bytes())
-        self.binary = self.root / "dcc-ai-tracking"
+        self.binary = self.root / "git-ai"
         self.binary.write_bytes(b"signed native binary fixture\x00")
         self.metadata = self.root / "cargo-metadata.json"
         self.metadata.write_text(json.dumps({"packages": [
@@ -45,7 +45,7 @@ class NpmPackageTests(unittest.TestCase):
         archive = self.root / "out" / "dcc-git-ai-darwin-arm64-1.7.7-dcc.1.tgz"
         with tarfile.open(archive) as package:
             self.assertEqual(set(package.getnames()), {
-                "package/package.json", "package/bin/dcc-ai-tracking", "package/LICENSE", "package/THIRD-PARTY-NOTICES", "package/install.sh",
+                "package/package.json", "package/bin/git-ai", "package/LICENSE", "package/THIRD-PARTY-NOTICES", "package/install.sh",
             })
             info = json.load(package.extractfile("package/package.json"))
             self.assertEqual(info["name"], "@dcc/git-ai-darwin-arm64")
@@ -58,8 +58,8 @@ class NpmPackageTests(unittest.TestCase):
             })
             for unwanted in ("scripts", "dependencies", "optionalDependencies", "main", "bin"):
                 self.assertNotIn(unwanted, info)
-            self.assertEqual(package.extractfile("package/bin/dcc-ai-tracking").read(), self.binary.read_bytes())
-            self.assertEqual(package.getmember("package/bin/dcc-ai-tracking").mode, 0o755)
+            self.assertEqual(package.extractfile("package/bin/git-ai").read(), self.binary.read_bytes())
+            self.assertEqual(package.getmember("package/bin/git-ai").mode, 0o755)
             self.assertIn("example 2.0.0 — MIT", package.extractfile("package/THIRD-PARTY-NOTICES").read().decode())
 
     def test_platform_packages_have_exact_platform_constraints(self):
@@ -78,7 +78,7 @@ class NpmPackageTests(unittest.TestCase):
                     info = json.load(package.extractfile("package/package.json"))
                     self.assertEqual(info["name"], f"@dcc/git-ai-{platform}")
                     self.assertEqual((info["os"], info["cpu"], info.get("libc")), ([os_name], [cpu], libc))
-                    binary = "dcc-ai-tracking.exe" if os_name == "win32" else "dcc-ai-tracking"
+                    binary = "git-ai.exe" if os_name == "win32" else "git-ai"
                     installer = "install.ps1" if os_name == "win32" else "install.sh"
                     self.assertEqual(info["files"], [f"bin/{binary}", "LICENSE", "THIRD-PARTY-NOTICES", installer])
                     self.assertTrue(package.getmember(f"package/{installer}").isfile())
@@ -88,7 +88,7 @@ class NpmPackageTests(unittest.TestCase):
     @unittest.skipUnless(host_platform.system() in ("Darwin", "Linux"), "requires Bash")
     def test_npm_upgrade_replaces_binary_without_running_first_install(self):
         home = self.root / "home"
-        target = home / ".dcc-ai-tracking/bin/dcc-ai-tracking"
+        target = home / ".git-ai/bin/git-ai"
         target.parent.mkdir(parents=True)
         target.write_bytes(b"previous executable")
         self.binary.write_bytes(b'#!/bin/sh\n: > "$HOME/installer-called-binary"\n')
@@ -103,7 +103,7 @@ class NpmPackageTests(unittest.TestCase):
         self.assertEqual(target.read_bytes(), self.binary.read_bytes())
         self.assertTrue(os.access(target, os.X_OK))
         self.assertFalse((home / "installer-called-binary").exists())
-        self.assertFalse((home / ".local/bin/dcc-ai-tracking").exists())
+        self.assertFalse((home / ".local/bin/git-ai").exists())
 
     def test_existing_version_archive_is_not_overwritten(self):
         self.assertEqual(self.pack().returncode, 0)

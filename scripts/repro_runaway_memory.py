@@ -364,8 +364,8 @@ def main() -> int:
     )
     parser.add_argument(
         "--git-ai-bin",
-        default="target/debug/dcc-ai-tracking",
-        help="Path to git-ai binary (default: target/debug/dcc-ai-tracking).",
+        default="target/debug/git-ai",
+        help="Path to git-ai binary (default: target/debug/git-ai).",
     )
     parser.add_argument(
         "--scenario",
@@ -417,7 +417,7 @@ def main() -> int:
     if not git_ai_bin.exists():
         print(
             f"git-ai binary not found at {git_ai_bin}. "
-            "Build first (example: cargo build --bin dcc-ai-tracking).",
+            "Build first (example: cargo build --bin git-ai).",
             file=sys.stderr,
         )
         return 2

@@ -384,7 +384,7 @@ fn handle_ci_local(args: &[String]) {
 fn print_ci_help_and_exit() -> ! {
     eprintln!("git-ai ci - Continuous integration utilities");
     eprintln!();
-    eprintln!("Usage: dcc-ai-tracking ci <subcommand> [args...]");
+    eprintln!("Usage: git-ai ci <subcommand> [args...]");
     eprintln!();
     eprintln!("Subcommands:");
     eprintln!("  github           GitHub CI");
@@ -394,7 +394,7 @@ fn print_ci_help_and_exit() -> ! {
     eprintln!("    run [--no-cleanup]  Run GitLab CI in current repo");
     eprintln!("    install        Print YAML snippet to add to .gitlab-ci.yml");
     eprintln!("  local            Run CI locally by event name and flags");
-    eprintln!("                   Usage: dcc-ai-tracking ci local <event> [flags]");
+    eprintln!("                   Usage: git-ai ci local <event> [flags]");
     eprintln!("                   Events:");
     eprintln!(
         "                     merge  --merge-commit-sha <sha> --base-ref <ref> --head-ref <ref> --head-sha <sha> --base-sha <sha> [--fork-clone-url <url>]"
@@ -414,7 +414,7 @@ fn print_ci_help_and_exit() -> ! {
 fn print_ci_local_help_and_exit() -> ! {
     eprintln!("git-ai ci local - Run CI locally by event name and flags");
     eprintln!();
-    eprintln!("Usage: dcc-ai-tracking ci local <event> [flags]");
+    eprintln!("Usage: git-ai ci local <event> [flags]");
     eprintln!();
     eprintln!("Events:");
     eprintln!(
@@ -435,7 +435,7 @@ fn print_ci_local_help_and_exit() -> ! {
 fn print_ci_github_help_and_exit() -> ! {
     eprintln!("git-ai ci github - GitHub CI utilities");
     eprintln!();
-    eprintln!("Usage: dcc-ai-tracking ci github <subcommand> [args...]");
+    eprintln!("Usage: git-ai ci github <subcommand> [args...]");
     eprintln!();
     eprintln!("Subcommands:");
     eprintln!("  run [--no-cleanup]   Run GitHub CI in current repo");
@@ -447,7 +447,7 @@ fn print_ci_github_help_and_exit() -> ! {
 fn print_ci_gitlab_help_and_exit() -> ! {
     eprintln!("git-ai ci gitlab - GitLab CI utilities");
     eprintln!();
-    eprintln!("Usage: dcc-ai-tracking ci gitlab <subcommand> [args...]");
+    eprintln!("Usage: git-ai ci gitlab <subcommand> [args...]");
     eprintln!();
     eprintln!("Subcommands:");
     eprintln!("  run [--no-cleanup]   Run GitLab CI in current repo");

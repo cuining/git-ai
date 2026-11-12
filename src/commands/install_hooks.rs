@@ -2,13 +2,14 @@ use crate::config;
 use crate::daemon::DaemonConfig;
 use crate::error::GitAiError;
 use crate::mdm::agents::get_all_installers;
-use crate::mdm::hook_installer::{HookInstaller, HookInstallerParams};
+use crate::mdm::hook_installer::HookInstallerParams;
 use crate::mdm::skills_installer;
 use crate::mdm::spinner::{Spinner, print_diff};
-use crate::mdm::utils::get_current_binary_path;
+use crate::mdm::utils::{clean_path, get_current_binary_path};
 use serde_json::{Map, Value, json};
 use std::collections::{HashMap, HashSet};
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -28,7 +29,14 @@ struct InstallOptions {
     api_base: Option<String>,
     api_key: Option<String>,
     agents: Option<HashSet<String>>,
-    managed_local: bool,
+    local_profile: bool,
+    if_missing: bool,
+}
+
+impl InstallOptions {
+    fn hooks_only(&self) -> bool {
+        self.local_profile || self.agents.is_some()
+    }
 }
 
 /// Installation status for a tool
@@ -301,12 +309,17 @@ fn skip_install_daemon(dry_run: bool) -> bool {
         || std::env::var_os("GITAI_TEST_DB_PATH").is_some()
 }
 
-fn ensure_daemon(dry_run: bool, restart: bool, managed: bool) -> Result<(), GitAiError> {
+fn ensure_daemon(
+    dry_run: bool,
+    restart: bool,
+    strict: bool,
+    installed_exe: Option<&Path>,
+) -> Result<(), GitAiError> {
     if skip_install_daemon(dry_run) {
         return Ok(());
     }
-    if managed {
-        crate::commands::daemon::repair_daemon(restart)
+    if strict {
+        crate::commands::daemon::repair_daemon(restart, installed_exe)
     } else if restart {
         let daemon_config = DaemonConfig::from_env_or_default_paths()?;
         crate::commands::daemon::restart_daemon(&daemon_config)
@@ -320,7 +333,11 @@ fn ensure_daemon(dry_run: bool, restart: bool, managed: bool) -> Result<(), GitA
 /// Main entry point for install-hooks command
 pub fn run(args: &[String]) -> Result<HashMap<String, String>, GitAiError> {
     let options = parse_install_options(args)?;
-    let result = run_hooks_install(&options);
+    let result = if options.if_missing {
+        install_if_missing(&options)
+    } else {
+        run_hooks_install(&options, None)
+    };
 
     // The install scripts previously applied shell/PATH config even when
     // install-hooks failed, so --env must run regardless of the hooks result.
@@ -355,14 +372,84 @@ pub fn run(args: &[String]) -> Result<HashMap<String, String>, GitAiError> {
     result
 }
 
-fn apply_managed_local_profile() -> Result<(), String> {
+/// A packaged executable can install itself without any knowledge of its caller.
+fn install_if_missing(options: &InstallOptions) -> Result<HashMap<String, String>, GitAiError> {
+    let root = config::git_ai_dir_path()
+        .ok_or_else(|| GitAiError::Generic("Cannot determine the installation directory".into()))?;
+    let bin = root.join("bin");
+    let executable = bin.join(format!("git-ai{}", std::env::consts::EXE_SUFFIX));
+    let _lock = if options.dry_run {
+        None
+    } else {
+        fs::create_dir_all(&bin)?;
+        let lock = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(root.join("install.lock"))?;
+        lock.lock()?;
+        Some(lock)
+    };
+
+    // Keep a hard link until setup finishes. An interrupted setup can be retried,
+    // and an executable placed by a different installer is never replaced.
+    let pending = bin.join(".git-ai-install-pending");
+    match fs::symlink_metadata(&executable) {
+        Ok(_) if executable.is_file() => {
+            let setup_pending = match same_file::is_same_file(&pending, &executable) {
+                Ok(true) => true,
+                Ok(false) => {
+                    if !options.dry_run {
+                        fs::remove_file(&pending)?;
+                    }
+                    false
+                }
+                Err(error) if error.kind() == ErrorKind::NotFound => false,
+                Err(error) => return Err(error.into()),
+            };
+            if !setup_pending {
+                println!(
+                    "Git AI is already installed at {}. Skipping setup.",
+                    executable.display()
+                );
+                return Ok(HashMap::new());
+            }
+        }
+        Ok(_) => {
+            return Err(GitAiError::Generic(format!(
+                "Git AI executable path is occupied: {}",
+                executable.display()
+            )));
+        }
+        Err(error) if error.kind() == ErrorKind::NotFound && options.dry_run => {}
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            let staged = tempfile::NamedTempFile::new_in(&bin)?;
+            fs::copy(get_current_binary_path()?, staged.path())?;
+            staged.as_file().sync_all()?;
+            drop(staged.persist(&pending).map_err(|error| error.error)?);
+            fs::hard_link(&pending, &executable)?;
+        }
+        Err(error) => return Err(error.into()),
+    }
+
+    if options.dry_run {
+        return run_hooks_install(options, Some(&executable));
+    }
+    let executable = clean_path(executable.canonicalize()?);
+    let statuses = run_hooks_install(options, Some(&executable))?;
+    fs::remove_file(pending)?;
+    Ok(statuses)
+}
+
+fn apply_local_profile() -> Result<(), String> {
     let fields = [
         ("remote_api_enabled", json!(false)),
-        ("disable_auto_updates", json!(true)),
-        ("disable_version_checks", json!(true)),
+        ("disable_auto_updates", json!(false)),
+        ("disable_version_checks", json!(false)),
         ("telemetry_oss", json!("off")),
         ("prompt_storage", json!("local")),
-        ("codex_hooks_format", json!("hooks_json")),
+        ("codex_hooks_format", json!("config_toml")),
     ];
     let load = || {
         let document = config::load_config_document::<Map<String, Value>>()?;
@@ -381,81 +468,33 @@ fn apply_managed_local_profile() -> Result<(), String> {
             let mut document = load()?;
             document.extend(fields.map(|(key, value)| (key.to_string(), value)));
             config::save_config_document(&document)
-        })??;
+        })?;
     }
 
     let effective = config::Config::fresh();
     if effective.remote_api_enabled()
-        || !effective.auto_updates_disabled()
-        || !effective.version_checks_disabled()
+        || effective.auto_updates_disabled()
+        || effective.version_checks_disabled()
         || !effective.is_telemetry_oss_disabled()
         || effective.prompt_storage() != "local"
-        || effective.codex_hooks_format() != config::CodexHooksFormat::HooksJson
+        || effective.codex_hooks_format() != config::CodexHooksFormat::ConfigToml
     {
-        return Err("managed-local policy is not effective".into());
+        return Err("local profile settings are not effective".into());
     }
     Ok(())
 }
 
-fn prepare_managed_local(dry_run: bool) -> Result<(), GitAiError> {
-    if !dry_run {
-        apply_managed_local_profile().map_err(GitAiError::Generic)?;
-    }
-    configure_daemon_trace2(dry_run)
-}
-
-pub(super) fn initialize_managed_local(
-    binary_path: &Path,
-    agent: &str,
-    restart: bool,
-) -> Result<(), GitAiError> {
-    let installer_id = match agent {
-        "claude" => "claude-code",
-        "codex" | "opencode" => agent,
-        _ => return Err(GitAiError::Generic("unsupported managed agent".into())),
-    };
-    let installer = get_all_installers()
-        .into_iter()
-        .find(|installer| installer.id() == installer_id)
-        .ok_or_else(|| GitAiError::Generic("managed installer is unavailable".into()))?;
-
-    check_git_version(config::Config::fresh().git_cmd())?;
-    prepare_managed_local(false)?;
-
-    let params = HookInstallerParams {
-        binary_path: binary_path.to_path_buf(),
-    };
-    if !installer.check_hooks(&params)?.tool_installed {
-        return Err(GitAiError::Generic("managed agent was not detected".into()));
-    }
-    installer.install_hooks(&params, false)?;
-    if !verify_installed_hooks(installer.as_ref(), &params) {
-        return Err(GitAiError::Generic(
-            "managed hook verification failed".into(),
-        ));
-    }
-    if !skip_install_daemon(false) {
-        crate::commands::daemon::repair_daemon_with_exe(restart, Some(binary_path))
-            .map_err(GitAiError::Generic)?;
-    }
-    cleanup_legacy_envelope_logs();
-    Ok(())
-}
-
-fn verify_installed_hooks(installer: &dyn HookInstaller, params: &HookInstallerParams) -> bool {
-    installer
-        .check_hooks(params)
-        .is_ok_and(|check| check.tool_installed && check.hooks_installed && check.hooks_up_to_date)
-}
-
-fn run_hooks_install(options: &InstallOptions) -> Result<HashMap<String, String>, GitAiError> {
+fn run_hooks_install(
+    options: &InstallOptions,
+    installed_exe: Option<&Path>,
+) -> Result<HashMap<String, String>, GitAiError> {
     check_git_version(config::Config::fresh().git_cmd())?;
     // Package installer environment is only inherited by the standalone installer.
-    // A caller selecting Agents must not accidentally copy a generic shell API key.
-    let fallback = if options.agents.is_none() {
-        install_config_from_environment()
-    } else {
+    let hooks_only = options.hooks_only();
+    let fallback = if hooks_only {
         InstallConfig::default()
+    } else {
+        install_config_from_environment()
     };
     let install_config = InstallConfig {
         api_base: options.api_base.clone().or(fallback.api_base),
@@ -463,27 +502,31 @@ fn run_hooks_install(options: &InstallOptions) -> Result<HashMap<String, String>
     };
 
     // Persist configuration before any daemon can start and observe it.
-    let binary_path = get_current_binary_path()?;
-    let config_changed = if options.managed_local {
-        prepare_managed_local(options.dry_run)?;
+    let binary_path = match installed_exe {
+        Some(path) => path.to_path_buf(),
+        None => get_current_binary_path()?,
+    };
+    let config_changed = if options.local_profile {
+        if !options.dry_run {
+            // Preserve the current configuration and daemon if Trace2 has a conflict.
+            configure_daemon_trace2(true)?;
+            apply_local_profile().map_err(GitAiError::Generic)?;
+        }
         false
     } else {
         persist_install_config_with_values(&binary_path, options.dry_run, &install_config)?
     };
     let params = HookInstallerParams { binary_path };
-    let managed = options.agents.is_some();
-    if !options.managed_local
-        && let Err(error) = configure_daemon_trace2(options.dry_run)
-    {
-        if managed {
+    if let Err(error) = configure_daemon_trace2(options.dry_run) {
+        if hooks_only {
             return Err(error);
         }
         eprintln!("Warning: could not configure Git trace2: {error}");
     }
     // The package installers pass --env after installing a new executable.
     let restart_daemon = config_changed || options.configure_env;
-    if let Err(error) = ensure_daemon(options.dry_run, restart_daemon, managed) {
-        if managed {
+    if let Err(error) = ensure_daemon(options.dry_run, restart_daemon, hooks_only, installed_exe) {
+        if hooks_only {
             return Err(error);
         }
         eprintln!("Warning: could not start the background service: {error}");
@@ -495,7 +538,7 @@ fn run_hooks_install(options: &InstallOptions) -> Result<HashMap<String, String>
 
     // Run async operations and convert result.
     let statuses = crate::tokio_runtime::block_on(async_run_install(&params, options))?;
-    if options.managed_local && !skip_install_daemon(options.dry_run) {
+    if options.local_profile && !skip_install_daemon(options.dry_run) {
         let daemon_config = DaemonConfig::from_env_or_default_paths()?;
         crate::commands::daemon::check_daemon_health(&daemon_config)
             .map_err(GitAiError::Generic)?;
@@ -519,7 +562,8 @@ fn parse_install_options(args: &[String]) -> Result<InstallOptions, GitAiError> 
             "--dry-run" | "--dry-run=true" => options.dry_run = true,
             "--dry-run=false" => options.dry_run = false,
             "--verbose" | "-v" => options.verbose = true,
-            "--profile=managed-local" => options.managed_local = true,
+            "--profile=local" => options.local_profile = true,
+            "--if-missing" => options.if_missing = true,
             "--skills" => options.install_skills = true,
             "--visual-studio-extension" => options.include_visual_studio_extension = true,
             "--env" | "--env=true" => options.configure_env = true,
@@ -558,21 +602,24 @@ fn parse_install_options(args: &[String]) -> Result<InstallOptions, GitAiError> 
             }
         }
     }
-    if options.agents.is_some()
+    if options.hooks_only()
         && (options.configure_env
             || options.configure_wsl
             || options.install_skills
             || options.include_visual_studio_extension)
     {
         return Err(GitAiError::Generic(
-            "--agents cannot be combined with environment, skills, WSL or IDE setup".into(),
+            "Environment, skills, WSL or IDE setup cannot be combined with --agents or --profile=local".into(),
         ));
     }
-    if options.managed_local
-        && (options.agents.is_none() || options.api_base.is_some() || options.api_key.is_some())
-    {
+    if options.local_profile && (options.api_base.is_some() || options.api_key.is_some()) {
         return Err(GitAiError::Generic(
-            "--profile=managed-local requires --agents and does not accept API credentials".into(),
+            "--profile=local does not accept API credentials".into(),
+        ));
+    }
+    if options.if_missing && !options.local_profile {
+        return Err(GitAiError::Generic(
+            "--if-missing requires --profile=local".into(),
         ));
     }
     Ok(options)
@@ -738,6 +785,7 @@ async fn async_run_install(
     params: &HookInstallerParams,
     options: &InstallOptions,
 ) -> Result<HashMap<String, InstallStatus>, GitAiError> {
+    let hooks_only = options.hooks_only();
     let mut any_checked = false;
     let mut has_changes = false;
     let mut statuses: HashMap<String, InstallStatus> = HashMap::new();
@@ -824,7 +872,7 @@ async fn async_run_install(
                 }
 
                 // Install extras (extensions, git.path, etc.)
-                match if options.agents.is_none() {
+                match if !hooks_only {
                     installer.install_extras(params, options.dry_run)
                 } else {
                     Ok(Vec::new())
@@ -903,7 +951,9 @@ async fn async_run_install(
                 }
                 if !options.dry_run
                     && installer.uses_config_hooks()
-                    && !verify_installed_hooks(installer.as_ref(), params)
+                    && !installer.check_hooks(params).is_ok_and(|check| {
+                        check.tool_installed && check.hooks_installed && check.hooks_up_to_date
+                    })
                 {
                     eprintln!("  Hook verification failed for {name}");
                     statuses.insert(id.to_string(), InstallStatus::Failed);
@@ -929,7 +979,7 @@ async fn async_run_install(
         {
             has_changes = true;
         }
-    } else if options.agents.is_none()
+    } else if !hooks_only
         && let Ok(result) = skills_installer::uninstall_skills(options.dry_run, options.verbose)
         && result.changed
     {
@@ -945,9 +995,7 @@ async fn async_run_install(
         let wsl_flag = if options.configure_wsl { " --wsl" } else { "" };
         println!("\n\x1b[33m⚠ Dry-run mode (default). No changes were made.\x1b[0m");
         println!("To apply these changes, run:");
-        println!(
-            "\x1b[1m  dcc-ai-tracking install-hooks --dry-run=false{env_flag}{wsl_flag}\x1b[0m"
-        );
+        println!("\x1b[1m  git-ai install-hooks --dry-run=false{env_flag}{wsl_flag}\x1b[0m");
     }
 
     // Check for running agents that had hooks updated and warn about restart
@@ -995,14 +1043,17 @@ async fn async_run_install(
         emit_install_hooks_metrics(&detailed_results);
     }
 
-    if options.agents.is_none() {
+    if !hooks_only {
         return Ok(statuses);
     }
 
+    let require_detected_agents = options.agents.is_some();
     let mut failed_agents: Vec<&str> = statuses
         .iter()
         .filter_map(|(id, status)| {
-            matches!(status, InstallStatus::Failed | InstallStatus::NotFound).then_some(id.as_str())
+            let failed = *status == InstallStatus::Failed
+                || (require_detected_agents && *status == InstallStatus::NotFound);
+            failed.then_some(id.as_str())
         })
         .collect();
     failed_agents.sort_unstable();
@@ -1178,7 +1229,7 @@ async fn async_run_uninstall(
     } else if has_changes && dry_run {
         println!("\n\x1b[33m⚠ Dry-run mode (default). No changes were made.\x1b[0m");
         println!("To apply these changes, run:");
-        println!("\x1b[1m  dcc-ai-tracking uninstall-hooks --dry-run=false\x1b[0m");
+        println!("\x1b[1m  git-ai uninstall-hooks --dry-run=false\x1b[0m");
     } else if !has_changes {
         println!("All git-ai hooks have been removed.");
     }
@@ -1189,7 +1240,7 @@ async fn async_run_uninstall(
 /// Remove the legacy envelope logs directory and related lock/marker files.
 ///
 /// All telemetry now flows through the daemon control socket, so the per-PID
-/// log file system under `~/.dcc-ai-tracking/internal/logs/` is no longer needed.
+/// log file system under `~/.git-ai/internal/logs/` is no longer needed.
 fn cleanup_legacy_envelope_logs() {
     let Some(home) = dirs::home_dir() else {
         return;
@@ -1257,12 +1308,12 @@ mod tests {
     fn test_binary_path(install_dir: &Path) -> PathBuf {
         #[cfg(windows)]
         {
-            install_dir.join("dcc-ai-tracking.exe")
+            install_dir.join("git-ai.exe")
         }
 
         #[cfg(not(windows))]
         {
-            install_dir.join("dcc-ai-tracking")
+            install_dir.join("git-ai")
         }
     }
 
@@ -1319,7 +1370,7 @@ mod tests {
         let _path = EnvVarGuard::set("PATH", "");
         let options = parse_install_options(&["--agents=codex".into()]).unwrap();
         let params = HookInstallerParams {
-            binary_path: temp.path().join("dcc-ai-tracking"),
+            binary_path: temp.path().join("git-ai"),
         };
         assert!(crate::tokio_runtime::block_on(async_run_install(&params, &options)).is_err());
         fs::create_dir_all(&codex_home).unwrap();
@@ -1353,8 +1404,8 @@ mod tests {
         let _legacy_db = EnvVarGuard::remove("GITAI_TEST_DB_PATH");
         let _control = EnvVarGuard::remove("GIT_AI_DAEMON_CONTROL_SOCKET");
         let _trace = EnvVarGuard::remove("GIT_AI_DAEMON_TRACE_SOCKET");
-        assert!(ensure_daemon(false, false, true).is_err());
-        assert!(ensure_daemon(true, false, true).is_ok());
+        assert!(ensure_daemon(false, false, true, None).is_err());
+        assert!(ensure_daemon(true, false, true, None).is_ok());
     }
 
     #[test]
@@ -1648,24 +1699,12 @@ mod tests {
 
         let changed = persist_install_config(&test_binary_path(&install_dir), false).unwrap();
         assert!(!changed);
-        assert!(
-            !temp
-                .path()
-                .join(".dcc-ai-tracking")
-                .join("config.json")
-                .exists()
-        );
+        assert!(!temp.path().join(".git-ai").join("config.json").exists());
 
         let _api_base = EnvVarGuard::set("API_BASE", "https://enterprise.example");
         let changed = persist_install_config(&test_binary_path(&install_dir), true).unwrap();
         assert!(!changed);
-        assert!(
-            !temp
-                .path()
-                .join(".dcc-ai-tracking")
-                .join("config.json")
-                .exists()
-        );
+        assert!(!temp.path().join(".git-ai").join("config.json").exists());
     }
 
     #[test]

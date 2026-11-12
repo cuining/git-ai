@@ -466,11 +466,11 @@ export class AIEditManager {
     const url = vscode.Uri.parse(GIT_AI_INSTALL_DOCS_URL);
 
     const choice = await vscode.window.showErrorMessage(
-      `dcc-ai-tracking version ${detectedVersion} is no longer supported.`,
-      'Update dcc-ai-tracking'
+      `git-ai version ${detectedVersion} is no longer supported.`,
+      'Update git-ai'
     );
 
-    if (choice === 'Update dcc-ai-tracking') {
+    if (choice === 'Update git-ai') {
       await vscode.env.openExternal(url);
     }
   }
@@ -479,11 +479,11 @@ export class AIEditManager {
     const url = vscode.Uri.parse(GIT_AI_INSTALL_DOCS_URL);
 
     const choice = await vscode.window.showInformationMessage(
-      'dcc-ai-tracking is not installed.',
-      'Install dcc-ai-tracking'
+      'git-ai is not installed.',
+      'Install git-ai'
     );
 
-    if (choice === 'Install dcc-ai-tracking') {
+    if (choice === 'Install git-ai') {
       await vscode.env.openExternal(url);
     }
   }
@@ -500,7 +500,7 @@ export class AIEditManager {
           if (!this.hasShownGitAiErrorMessage) {
             // Show startup notification
             vscode.window.showInformationMessage(
-              `dcc-ai-tracking is not installed. See ${GIT_AI_INSTALL_DOCS_URL} for installation instructions.`
+              `git-ai is not installed. See ${GIT_AI_INSTALL_DOCS_URL} for installation instructions.`
             );
             this.hasShownGitAiErrorMessage = true;
           }

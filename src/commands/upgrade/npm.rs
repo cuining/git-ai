@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use url::Url;
 
 const REGISTRY: &str = "https://npm.intra.xiaojukeji.com";
-const TAG: &str = "dcc";
+const TAG: &str = "latest";
 const MAX_METADATA: u64 = 8 * 1024 * 1024;
 const MAX_ARCHIVE: u64 = 32 * 1024 * 1024;
 const MAX_BINARY: u64 = 64 * 1024 * 1024;
@@ -18,25 +18,18 @@ pub(super) fn enabled() -> bool {
     option_env!("OSS_BUILD") == Some("0")
 }
 
-pub(super) fn standalone_home() -> Result<PathBuf, String> {
+pub(super) fn install_home() -> Result<PathBuf, String> {
     let root =
         crate::config::git_ai_dir_path().ok_or("Cannot determine the installation directory")?;
-    match fs::symlink_metadata(root.join("dcc-install.json")) {
-        Ok(_) => Err("This installation is managed by DCC. Update it through DCC.".into()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            if root.join(Platform::current()?.filenames().0).is_file() {
-                Ok(root)
-            } else {
-                Err("No standalone installation found in the user bin directory".into())
-            }
-        }
-        Err(error) => Err(format!("Cannot check DCC installation ownership: {error}")),
+    if !root.join(Platform::current()?.filenames().0).is_file() {
+        return Err("No git-ai installation found in the user bin directory".into());
     }
+    Ok(root)
 }
 
 #[cfg(not(windows))]
-pub(super) fn standalone_executable() -> Result<PathBuf, String> {
-    Ok(standalone_home()?.join(Platform::current()?.filenames().0))
+pub(super) fn installed_executable() -> Result<PathBuf, String> {
+    Ok(install_home()?.join(Platform::current()?.filenames().0))
 }
 
 struct Platform {
@@ -74,9 +67,9 @@ impl Platform {
 
     fn filenames(&self) -> (&'static str, &'static str) {
         if self.os == "win32" {
-            ("bin/dcc-ai-tracking.exe", "install.ps1")
+            ("bin/git-ai.exe", "install.ps1")
         } else {
-            ("bin/dcc-ai-tracking", "install.sh")
+            ("bin/git-ai", "install.sh")
         }
     }
 
@@ -176,13 +169,13 @@ fn release_from_json(platform: &Platform, data: &[u8]) -> Result<Release, String
         serde_json::from_slice(data).map_err(|error| format!("Invalid npm metadata: {error}"))?;
     let version = data["dist-tags"][TAG]
         .as_str()
-        .ok_or("npm update package has no dcc tag")?
+        .ok_or("npm update package has no latest tag")?
         .to_string();
     let record = data
         .get_mut("versions")
         .and_then(|versions| versions.get_mut(&version))
         .map(serde_json::Value::take)
-        .ok_or("npm dcc tag has no matching version metadata")?;
+        .ok_or("npm latest tag has no matching version metadata")?;
     semver::Version::parse(&version).map_err(|_| "Invalid npm update version")?;
     let release: Release =
         serde_json::from_value(record).map_err(|error| format!("Invalid npm release: {error}"))?;
@@ -234,7 +227,7 @@ impl Staged {
 }
 
 pub(super) fn stage(release: &Release) -> Result<Staged, String> {
-    let root = standalone_home()?;
+    let root = install_home()?;
     let data = download_archive(release)?;
     let directory = root.join("tmp");
     fs::create_dir_all(&directory)
@@ -367,11 +360,13 @@ mod tests {
     }
 
     #[test]
-    fn chooses_the_dcc_tag_even_when_latest_is_different() {
+    fn chooses_latest_when_the_dcc_tag_points_to_another_release() {
         let metadata = package_metadata();
+        let mut previous = metadata.clone();
+        previous["version"] = "1.7.7-dcc.9".into();
         let mut document = serde_json::json!({
-            "dist-tags": {"latest": "1.8.0", "dcc": "1.7.7-dcc.10"},
-            "versions": {"1.7.7-dcc.10": metadata}
+            "dist-tags": {"latest": "1.7.7-dcc.10", "dcc": "1.7.7-dcc.9"},
+            "versions": {"1.7.7-dcc.10": metadata, "1.7.7-dcc.9": previous}
         });
         let release =
             release_from_json(&platform(), &serde_json::to_vec(&document).unwrap()).unwrap();
@@ -381,14 +376,14 @@ mod tests {
     }
 
     #[test]
-    fn revalidates_the_dcc_tag_after_a_release_is_withdrawn() {
+    fn revalidates_latest_after_a_release_is_withdrawn() {
         let mut registry = mockito::Server::new();
         let platform = platform();
         let withdrawn = package_metadata();
         let mut current = withdrawn.clone();
         current["version"] = "1.7.7-dcc.9".into();
         let metadata = serde_json::json!({
-            "dist-tags": {"dcc": "1.7.7-dcc.9"},
+            "dist-tags": {"latest": "1.7.7-dcc.9"},
             "versions": {"1.7.7-dcc.9": current, "1.7.7-dcc.10": withdrawn},
         });
         let packument = registry
@@ -441,7 +436,7 @@ mod tests {
             );
         }
         assert!(fetch_wsl_package("i686", "1.7.7-dcc.10").is_err());
-        assert!(fetch_wsl_package("x86_64", "dcc").is_err());
+        assert!(fetch_wsl_package("x86_64", "latest").is_err());
     }
 
     #[test]
@@ -490,7 +485,7 @@ mod tests {
         let mut tar = tar::Builder::new(GzEncoder::new(Vec::new(), Compression::fast()));
         for (path, bytes) in [
             ("package/package.json", manifest.as_slice()),
-            ("package/bin/dcc-ai-tracking", b"native-binary".as_slice()),
+            ("package/bin/git-ai", b"native-binary".as_slice()),
             ("package/install.sh", b"#!/bin/bash\nexit 0\n".as_slice()),
             ("package/LICENSE", b"license".as_slice()),
             ("package/THIRD-PARTY-NOTICES", b"notices".as_slice()),

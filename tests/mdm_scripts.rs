@@ -1,6 +1,6 @@
 //! Static checks on the MDM login-start scripts in `mdm/`.
 //!
-//! These scripts register `dcc-ai-tracking bg start` to run at login. The daemon
+//! These scripts register `git-ai bg start` to run at login. The daemon
 //! supervises itself (uptime restart, self-update, lock-guarded single
 //! instance), so the launch definitions must never supervise it and must
 //! never tear down the process group the daemon is left in once `bg start`
@@ -68,7 +68,7 @@ fn macos_launch_agent_abandons_process_group_and_never_keeps_alive() {
     );
     assert!(
         script.contains(r#"$(xml_string "$BIN")"#),
-        "per-user agents must run dcc-ai-tracking directly so macOS shows it as the login item"
+        "per-user agents must run git-ai directly so macOS shows it as the login item"
     );
 }
 
@@ -184,9 +184,9 @@ fn release_workflow_publishes_the_scripts_as_assets() {
     let readme = mdm_file("README.md");
 
     for asset in [
-        "dcc-ai-tracking-login-start-macos.sh",
-        "dcc-ai-tracking-login-start-linux.sh",
-        "dcc-ai-tracking-login-start-windows.ps1",
+        "git-ai-login-start-macos.sh",
+        "git-ai-login-start-linux.sh",
+        "git-ai-login-start-windows.ps1",
     ] {
         assert!(
             release.contains(asset),
@@ -198,7 +198,7 @@ fn release_workflow_publishes_the_scripts_as_assets() {
         );
     }
     assert!(
-        release.contains("sha256sum install.sh install.ps1 dcc-ai-tracking-login-start-*"),
+        release.contains("sha256sum install.sh install.ps1 git-ai-login-start-*"),
         "login-start assets must be covered by SHA256SUMS"
     );
 }

@@ -4,7 +4,7 @@ import * as os from "os";
 import * as path from "node:path";
 import * as vscode from "vscode";
 
-const binaryName = "dcc-ai-tracking";
+const binaryName = "git-ai";
 let resolvedPath: string | null = null;
 let processBinaryPath: string | undefined;
 let resolvePromise: Promise<string | null> | null = null;
@@ -72,7 +72,7 @@ export function resolveGitAiBinary(): Promise<string | null> {
 function findProcessBinary(): string | undefined {
   const suffix = os.platform() === "win32" ? ".exe" : "";
   const directories = [
-    path.join(os.homedir(), ".dcc-ai-tracking", "bin"),
+    path.join(os.homedir(), ".git-ai", "bin"),
     ...(process.env.PATH ?? "").split(path.delimiter).filter(path.isAbsolute),
   ];
   for (const directory of directories) {

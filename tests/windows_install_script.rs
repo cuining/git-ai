@@ -26,14 +26,14 @@ fn install_script_path() -> PathBuf {
 
 fn installed_git_ai_path(repo: &TestRepo) -> PathBuf {
     repo.test_home_path()
-        .join(".dcc-ai-tracking")
+        .join(".git-ai")
         .join("bin")
-        .join("dcc-ai-tracking.exe")
+        .join("git-ai.exe")
 }
 
 fn installed_git_wrapper_path(repo: &TestRepo) -> PathBuf {
     repo.test_home_path()
-        .join(".dcc-ai-tracking")
+        .join(".git-ai")
         .join("bin")
         .join("git.exe")
 }
@@ -54,7 +54,7 @@ fn foreground_daemon_logs(repo: &TestRepo) -> (String, String) {
 
 fn daemon_log_dir(repo: &TestRepo) -> PathBuf {
     repo.test_home_path()
-        .join(".dcc-ai-tracking")
+        .join(".git-ai")
         .join("internal")
         .join("daemon")
         .join("logs")
@@ -64,7 +64,7 @@ fn wait_for_daemon_log_file(repo: &TestRepo, timeout: Duration) -> PathBuf {
     let deadline = Instant::now() + timeout;
     let pid_meta_path = repo
         .test_home_path()
-        .join(".dcc-ai-tracking")
+        .join(".git-ai")
         .join("internal")
         .join("daemon")
         .join("daemon.pid.json");
@@ -283,7 +283,7 @@ fn kill_installed_processes(repo: &TestRepo) {
          ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }}",
         installed_git_ai_path(repo).display(),
         repo.test_home_path()
-            .join(".dcc-ai-tracking")
+            .join(".git-ai")
             .join("bin")
             .join("git.exe")
             .display()
@@ -347,7 +347,7 @@ fn windows_install_script_reinstall_stops_running_daemon() {
     let installed_git_ai = installed_git_ai_path(&repo);
     assert!(
         installed_git_ai.exists(),
-        "dcc-ai-tracking.exe should be installed at {}",
+        "git-ai.exe should be installed at {}",
         installed_git_ai.display()
     );
 
@@ -399,16 +399,15 @@ fn windows_daemon_creates_log_file() {
 }
 
 fn seed_existing_wrapper(repo: &TestRepo) {
-    let bin_dir = repo.test_home_path().join(".dcc-ai-tracking").join("bin");
+    let bin_dir = repo.test_home_path().join(".git-ai").join("bin");
     fs::create_dir_all(&bin_dir).expect("failed to create install dir");
-    fs::write(bin_dir.join("dcc-ai-tracking.exe"), b"")
-        .expect("failed to create dcc-ai-tracking.exe stub");
+    fs::write(bin_dir.join("git-ai.exe"), b"").expect("failed to create git-ai.exe stub");
     fs::write(bin_dir.join("git.exe"), b"").expect("failed to create git.exe stub");
 }
 
 #[test]
 #[serial]
-fn windows_git_extension_rejects_the_retired_executable_name() {
+fn windows_git_extension_upgrade_requires_direct_git_ai_binary() {
     let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
 
     // Pre-seed wrapper state so the installer treats this as an existing-user
@@ -423,11 +422,6 @@ fn windows_git_extension_rejects_the_retired_executable_name() {
         initial_install.stderr
     );
 
-    // Git resolves `git ai` through the legacy extension filename.
-    let installed = installed_git_ai_path(&repo);
-    fs::copy(&installed, installed.with_file_name("git-ai.exe"))
-        .expect("failed to seed the legacy Git extension executable");
-
     let result = run_installed_git_wrapper(
         &repo,
         &["ai", "upgrade", "--force"],
@@ -437,19 +431,18 @@ fn windows_git_extension_rejects_the_retired_executable_name() {
 
     assert!(
         !result.status.success(),
-        "`git ai upgrade` should reject the retired executable name\nstdout:\n{}\nstderr:\n{}",
+        "`git ai upgrade` should fail fast on Windows\nstdout:\n{}\nstderr:\n{}",
         result.stdout,
         result.stderr
     );
     assert!(
-        combined.contains("Unsupported executable name 'git-ai'.")
-            || combined.contains("Unsupported executable name 'git-ai.exe'."),
-        "expected the retired executable name to be rejected, got:\n{}",
+        combined.contains("`git ai upgrade` is not supported on Windows"),
+        "expected Windows upgrade guard message, got:\n{}",
         combined
     );
     assert!(
-        combined.contains("Use dcc-ai-tracking."),
-        "expected the canonical executable hint, got:\n{}",
+        combined.contains("git-ai upgrade"),
+        "expected direct command hint, got:\n{}",
         combined
     );
 }
@@ -469,11 +462,11 @@ fn windows_install_script_skips_wrapper_for_new_users() {
 
     assert!(
         installed_git_ai_path(&repo).exists(),
-        "dcc-ai-tracking.exe should be installed at {}",
+        "git-ai.exe should be installed at {}",
         installed_git_ai_path(&repo).display()
     );
 
-    let bin_dir = repo.test_home_path().join(".dcc-ai-tracking").join("bin");
+    let bin_dir = repo.test_home_path().join(".git-ai").join("bin");
     assert!(
         !bin_dir.join("git.exe").exists(),
         "fresh install should NOT create the git.exe wrapper"
@@ -509,7 +502,7 @@ fn windows_install_script_skips_wrapper_for_new_users() {
         let bashrc = fs::read_to_string(repo.test_home_path().join(".bashrc"))
             .expect("install-hooks --env should create ~/.bashrc for Git Bash");
         assert!(
-            bashrc.contains("export PATH=\"$HOME/.dcc-ai-tracking/bin:$PATH\""),
+            bashrc.contains("export PATH=\"$HOME/.git-ai/bin:$PATH\""),
             "Git Bash config should contain the PATH export:\n{bashrc}"
         );
     }

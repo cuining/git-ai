@@ -1,4 +1,4 @@
-//! Best-effort installation of DCC AI Tracking into Windows Subsystem for Linux distros.
+//! Best-effort installation of Git AI into Windows Subsystem for Linux distros.
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -69,7 +69,7 @@ fn install_on_windows(config: InstallConfig<'_>) {
     );
     let mut packages = std::collections::HashMap::new();
     let failures = install_in_distros(&distros, |distro| {
-        println!("Installing DCC AI Tracking in WSL distribution: {distro}");
+        println!("Installing Git AI in WSL distribution: {distro}");
         let arch = distro_architecture(distro)?;
         let package = packages.entry(arch).or_insert_with_key(|arch| {
             super::upgrade::npm::fetch_wsl_package(arch, env!("CARGO_PKG_VERSION"))
@@ -80,12 +80,12 @@ fn install_on_windows(config: InstallConfig<'_>) {
 
     if failures.is_empty() {
         println!(
-            "Successfully installed DCC AI Tracking in {} WSL distribution(s).",
+            "Successfully installed Git AI in {} WSL distribution(s).",
             distros.len()
         );
     } else {
         eprintln!(
-            "[git-ai] warning: DCC AI Tracking could not be installed in {} of {} WSL distribution(s): {}",
+            "[git-ai] warning: Git AI could not be installed in {} of {} WSL distribution(s): {}",
             failures.len(),
             distros.len(),
             failures.join(", ")
@@ -185,10 +185,7 @@ fn write_install_archive(
     installer: &str,
 ) -> std::io::Result<()> {
     let mut archive = tar::Builder::new(writer);
-    for (name, contents) in [
-        ("dcc-ai-tracking", binary),
-        ("install.sh", installer.as_bytes()),
-    ] {
+    for (name, contents) in [("git-ai", binary), ("install.sh", installer.as_bytes())] {
         let mut header = tar::Header::new_ustar();
         header.set_mode(0o600);
         header.set_size(contents.len() as u64);
@@ -313,7 +310,7 @@ mod tests {
         let checksum = Sha256::digest(binary);
         let installer = include_str!("../../install.sh").replacen(
             "EMBEDDED_CHECKSUMS=\"__CHECKSUMS_PLACEHOLDER__\"",
-            &format!("EMBEDDED_CHECKSUMS=\"{checksum:x}  dcc-ai-tracking\""),
+            &format!("EMBEDDED_CHECKSUMS=\"{checksum:x}  git-ai\""),
             1,
         );
         let mut archive = Vec::new();
@@ -336,25 +333,17 @@ mod tests {
             child.wait().unwrap().success() && transfer.is_ok()
         };
 
-        let install_root = scratch.path().join(".dcc-ai-tracking");
-        let installed = install_root.join("bin/dcc-ai-tracking");
+        let installed = scratch.path().join(".git-ai/bin/git-ai");
         assert!(!run_guest(&archive[..archive.len() - 512]));
         assert!(!installed.exists());
         assert!(run_guest(&archive));
         assert_eq!(std::fs::read(&installed).unwrap(), binary);
         assert!(scratch.path().join("hooks-initialized").exists());
 
-        std::fs::write(&installed, b"DCC-managed executable").unwrap();
-        std::os::unix::fs::symlink(
-            "missing-owner-record",
-            install_root.join("dcc-install.json"),
-        )
-        .unwrap();
-        assert!(!run_guest(&archive));
-        assert_eq!(
-            std::fs::read(&installed).unwrap(),
-            b"DCC-managed executable"
-        );
+        let mut invalid_archive = Vec::new();
+        write_install_archive(&mut invalid_archive, b"tampered binary", &installer).unwrap();
+        assert!(!run_guest(&invalid_archive));
+        assert_eq!(std::fs::read(&installed).unwrap(), binary);
     }
 
     #[test]

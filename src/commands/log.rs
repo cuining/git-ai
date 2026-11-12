@@ -352,9 +352,7 @@ fn is_unsupported_render_arg(arg: &str) -> bool {
 }
 
 fn print_log_help() {
-    println!(
-        "Usage: dcc-ai-tracking log [--raw|--notes] [--plain] [git log filters] [--] [pathspecs...]"
-    );
+    println!("Usage: git-ai log [--raw|--notes] [--plain] [git log filters] [--] [pathspecs...]");
     println!();
     println!("Shows commit history with Git AI authorship stats.");
     println!();
@@ -675,7 +673,7 @@ fn render_stats(
     ) && estimate.should_skip()
     {
         return Err(format!(
-            "stats skipped for large commit; run `dcc-ai-tracking stats {}` to compute on demand",
+            "stats skipped for large commit; run `git-ai stats {}` to compute on demand",
             commit_sha
         ));
     }
@@ -832,12 +830,12 @@ fn draw_pager(
 
     let status = if pager.is_eof() {
         format!(
-            " dcc-ai-tracking log  lines {}  q quit  ↑/↓ scroll  PgUp/PgDn page ",
+            " git-ai log  lines {}  q quit  ↑/↓ scroll  PgUp/PgDn page ",
             pager.line_count()
         )
     } else {
         format!(
-            " dcc-ai-tracking log  loaded {} lines  q quit  ↑/↓ scroll  PgUp/PgDn page ",
+            " git-ai log  loaded {} lines  q quit  ↑/↓ scroll  PgUp/PgDn page ",
             pager.line_count()
         )
     };

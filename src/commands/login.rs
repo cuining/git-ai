@@ -1,6 +1,6 @@
 use crate::auth::{CredentialStore, OAuthClient};
 
-/// Handle the `dcc-ai-tracking login` command
+/// Handle the `git-ai login` command
 pub fn handle_login(_args: &[String]) {
     let store = CredentialStore::new();
 
@@ -8,7 +8,7 @@ pub fn handle_login(_args: &[String]) {
     if let Ok(Some(creds)) = store.load()
         && !creds.is_refresh_token_expired()
     {
-        eprintln!("Already logged in. Use 'dcc-ai-tracking logout' to log out first.");
+        eprintln!("Already logged in. Use 'git-ai logout' to log out first.");
         std::process::exit(0);
     }
 

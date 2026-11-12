@@ -87,7 +87,7 @@ fn test_config_fresh_picks_up_file_changes() {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let _home_guard = HomeEnvGuard::set(temp_dir.path());
 
-    let config_dir = temp_dir.path().join(".dcc-ai-tracking");
+    let config_dir = temp_dir.path().join(".git-ai");
     std::fs::create_dir_all(&config_dir).expect("Failed to create config dir");
 
     // Write initial config with api_base_url = "https://old.example.com"
@@ -123,7 +123,7 @@ fn test_config_get_uses_cache() {
 
     // Create a temporary config directory
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
-    let config_dir = temp_dir.path().join(".dcc-ai-tracking");
+    let config_dir = temp_dir.path().join(".git-ai");
     std::fs::create_dir_all(&config_dir).expect("Failed to create config dir");
 
     let _home_guard = HomeEnvGuard::set(temp_dir.path());
@@ -150,7 +150,7 @@ fn test_config_get_uses_cache() {
 #[serial]
 fn test_config_fresh_picks_up_api_key_changes() {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
-    let config_dir = temp_dir.path().join(".dcc-ai-tracking");
+    let config_dir = temp_dir.path().join(".git-ai");
     std::fs::create_dir_all(&config_dir).expect("Failed to create config dir");
 
     let _home_guard = HomeEnvGuard::set(temp_dir.path());
@@ -196,7 +196,7 @@ fn test_config_fresh_respects_env_vars() {
         env::remove_var("GIT_AI_API_BASE_URL");
     }
 
-    let config_dir = temp_dir.path().join(".dcc-ai-tracking");
+    let config_dir = temp_dir.path().join(".git-ai");
     std::fs::create_dir_all(&config_dir).expect("Failed to create config dir");
 
     // Create config file WITHOUT api_base_url, so env var should be used
@@ -237,7 +237,7 @@ fn test_api_context_uses_fresh_config() {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let _home_guard = HomeEnvGuard::set(temp_dir.path());
 
-    let config_dir = temp_dir.path().join(".dcc-ai-tracking");
+    let config_dir = temp_dir.path().join(".git-ai");
     std::fs::create_dir_all(&config_dir).expect("Failed to create config dir");
 
     // Set initial API URL
@@ -267,7 +267,7 @@ fn test_oauth_client_uses_fresh_config() {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let _home_guard = HomeEnvGuard::set(temp_dir.path());
 
-    let config_dir = temp_dir.path().join(".dcc-ai-tracking");
+    let config_dir = temp_dir.path().join(".git-ai");
     std::fs::create_dir_all(&config_dir).expect("Failed to create config dir");
 
     // Set initial API URL
@@ -297,7 +297,7 @@ fn test_api_context_picks_up_api_key_changes() {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let _home_guard = HomeEnvGuard::set(temp_dir.path());
 
-    let config_dir = temp_dir.path().join(".dcc-ai-tracking");
+    let config_dir = temp_dir.path().join(".git-ai");
     std::fs::create_dir_all(&config_dir).expect("Failed to create config dir");
 
     // Initially no API key
@@ -335,7 +335,7 @@ fn test_remote_api_disabled_blocks_get_post_and_oauth_before_connecting() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
     let base_url = format!("http://{}", listener.local_addr().unwrap());
-    let path = temp_dir.path().join(".dcc-ai-tracking");
+    let path = temp_dir.path().join(".git-ai");
     std::fs::create_dir_all(&path).unwrap();
     std::fs::write(
         path.join("config.json"),
@@ -385,7 +385,7 @@ fn test_remote_api_disabled_does_not_load_credentials_or_env_key() {
     use git_ai::auth::{CredentialStore, types::StoredCredentials};
     let temp_dir = TempDir::new().unwrap();
     let _home_guard = HomeEnvGuard::set(temp_dir.path());
-    let path = temp_dir.path().join(".dcc-ai-tracking");
+    let path = temp_dir.path().join(".git-ai");
     std::fs::create_dir_all(&path).unwrap();
     std::fs::write(
         path.join("config.json"),
@@ -439,7 +439,7 @@ fn test_config_save_atomically_preserves_disabled_remote_and_private_permissions
         ..Default::default()
     };
     save_file_config(&config).unwrap();
-    let path = temp_dir.path().join(".dcc-ai-tracking/config.json");
+    let path = temp_dir.path().join(".git-ai/config.json");
     let original = std::fs::read(&path).unwrap();
     let mut previous_file = std::fs::File::open(&path).unwrap();
     config.prompt_storage = Some("local".to_string());

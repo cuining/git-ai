@@ -18,8 +18,7 @@ impl FirebenderInstaller {
 
     fn is_firebender_checkpoint_command(cmd: &str) -> bool {
         cmd.contains("checkpoint firebender")
-            && ((cmd.contains("dcc-ai-tracking") || cmd.contains("git-ai"))
-                || cmd.ends_with(FIREBENDER_CHECKPOINT_CMD))
+            && (cmd.contains("git-ai") || cmd.ends_with(FIREBENDER_CHECKPOINT_CMD))
     }
 }
 

@@ -110,13 +110,8 @@ impl CodexInstaller {
         let has_git_ai_bin = args
             .first()
             .map(|bin| {
-                bin == "dcc-ai-tracking"
-                    || bin == "dcc-ai-tracking.exe"
-                    || bin.ends_with("/dcc-ai-tracking")
-                    || bin.ends_with("\\dcc-ai-tracking")
-                    || bin.ends_with("/dcc-ai-tracking.exe")
-                    || bin.ends_with("\\dcc-ai-tracking.exe")
-                    || bin == "git-ai"
+                bin == "git-ai"
+                    || bin == "git-ai.exe"
                     || bin.ends_with("/git-ai")
                     || bin.ends_with("\\git-ai")
                     || bin.ends_with("/git-ai.exe")
@@ -287,7 +282,17 @@ impl CodexInstaller {
             GitAiError::Generic("Codex config hooks field must be a table".to_string())
         })?;
 
-        let mut installed_positions: Vec<(&str, usize, usize)> = Vec::new();
+        let git_ai_group = TomlValue::Table(Map::from_iter([(
+            "hooks".to_string(),
+            TomlValue::Array(vec![TomlValue::Table(Map::from_iter([
+                ("type".to_string(), TomlValue::String("command".to_string())),
+                (
+                    "command".to_string(),
+                    TomlValue::String(desired_command.clone()),
+                ),
+            ]))]),
+        )]));
+        let mut installed_positions = Vec::new();
 
         for event_name in CODEX_HOOK_EVENTS {
             let blocks = hooks_obj
@@ -296,69 +301,34 @@ impl CodexInstaller {
                 .cloned()
                 .unwrap_or_default();
             let mut cleaned_blocks = Vec::new();
-
-            for block in blocks {
-                let mut cleaned_block = block;
-                let original_hook_count = cleaned_block
-                    .get("hooks")
-                    .and_then(|value| value.as_array())
-                    .map(|hooks| hooks.len())
-                    .unwrap_or(0);
-
-                let cleaned_hooks = cleaned_block
-                    .get("hooks")
-                    .and_then(|value| value.as_array())
-                    .cloned()
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter(|hook| {
+            let mut git_ai_index = None;
+            for mut block in blocks {
+                if let Some(handlers) = block.get_mut("hooks").and_then(TomlValue::as_array_mut)
+                    && !handlers.is_empty()
+                {
+                    handlers.retain(|hook| {
                         hook.get("command")
-                            .and_then(|value| value.as_str())
-                            .map(|cmd| !Self::is_git_ai_codex_command(cmd))
-                            .unwrap_or(true)
-                    })
-                    .collect::<Vec<_>>();
-
-                if let Some(block_tbl) = cleaned_block.as_table_mut() {
-                    block_tbl.insert("hooks".to_string(), TomlValue::Array(cleaned_hooks));
+                            .and_then(TomlValue::as_str)
+                            .is_none_or(|cmd| !Self::is_git_ai_codex_command(cmd))
+                    });
+                    if handlers.is_empty() {
+                        if git_ai_index.is_none() {
+                            // Keep an existing dedicated group's position for Codex hook trust.
+                            git_ai_index = Some(cleaned_blocks.len());
+                            cleaned_blocks.push(git_ai_group.clone());
+                        }
+                        continue;
+                    }
                 }
-
-                let remaining_hook_count = cleaned_block
-                    .get("hooks")
-                    .and_then(|value| value.as_array())
-                    .map(|hooks| hooks.len())
-                    .unwrap_or(0);
-                if remaining_hook_count > 0 || original_hook_count == 0 {
-                    cleaned_blocks.push(cleaned_block);
-                }
+                cleaned_blocks.push(block);
             }
 
-            let target_idx = cleaned_blocks
-                .iter()
-                .position(|block| block.get("matcher").is_none())
-                .unwrap_or_else(|| {
-                    cleaned_blocks.push(TomlValue::Table(Map::from_iter([(
-                        "hooks".to_string(),
-                        TomlValue::Array(Vec::new()),
-                    )])));
-                    cleaned_blocks.len() - 1
-                });
-
-            if let Some(hooks_array) = cleaned_blocks[target_idx]
-                .get_mut("hooks")
-                .and_then(|value| value.as_array_mut())
-            {
-                let handler_idx = hooks_array.len();
-                let mut hook_entry = Map::new();
-                hook_entry.insert("type".to_string(), TomlValue::String("command".to_string()));
-                hook_entry.insert(
-                    "command".to_string(),
-                    TomlValue::String(desired_command.clone()),
-                );
-                hooks_array.push(TomlValue::Table(hook_entry));
-                installed_positions.push((event_name, target_idx, handler_idx));
-            }
-
+            let group_idx = git_ai_index.unwrap_or_else(|| {
+                let index = cleaned_blocks.len();
+                cleaned_blocks.push(git_ai_group.clone());
+                index
+            });
+            installed_positions.push((event_name, group_idx));
             hooks_obj.insert(event_name.to_string(), TomlValue::Array(cleaned_blocks));
         }
 
@@ -374,12 +344,9 @@ impl CodexInstaller {
             GitAiError::Generic("Codex config hooks.state must be a table".to_string())
         })?;
 
-        for (event_name, group_idx, handler_idx) in &installed_positions {
+        for (event_name, group_idx) in installed_positions {
             let snake_name = Self::event_name_to_snake_case(event_name);
-            let state_key = format!(
-                "{}:{}:{}:{}",
-                config_path_str, snake_name, group_idx, handler_idx
-            );
+            let state_key = format!("{config_path_str}:{snake_name}:{group_idx}:0");
             let trust_hash = Self::compute_trust_hash(snake_name, &desired_command)?;
 
             let mut entry = Map::new();
@@ -1106,9 +1073,9 @@ mod tests {
     #[test]
     fn test_is_git_ai_codex_notify_args_accepts_enterprise_binary() {
         for binary in [
-            "dcc-ai-tracking",
-            "/tmp/with space/dcc-ai-tracking",
-            r"C:\Program Files\DCC\dcc-ai-tracking.exe",
+            "git-ai",
+            "/tmp/with space/git-ai",
+            r"C:\Program Files\DCC\git-ai.exe",
         ] {
             let args = vec![
                 binary.to_string(),
@@ -1135,7 +1102,7 @@ mod tests {
     #[test]
     fn test_is_git_ai_codex_notify_args_true_for_legacy_via_codex_notify_args() {
         let args = vec![
-            "/Users/svarlamov/.dcc-ai-tracking/bin/git-ai".to_string(),
+            "/Users/svarlamov/.git-ai/bin/git-ai".to_string(),
             "checkpoint".to_string(),
             "codex".to_string(),
             "--via-codex-notify".to_string(),
@@ -1179,7 +1146,7 @@ notify = ["/usr/local/bin/git-ai", "checkpoint", "codex", "--hook-input"]
         let config = CodexInstaller::parse_config_toml(
             r#"
 model = "gpt-5"
-notify = ["/Users/svarlamov/.dcc-ai-tracking/bin/git-ai", "checkpoint", "codex", "--via-codex-notify", "--hook-input", "stdin"]
+notify = ["/Users/svarlamov/.git-ai/bin/git-ai", "checkpoint", "codex", "--via-codex-notify", "--hook-input", "stdin"]
 "#,
         )
         .unwrap();
@@ -1665,7 +1632,7 @@ notify = ["/usr/local/bin/git-ai", "checkpoint", "codex", "--hook-input"]
                 &config_path,
                 r#"
 model = "gpt-5"
-notify = ["/Users/svarlamov/.dcc-ai-tracking/bin/git-ai", "checkpoint", "codex", "--via-codex-notify", "--hook-input", "stdin"]
+notify = ["/Users/svarlamov/.git-ai/bin/git-ai", "checkpoint", "codex", "--via-codex-notify", "--hook-input", "stdin"]
 "#,
             )
             .unwrap();

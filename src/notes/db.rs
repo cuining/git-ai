@@ -1,4 +1,4 @@
-//! Dedicated notes-backend storage at `~/.dcc-ai-tracking/internal/notes-db`.
+//! Dedicated notes-backend storage at `~/.git-ai/internal/notes-db`.
 //!
 //! Single `notes` table that doubles as cache and sync queue:
 //!  - `synced = 0` — the row is pending upload to the remote backend
@@ -946,7 +946,7 @@ mod tests {
     #[test]
     #[serial_test::serial(notes_db_env)]
     fn test_database_path_contains_expected_segments() {
-        // Without the test env var set we expect the path to include .dcc-ai-tracking/internal/notes-db
+        // Without the test env var set we expect the path to include .git-ai/internal/notes-db
         // (this test verifies the non-override branch at the schema level; in CI the HOME is
         // always set so dirs::home_dir() returns Some).
         unsafe {
@@ -955,9 +955,8 @@ mod tests {
         let path = NotesDatabase::database_path().unwrap();
         let path_str = path.to_string_lossy();
         assert!(
-            path.components()
-                .any(|part| part.as_os_str() == ".dcc-ai-tracking"),
-            "path should contain .dcc-ai-tracking: {}",
+            path.components().any(|part| part.as_os_str() == ".git-ai"),
+            "path should contain .git-ai: {}",
             path_str
         );
         assert!(

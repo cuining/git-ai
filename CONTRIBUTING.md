@@ -33,17 +33,17 @@ On Windows, use a native PowerShell or Windows Terminal session for setup. If yo
 
 ### Using a development build locally
 
-It's often helpful to point your CLI to a development build. The dev script builds the binary and installs it to `~/.dcc-ai-tracking/bin/dcc-ai-tracking`, replacing the production binary so you can test changes with real git repositories.
+It's often helpful to point your CLI to a development build. The dev script builds the binary and installs it to `~/.git-ai/bin/git-ai`, replacing the production binary so you can test changes with real git repositories.
 
 ```bash
 task dev
 ```
 
-If `~/.dcc-ai-tracking` isn't set up yet, the script will run the installer automatically first.
+If `~/.git-ai` isn't set up yet, the script will run the installer automatically first.
 
 On Windows, `task dev` runs the Windows development script, installs the current branch build, updates the `git.exe` shim, runs install hooks, and restarts the daemon.
 
-Use `task dev` before testing Windows behavior locally. `cargo build` only produces `target\debug\dcc-ai-tracking.exe`; it does not replace the installed `dcc-ai-tracking.exe`, update the `git.exe` shim, run install hooks, or restart the daemon. Testing setup, daemon startup, or git proxy behavior against only `target\debug\dcc-ai-tracking.exe` can give misleading results.
+Use `task dev` before testing Windows behavior locally. `cargo build` only produces `target\debug\git-ai.exe`; it does not replace the installed `git-ai.exe`, update the `git.exe` shim, run install hooks, or restart the daemon. Testing setup, daemon startup, or git proxy behavior against only `target\debug\git-ai.exe` can give misleading results.
 
 For changes that affect Windows setup or daemon startup, verify the installed development build in a fresh daemon session:
 
@@ -52,14 +52,14 @@ For changes that affect Windows setup or daemon startup, verify the installed de
 task dev
 
 # 2. Stop any daemon that was already running.
-~\.dcc-ai-tracking\bin\dcc-ai-tracking.exe bg shutdown --hard
+~\.git-ai\bin\git-ai.exe bg shutdown --hard
 
 # 3. Trigger daemon startup through the installed git-ai.
-dcc-ai-tracking status
+git-ai status
 
 # 4. Confirm the daemon is running.
-dcc-ai-tracking bg status
-Get-Process dcc-ai-tracking -ErrorAction SilentlyContinue
+git-ai bg status
+Get-Process git-ai -ErrorAction SilentlyContinue
 ```
 
 ## Contributing Changes

@@ -26,9 +26,7 @@ impl CursorInstaller {
 
     fn is_cursor_checkpoint_command(cmd: &str) -> bool {
         cmd.contains("git-ai checkpoint cursor")
-            || ((cmd.contains("dcc-ai-tracking") || cmd.contains("git-ai"))
-                && cmd.contains("checkpoint")
-                && cmd.contains("cursor"))
+            || (cmd.contains("git-ai") && cmd.contains("checkpoint") && cmd.contains("cursor"))
     }
 }
 
@@ -542,7 +540,7 @@ mod tests {
 
     #[test]
     fn test_cursor_hook_commands_no_windows_extended_path_prefix() {
-        let raw_path = PathBuf::from(r"\\?\C:\Users\USERNAME\.dcc-ai-tracking\bin\git-ai.exe");
+        let raw_path = PathBuf::from(r"\\?\C:\Users\USERNAME\.git-ai\bin\git-ai.exe");
         let binary_path = clean_path(raw_path);
 
         let pre_tool_use_cmd = format!("{} {}", binary_path.display(), CURSOR_PRE_TOOL_USE_CMD);

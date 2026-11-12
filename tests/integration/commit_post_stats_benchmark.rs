@@ -198,12 +198,8 @@ fn percentile_ms(durations: &[Duration], percentile: f64) -> f64 {
 }
 
 fn git_ai_bin() -> String {
-    std::env::var("CARGO_BIN_EXE_dcc-ai-tracking").unwrap_or_else(|_| {
-        format!(
-            "{}/target/debug/dcc-ai-tracking",
-            env!("CARGO_MANIFEST_DIR")
-        )
-    })
+    std::env::var("CARGO_BIN_EXE_git-ai")
+        .unwrap_or_else(|_| format!("{}/target/debug/git-ai", env!("CARGO_MANIFEST_DIR")))
 }
 
 fn benchmark_commit_with_git_ai(repo_path: &Path, message: &str) -> CommitPerfBreakdown {

@@ -1311,7 +1311,7 @@ fn trace2_config_failure_details(
         ));
     }
 
-    details.push("Common causes: `dcc-ai-tracking install-hooks` has not run, was run with `--dry-run`, or failed while writing global Git config.".to_string());
+    details.push("Common causes: `git-ai install-hooks` has not run, was run with `--dry-run`, or failed while writing global Git config.".to_string());
     details.push("Common causes: git-ai cannot edit the same global Git config Git reads because HOME/USERPROFILE/XDG_CONFIG_HOME/GIT_CONFIG_GLOBAL points somewhere different, the global config file or parent directory is read-only or locked, permissions or ownership are wrong, or the configured git and terminal git use different config locations.".to_string());
     details
 }

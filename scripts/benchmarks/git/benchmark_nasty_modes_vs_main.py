@@ -162,7 +162,7 @@ def resolve_real_git_binary(repo_root: Path) -> Path:
     fallback_name = fallback_path.name.lower()
     if (
         "git-ai" in fallback_name
-        or "dcc-ai-tracking" in fallback_name
+        or "git-ai" in fallback_name
         or str(repo_root / "target") in str(fallback_path)
     ):
         raise BenchmarkError(
@@ -222,7 +222,7 @@ def setup_variant_runtime(
 
     daemon_proc: subprocess.Popen[str] | None = None
     if variant.mode == "daemon":
-        daemon_dir = home_dir / ".dcc-ai-tracking" / "internal" / "daemon"
+        daemon_dir = home_dir / ".git-ai" / "internal" / "daemon"
         control_socket = daemon_dir / "control.sock"
         trace_socket = daemon_dir / "trace2.sock"
         daemon_dir.mkdir(parents=True, exist_ok=True)

@@ -1,6 +1,6 @@
 use crate::auth::CredentialStore;
 
-/// Handle the `dcc-ai-tracking logout` command
+/// Handle the `git-ai logout` command
 pub fn handle_logout(_args: &[String]) {
     let store = CredentialStore::new();
 

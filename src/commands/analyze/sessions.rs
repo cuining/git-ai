@@ -1,4 +1,4 @@
-//! `dcc-ai-tracking analyze sessions …` — pull coding sessions from Cube into a scratch
+//! `git-ai analyze sessions …` — pull coding sessions from Cube into a scratch
 //! SQLite DB, then hand them out one at a time for grading at scale.
 //!
 //! Two cursors live in the DB, both in the `cursor` table: a **pull cursor**
@@ -189,7 +189,7 @@ pub fn handle_sessions(args: &[String]) {
             return;
         }
         other => Err(format!(
-            "unknown sessions subcommand: {}\nRun `dcc-ai-tracking analyze sessions --help`.",
+            "unknown sessions subcommand: {}\nRun `git-ai analyze sessions --help`.",
             other
         )),
     };
@@ -419,8 +419,7 @@ fn cmd_next(args: &[String]) -> Result<(), String> {
         }
         i += 1;
     }
-    let path =
-        db_path.ok_or("usage: dcc-ai-tracking analyze sessions next <db> [--max-events N]")?;
+    let path = db_path.ok_or("usage: git-ai analyze sessions next <db> [--max-events N]")?;
     let mut conn = open_existing_db(&path)?;
 
     // Hand out the next session by advancing the analysis cursor exactly one
@@ -586,7 +585,7 @@ fn cmd_reset(args: &[String]) -> Result<(), String> {
         }
         i += 1;
     }
-    let path = db_path.ok_or("usage: dcc-ai-tracking analyze sessions reset <db> [--to <seq>]")?;
+    let path = db_path.ok_or("usage: git-ai analyze sessions reset <db> [--to <seq>]")?;
     let conn = open_existing_db(&path)?;
 
     conn.execute(
@@ -604,7 +603,7 @@ fn cmd_reset(args: &[String]) -> Result<(), String> {
 
 fn cmd_exec(args: &[String]) -> Result<(), String> {
     if args.len() < 2 {
-        return Err("usage: dcc-ai-tracking analyze sessions exec <db> \"<SQL>\"".to_string());
+        return Err("usage: git-ai analyze sessions exec <db> \"<SQL>\"".to_string());
     }
     let path = &args[0];
     let sql = &args[1];
@@ -809,7 +808,7 @@ fn ensure_derived_columns(conn: &Connection) -> Result<(), rusqlite::Error> {
 fn open_existing_db(path: &str) -> Result<Connection, String> {
     if !Path::new(path).exists() {
         return Err(format!(
-            "no such db: {} (run `dcc-ai-tracking analyze sessions pull` first)",
+            "no such db: {} (run `git-ai analyze sessions pull` first)",
             path
         ));
     }
@@ -1325,7 +1324,7 @@ fn single_db_arg(args: &[String], cmd: &str) -> Result<String, String> {
     args.iter()
         .find(|a| !a.starts_with('-'))
         .cloned()
-        .ok_or_else(|| format!("usage: dcc-ai-tracking analyze sessions {} <db>", cmd))
+        .ok_or_else(|| format!("usage: git-ai analyze sessions {} <db>", cmd))
 }
 
 fn now_secs() -> i64 {
@@ -1364,7 +1363,7 @@ fn random_db_path() -> PathBuf {
 }
 
 fn print_help() {
-    let help = r#"dcc-ai-tracking analyze sessions - pull coding sessions into a scratch DB and grade them
+    let help = r#"git-ai analyze sessions - pull coding sessions into a scratch DB and grade them
 
 Subcommands:
   pull [flags]            Create/fill a SQLite DB with sessions (latest-first)
@@ -1386,10 +1385,10 @@ pull flags:
 Analyzing your OWN (or one person's) sessions ("my sessions", "what I did"):
   user_id is opaque — resolve it from an email first, then pull with --user:
     EMAIL=$(git config user.email)
-    UID=$(dcc-ai-tracking analyze query --tsv -d public_v1_user_status.user_id \
+    UID=$(git-ai analyze query --tsv -d public_v1_user_status.user_id \
       -f '[{"member":"public_v1_user_status.author_email","operator":"equals","values":["'"$EMAIL"'"]}]' \
       | tail -n +2 | head -1)
-    DB=$(dcc-ai-tracking analyze sessions pull --user "$UID" --since "last 30 days")
+    DB=$(git-ai analyze sessions pull --user "$UID" --since "last 30 days")
   Swap in a different email for someone else. If the lookup is empty, stop and say so.
 
   Full query surface — same flags as `analyze query`, layered on top of the
@@ -1403,10 +1402,10 @@ Analyzing your OWN (or one person's) sessions ("my sessions", "what I did"):
 
   Examples:
     # only sessions that generated >100 net lines, made with cursor:
-    dcc-ai-tracking analyze sessions pull --agent cursor \
+    git-ai analyze sessions pull --agent cursor \
       -f '[{"member":"public_v1_sessions.net_generated_lines","operator":"gt","values":["100"]}]'
     # sessions whose work reached production, newest committed first:
-    dcc-ai-tracking analyze sessions pull \
+    git-ai analyze sessions pull \
       -f '[{"member":"public_v1_sessions.total_production_lines","operator":"gt","values":["0"]}]' \
       -o public_v1_sessions.session_end_time:desc
 
@@ -1458,7 +1457,7 @@ The work funnel (already columns — DO NOT read transcripts to derive these):
     production_rate            share of committed lines that reached production
   So "how much did this session commit that didn't ship, and where did it fall
   out?" is a SELECT, not a transcript read:
-    dcc-ai-tracking analyze sessions exec "$DB" \
+    git-ai analyze sessions exec "$DB" \
       "SELECT agent, SUM(committed_not_production), AVG(production_rate) \
        FROM sessions GROUP BY agent ORDER BY 2 DESC"
   What these columns CANNOT tell you is the *why* behind a gap — still-open PR
@@ -1480,9 +1479,9 @@ Baseline schema (every pulled session carries these, no extra work):
     session_models(session_id, model, event_count)
     session_prs(session_id, repo_url, pr_number, agent, model_raw, ai_lines)
   So you can aggregate immediately, e.g.:
-    dcc-ai-tracking analyze sessions exec "$DB" \
+    git-ai analyze sessions exec "$DB" \
       "SELECT agent, SUM(cost_usd), AVG(total_events) FROM sessions GROUP BY agent"
-    dcc-ai-tracking analyze sessions exec "$DB" \
+    git-ai analyze sessions exec "$DB" \
       "SELECT model, COUNT(*) FROM session_models GROUP BY model ORDER BY 2 DESC"
   (`sessions next` also returns a "prs" array per session.)
 
@@ -1495,7 +1494,7 @@ How the analysis cursor works:
 
 Grading workflow:
   1. Pull the sessions:
-       DB=$(dcc-ai-tracking analyze sessions pull --limit 100 --since "last 30 days")
+       DB=$(git-ai analyze sessions pull --limit 100 --since "last 30 days")
 
   2. DESIGN YOUR ANALYSIS SCHEMA FIRST. Turn the user's question into concrete
      columns and ADD them up front — do not just print findings to chat, persist
@@ -1504,23 +1503,23 @@ Grading workflow:
          overall, e.g. clarity_score, correctness_score, grade, rationale.
        - Categorizing? One column for the label plus a notes/evidence column.
      Add them once (TEXT or INTEGER), before iterating:
-       dcc-ai-tracking analyze sessions exec "$DB" "ALTER TABLE sessions ADD COLUMN grade TEXT"
-       dcc-ai-tracking analyze sessions exec "$DB" "ALTER TABLE sessions ADD COLUMN clarity_score INTEGER"
-       dcc-ai-tracking analyze sessions exec "$DB" "ALTER TABLE sessions ADD COLUMN rationale TEXT"
+       git-ai analyze sessions exec "$DB" "ALTER TABLE sessions ADD COLUMN grade TEXT"
+       git-ai analyze sessions exec "$DB" "ALTER TABLE sessions ADD COLUMN clarity_score INTEGER"
+       git-ai analyze sessions exec "$DB" "ALTER TABLE sessions ADD COLUMN rationale TEXT"
 
   3. Dispatch N subagents. Each loops, and MUST write its results back into the
      columns you added (not just return prose). The session_id comes from the
      JSON that `next` prints:
-       dcc-ai-tracking analyze sessions next "$DB"          # returns one session + transcript JSON
+       git-ai analyze sessions next "$DB"          # returns one session + transcript JSON
        # …analyze the transcript against your criteria…
-       dcc-ai-tracking analyze sessions exec "$DB" \
+       git-ai analyze sessions exec "$DB" \
          "UPDATE sessions SET grade='A', clarity_score=4, rationale='…' \
           WHERE session_id='<id>'"
      Loop until `next` prints {"done": true}.
 
-  4. Watch progress:  dcc-ai-tracking analyze sessions stats "$DB"   # shows cursor position
+  4. Watch progress:  git-ai analyze sessions stats "$DB"   # shows cursor position
   5. Synthesize over the enriched columns:
-       dcc-ai-tracking analyze sessions exec "$DB" \
+       git-ai analyze sessions exec "$DB" \
          "SELECT grade, COUNT(*), AVG(clarity_score) FROM sessions \
           WHERE grade IS NOT NULL GROUP BY grade ORDER BY grade"
 "#;

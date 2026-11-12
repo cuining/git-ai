@@ -79,7 +79,7 @@ git --version
 # Match the library-only Taskfile test invocation with a bounded runner pool.
 GIT_AI_TEST_SHARED_DAEMON_POOL_SIZE=4 "$@" test --locked --lib -- --test-threads 4
 # Compile integration tests without the bootstrap's library-only Cargo runner.
-"$@" build --locked --bin dcc-ai-tracking --features test-support --target-dir target
+"$@" build --locked --bin git-ai --features test-support --target-dir target
 "$@" test --locked --test integration --target-dir target --no-run --message-format=json \
     > "$scratch/usage-tests.jsonl"
 usage_test=$(python3 - "$scratch/usage-tests.jsonl" <<'PY'
@@ -96,7 +96,7 @@ if len(tests) != 1:
 print(tests[0])
 PY
 )
-GIT_AI_TEST_BINARY_PATH="$PWD/target/debug/dcc-ai-tracking" GIT_AI_TEST_SHARED_DAEMON_POOL_SIZE=4 \
+GIT_AI_TEST_BINARY_PATH="$PWD/target/debug/git-ai" GIT_AI_TEST_SHARED_DAEMON_POOL_SIZE=4 \
     "$usage_test" usage_period::usage_machine_ --test-threads 4
 
 if [ "$build_npm" = 1 ]; then

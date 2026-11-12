@@ -81,7 +81,7 @@ pub(crate) fn handle_reingest(args: &[String]) {
 fn response_error_message(error: Option<&str>) -> String {
     let error = error.unwrap_or("background service returned an error");
     if error.contains("invalid control request") && error.contains("metrics.reingest") {
-        return "the running background service does not support reingestion; run `dcc-ai-tracking bg restart` and retry"
+        return "the running background service does not support reingestion; run `git-ai bg restart` and retry"
             .to_string();
     }
     error.to_string()
@@ -195,9 +195,9 @@ fn parse_since_duration(value: &str) -> Result<u64, String> {
 
 fn print_usage() {
     eprintln!("Usage:");
-    eprintln!("  dcc-ai-tracking reingest --all");
-    eprintln!("  dcc-ai-tracking reingest --from <RFC3339> --to <RFC3339>");
-    eprintln!("  dcc-ai-tracking reingest --since <duration>");
+    eprintln!("  git-ai reingest --all");
+    eprintln!("  git-ai reingest --from <RFC3339> --to <RFC3339>");
+    eprintln!("  git-ai reingest --since <duration>");
     eprintln!();
     eprintln!("Reset local metric delivery state and let the daemon redeliver matching events.");
     eprintln!("Explicit bounds use a half-open [from, to) event-time range.");
@@ -294,7 +294,7 @@ mod tests {
             response_error_message(Some(
                 "invalid control request: unknown variant `metrics.reingest`"
             )),
-            "the running background service does not support reingestion; run `dcc-ai-tracking bg restart` and retry"
+            "the running background service does not support reingestion; run `git-ai bg restart` and retry"
         );
         assert_eq!(
             response_error_message(Some("database unavailable")),

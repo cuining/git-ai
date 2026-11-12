@@ -50,8 +50,8 @@ impl BenchDaemon {
         // runner, fall back to debug.
         let binary = {
             let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-            let rel = manifest.join("target/release/dcc-ai-tracking");
-            let dbg = manifest.join("target/debug/dcc-ai-tracking");
+            let rel = manifest.join("target/release/git-ai");
+            let dbg = manifest.join("target/debug/git-ai");
             if rel.exists() { rel } else { dbg }
         };
 

@@ -1538,7 +1538,7 @@ fn resolve_git_path(file_cfg: &Option<FileConfig>) -> String {
          Please install Git or update your config JSON.",
         cfg_path = config_file_path()
             .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_else(|| "~/.dcc-ai-tracking/config.json".to_string()),
+            .unwrap_or_else(|| "~/.git-ai/config.json".to_string()),
     );
     std::process::exit(1);
 }
@@ -1566,14 +1566,14 @@ pub fn config_file_path_public() -> Option<PathBuf> {
     config_file_path()
 }
 
-/// Returns the path to the git-ai base directory (~/.dcc-ai-tracking)
+/// Returns the path to the git-ai base directory (~/.git-ai)
 pub fn git_ai_dir_path() -> Option<PathBuf> {
     Some(git_ai_dir_for_home(&home_dir()))
 }
 
 /// Resolve git-ai's storage directory for an explicit home (including daemon/test homes).
 pub fn git_ai_dir_for_home(home: &Path) -> PathBuf {
-    home.join(".dcc-ai-tracking")
+    home.join(".git-ai")
 }
 
 /// Resolve internal state for the same home used by the caller.
@@ -1581,19 +1581,19 @@ pub fn internal_dir_for_home(home: &Path) -> PathBuf {
     git_ai_dir_for_home(home).join("internal")
 }
 
-/// Returns the path to the internal state directory (~/.dcc-ai-tracking/internal)
+/// Returns the path to the internal state directory (~/.git-ai/internal)
 /// This is where git-ai stores internal files like distinct_id, update_check, etc.
 pub fn internal_dir_path() -> Option<PathBuf> {
     git_ai_dir_path().map(|dir| dir.join("internal"))
 }
 
-/// Returns the path to the skills directory (~/.dcc-ai-tracking/skills)
+/// Returns the path to the skills directory (~/.git-ai/skills)
 /// This is where git-ai installs skills for Claude Code and other agents
 pub fn skills_dir_path() -> Option<PathBuf> {
     git_ai_dir_path().map(|dir| dir.join("skills"))
 }
 
-/// Public accessor for ID file path (~/.dcc-ai-tracking/internal/distinct_id)
+/// Public accessor for ID file path (~/.git-ai/internal/distinct_id)
 pub fn id_file_path() -> Option<PathBuf> {
     internal_dir_path().map(|dir| dir.join("distinct_id"))
 }
@@ -1601,7 +1601,7 @@ pub fn id_file_path() -> Option<PathBuf> {
 /// Cache for the distinct_id to avoid repeated file reads
 static DISTINCT_ID: OnceLock<String> = OnceLock::new();
 
-/// Get or create the distinct_id (UUID) from ~/.dcc-ai-tracking/internal/distinct_id
+/// Get or create the distinct_id (UUID) from ~/.git-ai/internal/distinct_id
 /// If the file doesn't exist, generates a new UUID and writes it to the file.
 /// The result is cached for the lifetime of the process.
 pub fn get_or_create_distinct_id() -> String {
@@ -1638,7 +1638,7 @@ pub fn get_or_create_distinct_id() -> String {
         .clone()
 }
 
-/// Returns the path to the update check cache file (~/.dcc-ai-tracking/internal/update_check)
+/// Returns the path to the update check cache file (~/.git-ai/internal/update_check)
 pub fn update_check_path() -> Option<PathBuf> {
     internal_dir_path().map(|dir| dir.join("update_check"))
 }
@@ -1737,12 +1737,7 @@ fn path_is_git_ai_binary(path: &Path) -> bool {
         && let Some(name) = canonical.file_name().and_then(|n| n.to_str())
     {
         let stem = name.strip_suffix(".exe").unwrap_or(name);
-        if stem == "dcc-ai-tracking"
-            || stem.starts_with("dcc-ai-tracking-")
-            || stem == "git-ai"
-            || stem.starts_with("git-ai-")
-            || stem.starts_with("git_ai")
-        {
+        if stem == "git-ai" || stem.starts_with("git-ai-") || stem.starts_with("git_ai") {
             return true;
         }
     }
@@ -1756,21 +1751,18 @@ fn path_is_git_ai_binary(path: &Path) -> bool {
     // a real git binary legitimately coexists with a git-ai symlink (e.g.
     // Docker images that compile git from source into /usr/local/bin).
     if let Some(parent) = path.parent() {
-        let binary_names = if cfg!(windows) {
-            ["dcc-ai-tracking.exe", "git-ai.exe"]
-        } else {
-            ["dcc-ai-tracking", "git-ai"]
-        };
-        for binary_name in binary_names {
-            let sibling = parent.join(binary_name);
-            #[cfg(windows)]
-            if sibling.exists() {
-                return true;
-            }
-            #[cfg(not(windows))]
-            if sibling.exists() && same_file(path, &sibling) {
-                return true;
-            }
+        #[cfg(windows)]
+        let sibling = parent.join("git-ai.exe");
+        #[cfg(not(windows))]
+        let sibling = parent.join("git-ai");
+
+        #[cfg(windows)]
+        if sibling.exists() {
+            return true;
+        }
+        #[cfg(not(windows))]
+        if sibling.exists() && same_file(path, &sibling) {
+            return true;
         }
     }
 
@@ -2717,7 +2709,7 @@ mod tests {
     fn test_path_is_git_ai_binary_symlink_to_git_ai() {
         // A symlink `git → git-ai` should be detected as git-ai.
         let dir = tempfile::tempdir().unwrap();
-        let git_ai = dir.path().join("dcc-ai-tracking");
+        let git_ai = dir.path().join("git-ai");
         fs::write(&git_ai, "fake-binary").unwrap();
         #[cfg(unix)]
         std::os::unix::fs::symlink(&git_ai, dir.path().join("git")).unwrap();
@@ -2733,10 +2725,10 @@ mod tests {
         let real_git = dir.path().join("git");
         fs::write(&real_git, "real-git-binary").unwrap();
         // git-ai is a different file (or symlink to a different file)
-        let git_ai_target = dir.path().join("dcc-ai-tracking-actual");
+        let git_ai_target = dir.path().join("git-ai-actual");
         fs::write(&git_ai_target, "git-ai-binary").unwrap();
         #[cfg(unix)]
-        std::os::unix::fs::symlink(&git_ai_target, dir.path().join("dcc-ai-tracking")).unwrap();
+        std::os::unix::fs::symlink(&git_ai_target, dir.path().join("git-ai")).unwrap();
         #[cfg(unix)]
         assert!(!path_is_git_ai_binary(&real_git));
     }
@@ -2745,7 +2737,7 @@ mod tests {
     fn test_path_is_git_ai_binary_hardlink() {
         // A hard-linked shim (same inode) should be detected as git-ai.
         let dir = tempfile::tempdir().unwrap();
-        let git_ai = dir.path().join("dcc-ai-tracking");
+        let git_ai = dir.path().join("git-ai");
         fs::write(&git_ai, "fake-binary").unwrap();
         #[cfg(unix)]
         {

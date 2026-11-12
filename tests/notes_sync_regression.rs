@@ -4,6 +4,7 @@ mod repos;
 
 use git_ai::notes::db::NotesDatabase;
 use git_ai::notes::reference_server::ReferenceServer;
+use repos::test_file::ExpectedLineExt;
 use repos::test_repo::{DaemonTestScope, TestRepo, real_git_executable};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -475,7 +476,7 @@ fn notes_sync_http_backend_clone_warms_notes_cache() {
     ]);
     let notes_db_path = source
         .test_home_path()
-        .join(".dcc-ai-tracking")
+        .join(".git-ai")
         .join("internal")
         .join("notes-db");
     let upstream = TestRepo::new_bare_with_daemon_scope(DaemonTestScope::NoDaemon);
@@ -594,6 +595,76 @@ worktree_test_wrappers! {
             seed_sha
         );
     }
+}
+
+#[test]
+fn notes_sync_kunpeng_review_fetch_preserves_source_authorship() {
+    let (author, upstream) = TestRepo::new_with_remote();
+    fs::write(author.path().join("base.txt"), "base\n").unwrap();
+    let base = author.stage_all_and_commit("Base").unwrap();
+    author
+        .filename("base.txt")
+        .assert_committed_lines(lines!["base".unattributed_human()]);
+    author
+        .git_og(&["push", "origin", "HEAD:refs/heads/main"])
+        .unwrap();
+
+    fs::write(author.path().join("review.txt"), "review change\n").unwrap();
+    author
+        .git_ai(&["checkpoint", "mock_ai", "review.txt"])
+        .unwrap();
+    let source = author.stage_all_and_commit("Review change").unwrap();
+    author
+        .filename("review.txt")
+        .assert_committed_lines(lines!["review change".ai()]);
+    let source_note = author.read_authorship_note(&source.commit_sha).unwrap();
+    let review_ref = "refs/revision/5/12345/67890";
+    author
+        .git_og(&[
+            "push",
+            "origin",
+            &format!("HEAD:{review_ref}"),
+            "refs/notes/ai",
+        ])
+        .unwrap();
+
+    let reviewer = TestRepo::new();
+    let remote = upstream.path().to_str().unwrap();
+    reviewer.git(&["fetch", remote, "refs/heads/main"]).unwrap();
+    reviewer
+        .git(&["checkout", "-B", "reviewer", &base.commit_sha])
+        .unwrap();
+    reviewer
+        .git(&["fetch", "--dry-run", remote, review_ref])
+        .unwrap();
+    assert!(
+        reviewer
+            .git_og(&["show-ref", "--verify", "refs/notes/ai"])
+            .is_err()
+    );
+
+    reviewer
+        .git(&["fetch", "--no-tags", "--jobs", "1", remote, review_ref])
+        .unwrap();
+    assert_eq!(
+        reviewer
+            .git_og(&["rev-parse", "FETCH_HEAD"])
+            .unwrap()
+            .trim(),
+        source.commit_sha
+    );
+    assert_eq!(
+        reviewer.read_authorship_note(&source.commit_sha),
+        Some(source_note),
+        "a review fetch should import the source commit's Note"
+    );
+    reviewer.git(&["checkout", "FETCH_HEAD"]).unwrap();
+    reviewer
+        .filename("review.txt")
+        .assert_committed_lines(lines!["review change".ai()]);
+    reviewer
+        .filename("base.txt")
+        .assert_committed_lines(lines!["base".unattributed_human()]);
 }
 
 worktree_test_wrappers! {
@@ -1167,7 +1238,7 @@ fn notes_sync_http_backend_plain_pull_warms_notes_cache() {
     ]);
     let notes_db_path = local
         .test_home_path()
-        .join(".dcc-ai-tracking")
+        .join(".git-ai")
         .join("internal")
         .join("notes-db");
     let upstream = TestRepo::new_bare_with_daemon_scope(DaemonTestScope::NoDaemon);

@@ -12,17 +12,17 @@ jobs:
       contents: write
 
     steps:
-      # Use a runner image with dcc-ai-tracking or add a provisioning step here.
+      # Use a runner image with git-ai or add a provisioning step here.
       - name: Run attribution CLI
         id: run-git-ai
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          export PATH="$HOME/.dcc-ai-tracking/bin:$PATH"
-          if ! command -v dcc-ai-tracking >/dev/null 2>&1; then
-            echo "Provision dcc-ai-tracking from the approved DCC Linux package and place it in ~/.dcc-ai-tracking/bin or a directory on PATH." >&2
+          export PATH="$HOME/.git-ai/bin:$PATH"
+          if ! command -v git-ai >/dev/null 2>&1; then
+            echo "Provision git-ai from the approved DCC Linux package and place it in ~/.git-ai/bin or a directory on PATH." >&2
             exit 1
           fi
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          dcc-ai-tracking ci github run
+          git-ai ci github run

@@ -33,7 +33,7 @@ impl GitHubCopilotInstaller {
 
     fn is_github_copilot_checkpoint_command(cmd: &str) -> bool {
         cmd.contains("git-ai checkpoint github-copilot")
-            || ((cmd.contains("dcc-ai-tracking") || cmd.contains("git-ai"))
+            || (cmd.contains("git-ai")
                 && cmd.contains("checkpoint")
                 && cmd.contains("github-copilot"))
     }
@@ -480,7 +480,7 @@ mod tests {
         with_temp_home(|home| {
             let installer = GitHubCopilotInstaller;
             let params = HookInstallerParams {
-                binary_path: PathBuf::from(r"C:\Users\test user\.dcc-ai-tracking\bin\git-ai.exe"),
+                binary_path: PathBuf::from(r"C:\Users\test user\.git-ai\bin\git-ai.exe"),
             };
 
             installer.install_hooks(&params, false).unwrap();
@@ -493,13 +493,13 @@ mod tests {
             assert_eq!(
                 pre_hook.get("command").and_then(|v| v.as_str()),
                 Some(
-                    "'C:/Users/test user/.dcc-ai-tracking/bin/git-ai.exe' checkpoint github-copilot --hook-input stdin"
+                    "'C:/Users/test user/.git-ai/bin/git-ai.exe' checkpoint github-copilot --hook-input stdin"
                 )
             );
             assert_eq!(
                 pre_hook.get("powershell").and_then(|v| v.as_str()),
                 Some(
-                    "& 'C:/Users/test user/.dcc-ai-tracking/bin/git-ai.exe' checkpoint github-copilot --hook-input stdin"
+                    "& 'C:/Users/test user/.git-ai/bin/git-ai.exe' checkpoint github-copilot --hook-input stdin"
                 )
             );
         });
@@ -519,14 +519,14 @@ mod tests {
                             "type": "command",
                             "matcher": "Edit|Write",
                             "timeoutSec": 15,
-                            "command": "C:/Users/test user/.dcc-ai-tracking/bin/git-ai.exe checkpoint github-copilot --hook-input stdin"
+                            "command": "C:/Users/test user/.git-ai/bin/git-ai.exe checkpoint github-copilot --hook-input stdin"
                         }
                     ],
                     "PostToolUse": [{
                         "type": "command",
                         "matcher": "Edit|Write",
                         "timeoutSec": 15,
-                        "command": "C:/Users/test user/.dcc-ai-tracking/bin/git-ai.exe checkpoint github-copilot --hook-input stdin"
+                        "command": "C:/Users/test user/.git-ai/bin/git-ai.exe checkpoint github-copilot --hook-input stdin"
                     }]
                 }
             });
@@ -538,7 +538,7 @@ mod tests {
 
             let installer = GitHubCopilotInstaller;
             let params = HookInstallerParams {
-                binary_path: PathBuf::from(r"C:\Users\test user\.dcc-ai-tracking\bin\git-ai.exe"),
+                binary_path: PathBuf::from(r"C:\Users\test user\.git-ai\bin\git-ai.exe"),
             };
 
             installer.install_hooks(&params, false).unwrap();
@@ -556,7 +556,7 @@ mod tests {
                 assert_eq!(hook["timeoutSec"], 15);
                 assert_eq!(
                     hook["powershell"],
-                    "& 'C:/Users/test user/.dcc-ai-tracking/bin/git-ai.exe' checkpoint github-copilot --hook-input stdin"
+                    "& 'C:/Users/test user/.git-ai/bin/git-ai.exe' checkpoint github-copilot --hook-input stdin"
                 );
             }
 
@@ -572,7 +572,7 @@ mod tests {
         with_temp_home(|_| {
             let installer = GitHubCopilotInstaller;
             let params = HookInstallerParams {
-                binary_path: PathBuf::from(r"C:\Users\test user\.dcc-ai-tracking\bin\git-ai.exe"),
+                binary_path: PathBuf::from(r"C:\Users\test user\.git-ai\bin\git-ai.exe"),
             };
 
             installer.install_hooks(&params, false).unwrap();

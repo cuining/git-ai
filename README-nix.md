@@ -21,7 +21,7 @@ The package provides three commands:
 | Command | Description |
 |---------|-------------|
 | `git` | Routes through git-ai (tracks AI authorship) |
-| `dcc-ai-tracking` | Direct tracking commands |
+| `git-ai` | Direct tracking commands |
 | `git-og` | Bypasses git-ai, calls real git |
 
 ## Flake Outputs
@@ -70,7 +70,7 @@ In your Home Manager configuration:
   # Enable git-ai hooks for IDE/agent integration
   programs.git-ai = {
     enable = true;
-    installHooks = true;  # Runs dcc-ai-tracking install-hooks on activation
+    installHooks = true;  # Runs git-ai install-hooks on activation
   };
 }
 ```
@@ -78,7 +78,7 @@ In your Home Manager configuration:
 This approach:
 - Replaces the standard git with git-ai throughout your environment
 - Installs IDE/agent hooks automatically
-- Creates `~/.dcc-ai-tracking/config.json` with the correct git path
+- Creates `~/.git-ai/config.json` with the correct git path
 - Avoids package conflicts
 
 ### 2. nix-darwin with Home Manager
@@ -215,7 +215,7 @@ The Home Manager module handles hooks and configuration only (not package instal
 |--------|------|---------|-------------|
 | `enable` | bool | `false` | Enable git-ai hooks and config |
 | `package` | package | flake default | The git-ai package (for hooks) |
-| `installHooks` | bool | `true` | Run `dcc-ai-tracking install-hooks` on activation |
+| `installHooks` | bool | `true` | Run `git-ai install-hooks` on activation |
 
 ### nixosModules.default
 
@@ -223,7 +223,7 @@ The Home Manager module handles hooks and configuration only (not package instal
 |--------|------|---------|-------------|
 | `enable` | bool | `false` | Enable git-ai |
 | `package` | package | flake default | The git-ai package to use |
-| `installHooks` | bool | `true` | Run `dcc-ai-tracking install-hooks` on activation |
+| `installHooks` | bool | `true` | Run `git-ai install-hooks` on activation |
 | `setGitAlias` | bool | `true` | Add git-ai to system PATH |
 
 ## Platforms

@@ -534,21 +534,19 @@ fn configure_test_home_env(command: &mut Command, test_home: &Path) {
                 if git_path.is_file() || git_path.is_symlink() {
                     // Shell-script wrapper containing "git-ai"
                     if let Ok(contents) = fs::read_to_string(&git_path)
-                        && (contents.contains("git-ai") || contents.contains("dcc-ai-tracking"))
+                        && contents.contains("git-ai")
                     {
                         return false;
                     }
                     // Symlink whose target contains "git-ai"
                     if let Ok(target) = std::fs::read_link(&git_path)
-                        && (target.to_string_lossy().contains("git-ai")
-                            || target.to_string_lossy().contains("dcc-ai-tracking"))
+                        && target.to_string_lossy().contains("git-ai")
                     {
                         return false;
                     }
                     // Canonical path contains "git-ai"
                     if let Ok(canonical) = git_path.canonicalize()
-                        && (canonical.to_string_lossy().contains("git-ai")
-                            || canonical.to_string_lossy().contains("dcc-ai-tracking"))
+                        && canonical.to_string_lossy().contains("git-ai")
                     {
                         return false;
                     }
@@ -3656,10 +3654,10 @@ fn find_real_git_by_probe() -> String {
 /// The `OnceLock` guarantees the init runs exactly once even under parallel tests.
 ///
 /// After this call:
-/// - `~/.dcc-ai-tracking/config.json` in the isolated HOME has `git_path` → real git,
+/// - `~/.git-ai/config.json` in the isolated HOME has `git_path` → real git,
 ///   so no daemon auto-spawn from in-process Config::get() calls.
 /// - `~/.gitconfig` is a minimal stub so plain git subprocesses don't fail.
-/// - Developer's real `~/.dcc-ai-tracking/`, `~/.claude/`, `~/.gitconfig` are unreachable.
+/// - Developer's real `~/.git-ai/`, `~/.claude/`, `~/.gitconfig` are unreachable.
 fn ensure_isolated_process_home() {
     static PROCESS_HOME: OnceLock<std::path::PathBuf> = OnceLock::new();
     PROCESS_HOME.get_or_init(|| {
@@ -3677,9 +3675,9 @@ fn ensure_isolated_process_home() {
         // Probe for real git before we overwrite HOME
         let real_git = find_real_git_by_probe();
 
-        // Minimal ~/.dcc-ai-tracking/config.json: real git_path
+        // Minimal ~/.git-ai/config.json: real git_path
         let git_ai_dir = git_ai::config::git_ai_dir_for_home(&home);
-        fs::create_dir_all(&git_ai_dir).expect("create .dcc-ai-tracking dir");
+        fs::create_dir_all(&git_ai_dir).expect("create .git-ai dir");
         // Escape backslashes for JSON (relevant on Windows)
         let real_git_json = real_git.replace('\\', "\\\\");
         fs::write(
@@ -3720,20 +3718,17 @@ fn ensure_isolated_process_home() {
                         let git_path = std::path::Path::new(dir).join("git");
                         if git_path.is_file() || git_path.is_symlink() {
                             if let Ok(contents) = fs::read_to_string(&git_path)
-                                && (contents.contains("git-ai")
-                                    || contents.contains("dcc-ai-tracking"))
+                                && contents.contains("git-ai")
                             {
                                 return false;
                             }
                             if let Ok(target) = std::fs::read_link(&git_path)
-                                && (target.to_string_lossy().contains("git-ai")
-                                    || target.to_string_lossy().contains("dcc-ai-tracking"))
+                                && target.to_string_lossy().contains("git-ai")
                             {
                                 return false;
                             }
                             if let Ok(canonical) = git_path.canonicalize()
-                                && (canonical.to_string_lossy().contains("git-ai")
-                                    || canonical.to_string_lossy().contains("dcc-ai-tracking"))
+                                && canonical.to_string_lossy().contains("git-ai")
                             {
                                 return false;
                             }
@@ -4036,13 +4031,7 @@ fn compile_binary() -> PathBuf {
 
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let output = Command::new("cargo")
-        .args([
-            "build",
-            "--bin",
-            "dcc-ai-tracking",
-            "--features",
-            "test-support",
-        ])
+        .args(["build", "--bin", "git-ai", "--features", "test-support"])
         .current_dir(manifest_dir)
         .output()
         .expect("Failed to compile git-ai binary");
@@ -4063,9 +4052,9 @@ fn compile_binary() -> PathBuf {
             .into_owned()
     });
     #[cfg(windows)]
-    let binary_path = PathBuf::from(&target_dir).join("debug/dcc-ai-tracking.exe");
+    let binary_path = PathBuf::from(&target_dir).join("debug/git-ai.exe");
     #[cfg(not(windows))]
-    let binary_path = PathBuf::from(&target_dir).join("debug/dcc-ai-tracking");
+    let binary_path = PathBuf::from(&target_dir).join("debug/git-ai");
 
     // Warm the freshly built binary once so the first daemon startups in highly parallel
     // suites don't all pay cold process initialization overhead at the same time.

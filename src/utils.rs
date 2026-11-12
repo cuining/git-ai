@@ -16,9 +16,9 @@ fn resolve_git_ai_exe_from_invocation_path(path: PathBuf) -> PathBuf {
     // Get platform-specific executable names
     let git_name = if cfg!(windows) { "git.exe" } else { "git" };
     let git_ai_name = if cfg!(windows) {
-        "dcc-ai-tracking.exe"
+        "git-ai.exe"
     } else {
-        "dcc-ai-tracking"
+        "git-ai"
     };
 
     let Some(file_name) = path.file_name().and_then(|n| n.to_str()) else {
@@ -277,7 +277,7 @@ pub fn print_superuser_warning() {
          \n\
          To suppress this warning, either:\n\
          - Run git-ai as your normal user (recommended), or\n\
-         - Set GIT_AI_ALLOW_SUPERUSER=1 or add \"allow_superuser\": true to ~/.dcc-ai-tracking/config.json\n\
+         - Set GIT_AI_ALLOW_SUPERUSER=1 or add \"allow_superuser\": true to ~/.git-ai/config.json\n\
          \n\
          This warning is automatically suppressed in CI environments."
     );
@@ -569,9 +569,9 @@ mod tests {
             .path()
             .join(if cfg!(windows) { "git.exe" } else { "git" });
         let git_ai = dir.path().join(if cfg!(windows) {
-            "dcc-ai-tracking.exe"
+            "git-ai.exe"
         } else {
-            "dcc-ai-tracking"
+            "git-ai"
         });
         std::fs::write(&git, "").unwrap();
         std::fs::write(&git_ai, "").unwrap();
@@ -586,7 +586,7 @@ mod tests {
         use std::os::unix::fs::symlink;
 
         let dir = tempfile::tempdir().unwrap();
-        let git_ai = dir.path().join("dcc-ai-tracking");
+        let git_ai = dir.path().join("git-ai");
         let hook = dir.path().join("pre-push");
         std::fs::write(&git_ai, "").unwrap();
         symlink(&git_ai, &hook).unwrap();
@@ -610,9 +610,9 @@ mod tests {
 
         let resolved = resolve_git_ai_exe_from_invocation_path(hook);
         let expected = if cfg!(windows) {
-            "dcc-ai-tracking.exe"
+            "git-ai.exe"
         } else {
-            "dcc-ai-tracking"
+            "git-ai"
         };
         assert_eq!(resolved, PathBuf::from(expected));
     }
@@ -625,7 +625,7 @@ mod tests {
         std::fs::write(&hook, "").unwrap();
 
         let resolved = resolve_git_ai_exe_from_invocation_path(hook);
-        assert_eq!(resolved, PathBuf::from("dcc-ai-tracking.exe"));
+        assert_eq!(resolved, PathBuf::from("git-ai.exe"));
     }
 
     #[test]

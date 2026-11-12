@@ -114,7 +114,7 @@ impl UpdateCache {
     }
 
     fn pending_version(&self) -> Option<&str> {
-        let current = version_for_source(env!("CARGO_PKG_VERSION"), self.channel == "npm:dcc");
+        let current = version_for_source(env!("CARGO_PKG_VERSION"), self.channel == "npm:latest");
         self.available_semver
             .as_deref()
             .filter(|version| is_newer_version(version, &current))
@@ -127,7 +127,7 @@ impl UpdateCache {
 
 fn update_cache_channel(channel: UpdateChannel) -> &'static str {
     if npm::enabled() {
-        "npm:dcc"
+        "npm:latest"
     } else {
         channel.as_str()
     }
@@ -176,7 +176,7 @@ fn exit_if_invoked_via_git_extension() {
         std::env::var(ENV_BACKGROUND_UPGRADE_WORKER).as_deref() == Ok("1"),
     ) {
         eprintln!(
-            "error: `git ai upgrade` is not supported on Windows. Run `dcc-ai-tracking upgrade` instead."
+            "error: `git ai upgrade` is not supported on Windows. Run `git-ai upgrade` instead."
         );
         std::process::exit(1);
     }
@@ -540,7 +540,7 @@ fn fetch_update_release(
     channel: UpdateChannel,
 ) -> Result<ChannelRelease, String> {
     if npm::enabled() {
-        npm::standalone_home()?;
+        npm::install_home()?;
         let release = npm::fetch()?;
         let version = release.version().to_string();
         Ok(ChannelRelease {
@@ -556,7 +556,7 @@ fn fetch_update_release(
 #[cfg(not(windows))]
 pub(crate) fn npm_installed_executable() -> Option<PathBuf> {
     if npm::enabled() {
-        npm::standalone_executable().ok()
+        npm::installed_executable().ok()
     } else {
         None
     }
@@ -577,7 +577,7 @@ fn install_release(
         }
         ReleaseDownload::Npm(package) => {
             #[cfg(not(windows))]
-            let installed_exe = npm::standalone_executable()?;
+            let installed_exe = npm::installed_executable()?;
             let staged = npm::stage(package)?;
             run_install_script(&staged.script, &release.tag, silent, Some(&staged))?;
 
@@ -669,7 +669,7 @@ fn run_install_script(
                   Write-Host \"Stack trace: $($_.ScriptStackTrace)\"; \
               }} finally {{ \
                   if ($env:{} -eq '1') {{ \
-                      $daemonExe = Join-Path $HOME '.dcc-ai-tracking\\bin\\dcc-ai-tracking.exe'; \
+                      $daemonExe = Join-Path $HOME '.git-ai\\bin\\git-ai.exe'; \
                       if (Test-Path $daemonExe) {{ try {{ & $daemonExe bg start *> $null }} catch {{ }} }} \
                   }}; \
                   Stop-Transcript | Out-Null; \
@@ -728,7 +728,7 @@ fn run_install_script(
         use std::io::Write;
         use std::os::unix::fs::PermissionsExt;
 
-        // Write script to ~/.dcc-ai-tracking/tmp/ to avoid /tmp noexec or permission issues.
+        // Write script to ~/.git-ai/tmp/ to avoid /tmp noexec or permission issues.
         // Fall back to the system temp dir if the home-based path is unavailable.
         let temp_dir = crate::config::git_ai_dir_path()
             .map(|p| p.join("tmp"))
@@ -792,7 +792,7 @@ pub fn run_with_args(args: &[String]) {
             "--background" => background = true, // Undocumented flag for internal use when spawning background process
             _ => {
                 eprintln!("Unknown argument: {}", arg);
-                eprintln!("Usage: dcc-ai-tracking upgrade [--force]");
+                eprintln!("Usage: git-ai upgrade [--force]");
                 std::process::exit(1);
             }
         }
@@ -858,7 +858,7 @@ fn run_impl_with_url(
             println!("You are already on the latest version!");
             println!();
             println!("To reinstall anyway, run:");
-            println!("  \x1b[1;36mdcc-ai-tracking upgrade --force\x1b[0m");
+            println!("  \x1b[1;36mgit-ai upgrade --force\x1b[0m");
             return action;
         }
         UpgradeAction::RunningNewerVersion => {
@@ -866,7 +866,7 @@ fn run_impl_with_url(
             println!("(This usually means you're running a development build)");
             println!();
             println!("To reinstall the selected release anyway, run:");
-            println!("  \x1b[1;36mdcc-ai-tracking upgrade --force\x1b[0m");
+            println!("  \x1b[1;36mgit-ai upgrade --force\x1b[0m");
             return action;
         }
         UpgradeAction::ForceReinstall => {
@@ -940,7 +940,7 @@ fn print_cached_notice(cache: &UpdateCache) {
         current_version, available_version
     );
     eprintln!(
-        "\x1b[1;33mRun \x1b[1;36mdcc-ai-tracking upgrade\x1b[0m \x1b[1;33mto upgrade to the latest version.\x1b[0m"
+        "\x1b[1;33mRun \x1b[1;36mgit-ai upgrade\x1b[0m \x1b[1;33mto upgrade to the latest version.\x1b[0m"
     );
     eprintln!();
 }
@@ -1010,7 +1010,7 @@ pub fn check_and_install_update_if_available() -> Result<DaemonUpdateCheckResult
     let config = config::Config::fresh();
     if config.version_checks_disabled()
         || config.auto_updates_disabled()
-        || (npm::enabled() && npm::standalone_home().is_err())
+        || (npm::enabled() && npm::install_home().is_err())
     {
         return Ok(DaemonUpdateCheckResult::NoUpdate);
     }
@@ -1079,7 +1079,7 @@ pub fn check_and_install_update_if_available() -> Result<DaemonUpdateCheckResult
 /// the channel has a newer version than the running binary.
 pub fn check_for_update_available() -> Result<DaemonUpdateCheckResult, String> {
     let config = config::Config::fresh();
-    if config.version_checks_disabled() || (npm::enabled() && npm::standalone_home().is_err()) {
+    if config.version_checks_disabled() || (npm::enabled() && npm::install_home().is_err()) {
         return Ok(DaemonUpdateCheckResult::NoUpdate);
     }
 
@@ -1467,18 +1467,18 @@ mod tests {
 
     #[test]
     fn test_parse_checksums_valid_format() {
-        let content = "594de6cf107e8ffb6efd9029bf727b465ab55a9b4c4c3995eb3e628c857dc423  dcc-ai-tracking-linux-arm64\n\
-                       88db3c0c7fc62a815579ec0ca42535c2b83ab18d9e3af8efe345dee96677b1d8  dcc-ai-tracking-linux-x64\n\
+        let content = "594de6cf107e8ffb6efd9029bf727b465ab55a9b4c4c3995eb3e628c857dc423  git-ai-linux-arm64\n\
+                       88db3c0c7fc62a815579ec0ca42535c2b83ab18d9e3af8efe345dee96677b1d8  git-ai-linux-x64\n\
                        75d1692d347c3e08a208dc6373df4cee2b5ffd0e2aee62ccb1bb47aae866b2c8  install.sh";
 
         let checksums = parse_checksums(content);
         assert_eq!(checksums.len(), 3);
         assert_eq!(
-            checksums.get("dcc-ai-tracking-linux-arm64"),
+            checksums.get("git-ai-linux-arm64"),
             Some(&"594de6cf107e8ffb6efd9029bf727b465ab55a9b4c4c3995eb3e628c857dc423".to_string())
         );
         assert_eq!(
-            checksums.get("dcc-ai-tracking-linux-x64"),
+            checksums.get("git-ai-linux-x64"),
             Some(&"88db3c0c7fc62a815579ec0ca42535c2b83ab18d9e3af8efe345dee96677b1d8".to_string())
         );
         assert_eq!(
@@ -1489,12 +1489,12 @@ mod tests {
 
     #[test]
     fn test_parse_checksums_with_extensions() {
-        let content = "23c693a25f4f2e99463c911e67d534ae17cbd9b98513aa65f0ae9da861775d54  dcc-ai-tracking-windows-x64.exe\n\
+        let content = "23c693a25f4f2e99463c911e67d534ae17cbd9b98513aa65f0ae9da861775d54  git-ai-windows-x64.exe\n\
                        f895af791eb30f6b074b2ab9f0f803e91230b084f5864befcb51ee9ced752adf  install.ps1";
 
         let checksums = parse_checksums(content);
         assert_eq!(checksums.len(), 2);
-        assert!(checksums.contains_key("dcc-ai-tracking-windows-x64.exe"));
+        assert!(checksums.contains_key("git-ai-windows-x64.exe"));
         assert!(checksums.contains_key("install.ps1"));
     }
 

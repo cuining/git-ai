@@ -51,11 +51,11 @@ pub fn handle_debug(args: &[String]) {
 }
 
 fn print_debug_help() {
-    eprintln!("dcc-ai-tracking debug - Print diagnostic information for troubleshooting");
+    eprintln!("git-ai debug - Print diagnostic information for troubleshooting");
     eprintln!();
     eprintln!("Usage:");
-    eprintln!("  dcc-ai-tracking debug [--skip-trace2-checks]");
-    eprintln!("  dcc-ai-tracking debug --help");
+    eprintln!("  git-ai debug [--skip-trace2-checks]");
+    eprintln!("  git-ai debug --help");
     eprintln!();
     eprintln!("Options:");
     eprintln!(
@@ -104,7 +104,7 @@ fn build_debug_report(options: DebugOptions) -> String {
     let shell_git_version = run_git_command_capture("git", &["--version"]);
     debug_progress("collecting git config");
     let git_config = collect_git_config_dump(&git_cmd);
-    debug_progress("collecting dcc-ai-tracking config and login state");
+    debug_progress("collecting git-ai config and login state");
     let git_ai_config = collect_git_ai_config_dump();
     let platform_info = collect_platform_info();
     let hardware_info = collect_hardware_info();
@@ -115,7 +115,7 @@ fn build_debug_report(options: DebugOptions) -> String {
     debug_progress("debug report ready");
 
     let mut out = String::new();
-    let _ = writeln!(out, "dcc-ai-tracking debug report");
+    let _ = writeln!(out, "git-ai debug report");
     let _ = writeln!(out, "Generated (UTC): {}", chrono::Utc::now().to_rfc3339());
     let _ = writeln!(out);
 

@@ -102,10 +102,10 @@ def build(cargo, work_dir, output):
             target_env.setdefault("XWIN_SDK_VERSION", "10.0.26100")
             target_env.setdefault("XWIN_CRT_VERSION", "14.44.17.14")
         print(f"Building {platform} ({target})", flush=True)
-        subprocess.run(cargo_command(cargo, subcommand, "--locked", "--release", "--bin", "dcc-ai-tracking",
+        subprocess.run(cargo_command(cargo, subcommand, "--locked", "--release", "--bin", "git-ai",
                                      "--target", target, "--target-dir", target_dir, "--jobs", "2"),
                        cwd=ROOT, env=target_env, check=True)
-        executable = "dcc-ai-tracking.exe" if platform == "win32-x64" else "dcc-ai-tracking"
+        executable = "git-ai.exe" if platform == "win32-x64" else "git-ai"
         binary = target_dir / target / "release" / executable
         verify_binary(binary, platform, version, work_dir)
         archives.append(packer.pack(ROOT, binary, platform, work_dir / "packages", source, metadata))

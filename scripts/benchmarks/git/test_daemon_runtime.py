@@ -14,7 +14,7 @@ import benchmark_nasty_modes_vs_main as nasty
 @unittest.skipUnless(os.name == "posix", "Benchmarks use Unix daemon sockets")
 class DaemonRuntimeTests(unittest.TestCase):
     def check_runtime(self, benchmark):
-        for default_root in (".baseline-state", ".dcc-ai-tracking"):
+        for default_root in (".baseline-state", ".git-ai"):
             with self.subTest(default_root=default_root), tempfile.TemporaryDirectory(
                 prefix="gai-br-", dir="/tmp"
             ) as tmp:
@@ -58,7 +58,7 @@ class DaemonRuntimeTests(unittest.TestCase):
                             env = runner.base_env
                             self.assertTrue(runner.daemon_started)
 
-                    expected_dir = home / ".dcc-ai-tracking/internal/daemon"
+                    expected_dir = home / ".git-ai/internal/daemon"
                     for key, name in (
                         ("GIT_AI_DAEMON_CONTROL_SOCKET", "control.sock"),
                         ("GIT_AI_DAEMON_TRACE_SOCKET", "trace2.sock"),
@@ -84,7 +84,7 @@ class DaemonRuntimeTests(unittest.TestCase):
     def test_real_git_lookup_rejects_tracking_symlink(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            binary = root / "dcc-ai-tracking"
+            binary = root / "git-ai"
             binary.touch()
             proxy = root / "git"
             proxy.symlink_to(binary)

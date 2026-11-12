@@ -56,16 +56,16 @@ def resolve_git_ai_bin(repo_root: Path, explicit: str | None) -> Path:
         return path
 
     candidates = [
-        repo_root / "target" / "release" / "dcc-ai-tracking",
-        repo_root / "target" / "debug" / "dcc-ai-tracking",
+        repo_root / "target" / "release" / "git-ai",
+        repo_root / "target" / "debug" / "git-ai",
     ]
     for candidate in candidates:
         if candidate.exists():
             return candidate
 
-    print("Building git-ai binary (cargo build --bin dcc-ai-tracking)...")
-    run(["cargo", "build", "--quiet", "--bin", "dcc-ai-tracking"], cwd=repo_root)
-    built = repo_root / "target" / "debug" / "dcc-ai-tracking"
+    print("Building git-ai binary (cargo build --bin git-ai)...")
+    run(["cargo", "build", "--quiet", "--bin", "git-ai"], cwd=repo_root)
+    built = repo_root / "target" / "debug" / "git-ai"
     if not built.exists():
         raise FileNotFoundError(
             f"Expected built binary not found at {built}; pass --git-ai-bin explicitly."
@@ -275,7 +275,7 @@ def main() -> None:
     parser.add_argument(
         "--git-ai-bin",
         default=None,
-        help="Path to git-ai binary. If omitted, tries target/{release,debug}/dcc-ai-tracking.",
+        help="Path to git-ai binary. If omitted, tries target/{release,debug}/git-ai.",
     )
     parser.add_argument(
         "--total-files",

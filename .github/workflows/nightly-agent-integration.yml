@@ -215,14 +215,14 @@ jobs:
         run: |
           export PATH="$GITHUB_WORKSPACE/target/release:$PATH"
           # Exercise the Git shim alongside the direct CLI.
-          ln -sf "$GITHUB_WORKSPACE/target/release/dcc-ai-tracking" "$GITHUB_WORKSPACE/target/release/git"
+          ln -sf "$GITHUB_WORKSPACE/target/release/git-ai" "$GITHUB_WORKSPACE/target/release/git"
           cd /tmp/test-repo
-          dcc-ai-tracking install
+          git-ai install
 
       - name: Start async daemon
         run: |
           source "$GITHUB_WORKSPACE/scripts/nightly/start-async-daemon.sh" \
-            "$GITHUB_WORKSPACE/target/release/dcc-ai-tracking"
+            "$GITHUB_WORKSPACE/target/release/git-ai"
 
       - name: Verify hook wiring
         env:
@@ -246,7 +246,7 @@ jobs:
         if: always()
         run: |
           bash "$GITHUB_WORKSPACE/scripts/nightly/stop-async-daemon.sh" \
-            "$GITHUB_WORKSPACE/target/release/dcc-ai-tracking"
+            "$GITHUB_WORKSPACE/target/release/git-ai"
 
       - name: Upload test results
         if: always()
@@ -322,14 +322,14 @@ jobs:
         run: |
           export PATH="$GITHUB_WORKSPACE/target/release:$PATH"
           # Exercise the Git shim alongside the direct CLI.
-          ln -sf "$GITHUB_WORKSPACE/target/release/dcc-ai-tracking" "$GITHUB_WORKSPACE/target/release/git"
+          ln -sf "$GITHUB_WORKSPACE/target/release/git-ai" "$GITHUB_WORKSPACE/target/release/git"
           cd /tmp/test-repo
-          dcc-ai-tracking install
+          git-ai install
 
       - name: Start async daemon
         run: |
           source "$GITHUB_WORKSPACE/scripts/nightly/start-async-daemon.sh" \
-            "$GITHUB_WORKSPACE/target/release/dcc-ai-tracking"
+            "$GITHUB_WORKSPACE/target/release/git-ai"
 
       - name: Run live agent test (with retry)
         uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60 # v4
@@ -360,7 +360,7 @@ jobs:
         if: always()
         run: |
           bash "$GITHUB_WORKSPACE/scripts/nightly/stop-async-daemon.sh" \
-            "$GITHUB_WORKSPACE/target/release/dcc-ai-tracking"
+            "$GITHUB_WORKSPACE/target/release/git-ai"
 
       - name: Upload test results
         if: always()

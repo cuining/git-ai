@@ -18,7 +18,7 @@ Options:
   --lines-per-file <n>         Lines per generated file (default: 3000)
   --burst-every <n>            Every Nth feature commit rewrites all generated files (default: 25)
   --git-bin <path>             Git binary to use (default: wrapper next to git-ai, else PATH git)
-  --git-ai-bin <path>          tracking binary (default: dcc-ai-tracking on PATH)
+  --git-ai-bin <path>          tracking binary (default: git-ai on PATH)
   --hook-mode <mode>           wrapper | daemon (default: wrapper)
   --skip-clone                 Reuse existing clone in <work-root>/repo
   -h, --help                   Show help
@@ -62,11 +62,11 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$GIT_AI_BIN" ]]; then
-  GIT_AI_BIN="$(command -v dcc-ai-tracking || true)"
+  GIT_AI_BIN="$(command -v git-ai || true)"
 fi
 
 if [[ -z "$GIT_AI_BIN" ]]; then
-  echo "error: dcc-ai-tracking not found in PATH" >&2
+  echo "error: git-ai not found in PATH" >&2
   exit 1
 fi
 
@@ -108,10 +108,10 @@ trap cleanup EXIT
 
 if [[ "$HOOK_MODE" == "daemon" ]]; then
   if [[ -z "${GIT_AI_DAEMON_CONTROL_SOCKET:-}" ]]; then
-    export GIT_AI_DAEMON_CONTROL_SOCKET="$HOME/.dcc-ai-tracking/internal/daemon/control.sock"
+    export GIT_AI_DAEMON_CONTROL_SOCKET="$HOME/.git-ai/internal/daemon/control.sock"
   fi
   if [[ -z "${GIT_TRACE2_EVENT:-}" ]]; then
-    export GIT_TRACE2_EVENT="af_unix:stream:$HOME/.dcc-ai-tracking/internal/daemon/trace2.sock"
+    export GIT_TRACE2_EVENT="af_unix:stream:$HOME/.git-ai/internal/daemon/trace2.sock"
   fi
   if [[ -z "${GIT_TRACE2_EVENT_NESTING:-}" ]]; then
     export GIT_TRACE2_EVENT_NESTING="0"

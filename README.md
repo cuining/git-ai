@@ -17,7 +17,7 @@ you  ██░░░░░░░░░░░░░░░░░░░░░░░
      6%                                  94%
 ```
 
-`dcc-ai-tracking blame /src/log_fmt/authorship_log.rs`
+`git-ai blame /src/log_fmt/authorship_log.rs`
 
 ```bash
 cb832b7 (Aidan Cunniffe      2025-12-13  133) pub fn execute_diff(
@@ -34,7 +34,7 @@ fe2c4c8 (claude              2025-12-02  141)             let from = resolve(rep
 
 ## Install
 
-Build and install `dcc-ai-tracking` from this checkout with `task dev` on macOS, Linux, or Windows. See the [packaging guide](packaging/README.md) for installer builds.
+Build and install `git-ai` from this checkout with `task dev` on macOS, Linux, or Windows. See the [packaging guide](packaging/README.md) for installer builds.
 
 **No per-repo setup or git hooks required.** Commit with the Agent, git, or your favorite git client. Attribution will be linked to commits automatically.
 
@@ -91,8 +91,8 @@ Want to learn more?
 Line-level AI-attribution let you track AI-code through the full SDLC. Track how much AI code gets accepted, committed, through code review, and into production — to identify which tools and practices work best.
 
 ```bash
-dcc-ai-tracking stats --json
-dcc-ai-tracking stats <start_sha>..<end_sha> --json
+git-ai stats --json
+git-ai stats <start_sha>..<end_sha> --json
 ```
 
 Calculates % AI-code, AI-lines generated vs committed, accepted rates, human overrides broken down by tool and model. Learn more: [Stats command reference docs](https://usegitai.com/docs/cli/reference#stats). 
@@ -124,7 +124,7 @@ Calculates % AI-code, AI-lines generated vs committed, accepted rates, human ove
 Git AI blame is a drop-in replacement for `git blame` that shows AI attribution for each line. It supports [all standard `git blame` flags](https://git-scm.com/docs/git-blame).
 
 ```bash
-dcc-ai-tracking blame /src/log_fmt/authorship_log.rs
+git-ai blame /src/log_fmt/authorship_log.rs
 ```
 
 ```bash
@@ -171,7 +171,7 @@ We built Git AI for Teams to make it easy to roll out Git AI across your organiz
 
 #### How does it work?
 
-1. Coding Agents call `dcc-ai-tracking checkpoint` whenever they write code or modify files with bash scripts.
+1. Coding Agents call `git-ai checkpoint` whenever they write code or modify files with bash scripts.
 1. On commit, Git AI stores line-level attribution data in Git Notes, linking each line of AI-generated code to the agent, model, and session that created it. Run `git log --show-notes="ai"` to see them. 
 1. Git AI moves and merges line-level attributions when you `squash`, `merge`, `reset`, `rebase`, `stash`, `cherry-pick`, etc. so your AI code is always accurately tracked.
 
@@ -190,7 +190,7 @@ Yes. Git AI is free and open source, works locally, and requires no login or tea
 No. Git AI does not use Git hooks and it does not wrap Git, so you won't see any overhead on your Git commands.
 
 #### Do I have to set up agent hooks?
-Nope — Git AI manages the agent hooks and checks/updates them daily. If you want to trigger this yourself (ie just installed a new agent) run `dcc-ai-tracking install-hooks`.
+Nope — Git AI manages the agent hooks and checks/updates them daily. If you want to trigger this yourself (ie just installed a new agent) run `git-ai install-hooks`.
 
 #### Who uses this?
 Hundreds of engineering teams (including many in the Fortune 100) use Git AI to understand their AI usage and make agents more effective on their codebase.

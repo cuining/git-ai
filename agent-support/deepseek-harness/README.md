@@ -4,14 +4,14 @@ This standalone Cordis plugin captures local `write` and `edit` checkpoints as `
 
 ## Install in Desktop
 
-On macOS and Windows, open Desktop once to initialize its profile, then fully quit it. Run `dcc-ai-tracking install-hooks` and reopen Desktop. Use DeepSeek Harness `0.2.1-rc.2` or `0.2.2-rc.1` and a DCC tracking build that includes this plugin.
+On macOS and Windows, open Desktop once to initialize its profile, then fully quit it. Run `git-ai install-hooks` and reopen Desktop. Use DeepSeek Harness `0.2.1-rc.2` or `0.2.2-rc.1` and a DCC tracking build that includes this plugin.
 
 ```text
-dcc-ai-tracking install-hooks --dry-run
-dcc-ai-tracking install-hooks
+git-ai install-hooks --dry-run
+git-ai install-hooks
 ```
 
-The `dcc-ai-tracking` binary includes the plugin files and installs them under `~/.dsh/profiles/desktop/local-plugins/`. It registers the module in that profile's `cordis.patch.yml` and preserves existing entries and comments. A complete package-managed installation is reported as already installed. A conflicting manual registration or an incomplete package-managed installation produces an error and stays in place. The installer accepts the default empty patch and single-document YAML block sequences. It reports unsupported formats before writing. Use `--dry-run` to preview the changes. `dcc-ai-tracking uninstall-hooks` removes the installer-managed registration and preserves other entries.
+The `git-ai` binary includes the plugin files and installs them under `~/.dsh/profiles/desktop/local-plugins/`. It registers the module in that profile's `cordis.patch.yml` and preserves existing entries and comments. A complete package-managed installation is reported as already installed. A conflicting manual registration or an incomplete package-managed installation produces an error and stays in place. The installer accepts the default empty patch and single-document YAML block sequences. It reports unsupported formats before writing. Use `--dry-run` to preview the changes. `git-ai uninstall-hooks` removes the installer-managed registration and preserves other entries.
 
 Set `DSH_HOME` if Desktop uses a custom profile home. The installer runs without the `dsh` CLI, Node, npm, or a separate archive. Use a preset that exposes the `write` and `edit` tools, such as Standard.
 
@@ -32,7 +32,7 @@ For an overlay saved elsewhere, use the absolute path to `git-ai.mjs` in `name`.
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `gitAiPath` | `dcc-ai-tracking` | An absolute executable path or a command found on the host `PATH`. An explicit value selects that executable. |
+| `gitAiPath` | `git-ai` | An absolute executable path or a command found on the host `PATH`. An explicit value selects that executable. |
 | `timeoutMs` | `3000` | Timeout for each checkpoint process in milliseconds. |
 | `captureBash` | `false` | Enable checkpoint pairs for foreground `bash`. |
 
@@ -50,7 +50,7 @@ Scripts that change a different repository or commit before the command returns 
 
 ## Verify
 
-In a disposable worktree, have Harness edit a file, then commit the result. Inspect `dcc-ai-tracking stats HEAD` to check the recorded attribution. With the Git notes backend, inspect the note using `git notes --ref=ai show HEAD`. Checkpoint failures are logged through Cordis and tool execution continues.
+In a disposable worktree, have Harness edit a file, then commit the result. Inspect `git-ai stats HEAD` to check the recorded attribution. With the Git notes backend, inspect the note using `git notes --ref=ai show HEAD`. Checkpoint failures are logged through Cordis and tool execution continues.
 
 Run the plugin tests or the opt-in Git and daemon integration from the git-ai repository root. `DSH_ROOT` points to a DeepSeek Harness checkout with dependencies installed.
 

@@ -1,4 +1,4 @@
-"""Pack one already-built and signed dcc-ai-tracking platform binary with its upgrade installer."""
+"""Pack one already-built and signed git-ai platform binary with its upgrade installer."""
 
 import argparse
 import hashlib
@@ -52,7 +52,7 @@ def pack(root, binary, platform, output, source_commit, cargo_metadata):
         raise ValueError("binary is empty")
     version = cargo_version(root)
     os_name, cpu = PLATFORMS[platform]
-    binary_path = "bin/dcc-ai-tracking.exe" if os_name == "win32" else "bin/dcc-ai-tracking"
+    binary_path = "bin/git-ai.exe" if os_name == "win32" else "bin/git-ai"
     installer = "install.ps1" if os_name == "win32" else "install.sh"
     digest = hashlib.sha256(content).hexdigest()
     asset = Path(binary_path).name

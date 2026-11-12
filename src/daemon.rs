@@ -61,6 +61,8 @@ pub mod analyzers;
 pub mod bash_history_db;
 pub mod bash_sessions;
 pub mod checkpoint;
+#[cfg(unix)]
+pub(crate) mod claude_trace2_relay;
 pub mod control_api;
 pub mod coordinator;
 pub mod daemon_log_layer;
@@ -402,7 +404,7 @@ impl DaemonConfig {
 
     pub fn from_default_paths() -> Result<Self, GitAiError> {
         let internal_dir = config::internal_dir_path().ok_or_else(|| {
-            GitAiError::Generic("Unable to determine ~/.dcc-ai-tracking/internal path".to_string())
+            GitAiError::Generic("Unable to determine ~/.git-ai/internal path".to_string())
         })?;
         Ok(Self::from_internal_dir(internal_dir))
     }
@@ -1380,24 +1382,101 @@ fn transcript_sweep_triggers_for_events(
     triggers
 }
 
-fn apply_pull_notes_sync_side_effect(
+fn kunpeng_review_fetch_remote(args: &[String]) -> Option<&str> {
+    // Only accept options whose operands can be skipped without changing fetch mode.
+    let mut args = args.iter().map(String::as_str);
+    let mut positionals = [None; 2];
+    let mut slots = positionals.iter_mut();
+    let mut parse_options = true;
+    while let Some(arg) = args.next() {
+        if parse_options && arg.starts_with('-') {
+            let (flag, value) = arg
+                .split_once('=')
+                .map_or((arg, None), |(flag, value)| (flag, Some(value)));
+            match flag {
+                "--" => parse_options = false,
+                "-n"
+                | "--no-tags"
+                | "-t"
+                | "--tags"
+                | "-q"
+                | "--quiet"
+                | "-v"
+                | "--verbose"
+                | "--progress"
+                | "--no-progress"
+                | "-f"
+                | "--force"
+                | "--no-recurse-submodules"
+                | "--recurse-submodules"
+                | "--no-auto-maintenance"
+                | "--no-write-fetch-head" => {}
+                "-j" | "--jobs" | "-o" | "--server-option" | "--depth" | "--deepen"
+                | "--shallow-since" | "--shallow-exclude" | "--filter" | "--upload-pack"
+                | "--refmap" | "--negotiation-tip" => {
+                    if value.is_none() {
+                        args.next()?;
+                    }
+                }
+                _ => return None,
+            }
+            continue;
+        }
+        *slots.next()? = Some(arg);
+    }
+    let [Some(remote), Some(refspec)] = positionals else {
+        return None;
+    };
+    let source_ref = refspec
+        .trim_start_matches('+')
+        .split(':')
+        .next()
+        .unwrap_or_default();
+    let mut segments = source_ref.strip_prefix("refs/revision/")?.split('/');
+    let is_patchset = (0..3).all(|_| {
+        segments
+            .next()
+            .is_some_and(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
+    }) && segments.next().is_none();
+    (is_patchset && !remote.starts_with('-')).then_some(remote)
+}
+
+fn apply_transport_notes_sync_side_effect(
     worktree: &str,
     command: Option<&str>,
     args: &[String],
 ) -> Result<(), GitAiError> {
     use crate::config::NotesBackendKind;
 
-    let repo = find_repository_in_path(worktree)?;
-    let parsed = parsed_invocation_for_side_effect(command, args);
-    let remote = fetch_remote_from_args(&repo, &parsed)?;
+    let review_remote = if command == Some("fetch") {
+        let Some(remote) = kunpeng_review_fetch_remote(args) else {
+            return Ok(());
+        };
+        Some(remote)
+    } else {
+        None
+    };
     let notes_backend = crate::config::Config::fresh().notes_backend_kind();
+    if review_remote.is_some() && notes_backend == NotesBackendKind::Http {
+        return Ok(());
+    }
 
+    let repo = find_repository_in_path(worktree)?;
+    let (remote, message) = if let Some(remote) = review_remote {
+        (remote.to_owned(), "handling fetch notes sync")
+    } else {
+        let parsed = parsed_invocation_for_side_effect(command, args);
+        (
+            fetch_remote_from_args(&repo, &parsed)?,
+            "handling pull notes sync",
+        )
+    };
     tracing::info!(
         command = command.unwrap_or("pull"),
         remote = %remote,
         backend = %notes_backend,
         worktree = %worktree,
-        "handling pull notes sync"
+        "{message}"
     );
 
     if notes_backend == NotesBackendKind::Http {
@@ -7622,8 +7701,15 @@ impl ActorDaemonCoordinator {
                     crate::daemon::domain::SemanticEvent::CloneCompleted { .. } => {
                         apply_clone_notes_sync_side_effect(&worktree)?;
                     }
+                    crate::daemon::domain::SemanticEvent::FetchCompleted { .. } => {
+                        apply_transport_notes_sync_side_effect(
+                            &worktree,
+                            Some("fetch"),
+                            &cmd.invoked_args,
+                        )?;
+                    }
                     crate::daemon::domain::SemanticEvent::PullCompleted { .. } => {
-                        apply_pull_notes_sync_side_effect(
+                        apply_transport_notes_sync_side_effect(
                             &worktree,
                             cmd.invoked_command.as_deref(),
                             &cmd.invoked_args,
@@ -10765,6 +10851,15 @@ pub(crate) async fn run_daemon(config: DaemonConfig) -> Result<DaemonExitAction,
     remove_socket_if_exists(&config.trace_socket_path)?;
     remove_socket_if_exists(&config.control_socket_path)?;
 
+    #[cfg(unix)]
+    let claude_trace2_relay = match claude_trace2_relay::start(&config) {
+        Ok(relay) => relay,
+        Err(error) => {
+            tracing::warn!(%error, "could not start Claude Trace2 relay");
+            None
+        }
+    };
+
     let mut coordinator_inner = ActorDaemonCoordinator::new();
 
     // Spawn the telemetry worker inside the daemon's tokio runtime.
@@ -10960,6 +11055,11 @@ pub(crate) async fn run_daemon(config: DaemonConfig) -> Result<DaemonExitAction,
     spawn_shutdown_deadline_enforcer(coordinator.clone(), self_restart_history_path(&config));
 
     coordinator.wait_for_shutdown().await;
+
+    #[cfg(unix)]
+    if let Some(relay) = claude_trace2_relay {
+        relay.stop().await;
+    }
 
     #[cfg(feature = "test-support")]
     if let Ok(raw_hang_secs) = std::env::var("GIT_AI_TEST_SHUTDOWN_HANG_SECS")

@@ -1,9 +1,9 @@
-//! Minimal Cube API client for `dcc-ai-tracking analyze`.
+//! Minimal Cube API client for `git-ai analyze`.
 //!
 //! Talks to the Next.js cube proxy at `<api_base_url>/api/cube/*` using the
 //! org API key in the `x-api-key` header. We build requests directly over
 //! [`crate::http`] rather than going through `ApiContext::post_json` so that we
-//! send ONLY the API key to the cube proxy — never a `dcc-ai-tracking login` OAuth
+//! send ONLY the API key to the cube proxy — never a `git-ai login` OAuth
 //! bearer, which the proxy does not expect on this route.
 
 use crate::config;
@@ -43,7 +43,7 @@ impl std::fmt::Display for CubeError {
             CubeError::MissingApiKey => write!(
                 f,
                 "no API key configured. Set GIT_AI_API_KEY or add \"api_key\" to \
-                 ~/.dcc-ai-tracking/config.json (the key needs organization:admin:read; \
+                 ~/.git-ai/config.json (the key needs organization:admin:read; \
                  create one in your Git AI org settings)."
             ),
             CubeError::Transport(e) => write!(f, "request failed: {}", e),

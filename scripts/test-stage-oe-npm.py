@@ -28,7 +28,7 @@ class OeNpmStagingTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory(prefix="git-ai-oe-fixtures-")
         cls.addClassCleanup(temporary.cleanup)
         root = Path(temporary.name)
-        binary = root / "dcc-ai-tracking"
+        binary = root / "git-ai"
         binary.write_bytes(BINARY)
         cls.version = PACKER.cargo_version(ROOT)
         metadata = root / "cargo-metadata.json"
@@ -63,7 +63,7 @@ class OeNpmStagingTests(unittest.TestCase):
             with self.subTest(platform=platform):
                 package = self.output / platform
                 windows = platform == "win32-x64"
-                binary = package / "bin" / ("dcc-ai-tracking.exe" if windows else "dcc-ai-tracking")
+                binary = package / "bin" / ("git-ai.exe" if windows else "git-ai")
                 self.assertEqual(binary.read_bytes(), BINARY)
                 self.assertTrue(os.access(binary, os.X_OK))
                 self.assertTrue((package / ("install.ps1" if windows else "install.sh")).is_file())
@@ -102,7 +102,7 @@ class OeNpmStagingTests(unittest.TestCase):
                 ) as replacement:
                     for member in original.getmembers():
                         data = original.extractfile(member).read()
-                        if member.name == "package/bin/dcc-ai-tracking.exe":
+                        if member.name == "package/bin/git-ai.exe":
                             if damage == "symlink":
                                 member.type = tarfile.SYMTYPE
                                 member.linkname = "../../unexpected.exe"

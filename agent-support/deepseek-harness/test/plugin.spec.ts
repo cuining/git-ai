@@ -132,17 +132,16 @@ it('captures actual file changes and foreground shell writes in their respective
 })
 
 it.skipIf(Boolean(process.env.DSH_GIT_AI_BIN)).each([true, false])(
-  'uses only the default dcc-ai-tracking command when present=%s', async (available) => {
+  'uses only the default git-ai command when present=%s', async (available) => {
     const root = await realpath(await mkdtemp(join(tmpdir(), 'dsh-git-ai-path-')))
     const ctx = new Context()
     try {
-      const canonicalLog = join(root, 'dcc-ai-tracking.jsonl')
-      const legacyLog = join(root, 'git-ai.jsonl')
-      await Promise.all([writeFile(canonicalLog, ''), writeFile(legacyLog, '')])
-      for (const name of available ? ['git-ai', 'dcc-ai-tracking'] : ['git-ai']) {
-        const dir = join(root, `${name}-fixture`)
+      const checkpointLog = join(root, 'git-ai.jsonl')
+      await writeFile(checkpointLog, '')
+      if (available) {
+        const dir = join(root, 'git-ai-fixture')
         await mkdir(dir)
-        await symlink(await recordingExecutable(dir, join(root, `${name}.jsonl`)), join(root, name))
+        await symlink(await recordingExecutable(dir, checkpointLog), join(root, 'git-ai'))
       }
       const driver = await mountHarness(ctx, root, undefined)
       const resolveExecutable = ctx.subprocess.resolveExecutable.bind(ctx.subprocess)
@@ -154,9 +153,8 @@ it.skipIf(Boolean(process.env.DSH_GIT_AI_BIN)).each([true, false])(
         toolCallResponse('default-path', 'write', { file_path: file, content: 'AI write\n' }),
       ])
       expect(result?.data.message.isError).toBe(false)
-      expect((await readCheckpoints(canonicalLog)).map(record => record.payload.type))
+      expect((await readCheckpoints(checkpointLog)).map(record => record.payload.type))
         .toEqual(available ? ['human', 'ai_agent'] : [])
-      expect(await readCheckpoints(legacyLog)).toEqual([])
     } finally {
       await ctx.fiber.dispose()
       await rm(root, { recursive: true, force: true })

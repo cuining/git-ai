@@ -1,4 +1,4 @@
-//! `dcc-ai-tracking notes migrate` — bulk-upload existing git notes to the HTTP backend.
+//! `git-ai notes migrate` — bulk-upload existing git notes to the HTTP backend.
 //!
 //! This command reads all notes stored in `refs/notes/ai` via `git notes --ref=ai list`,
 //! fetches their content using `git cat-file --batch`, uploads them to the remote HTTP
@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::process::{Command, Stdio};
 
-/// Entry point for `dcc-ai-tracking notes migrate`.
+/// Entry point for `git-ai notes migrate`.
 pub fn handle_notes_migrate(args: &[String]) {
     let mut force = false;
     for arg in args {
@@ -32,7 +32,7 @@ pub fn handle_notes_migrate(args: &[String]) {
             }
             other => {
                 eprintln!("error: unknown option '{}'", other);
-                eprintln!("Run 'dcc-ai-tracking notes migrate --help' for usage");
+                eprintln!("Run 'git-ai notes migrate --help' for usage");
                 std::process::exit(1);
             }
         }
@@ -42,12 +42,12 @@ pub fn handle_notes_migrate(args: &[String]) {
     let cfg = Config::fresh();
     if cfg.notes_backend_kind() != NotesBackendKind::Http {
         eprintln!(
-            "error: `dcc-ai-tracking notes migrate` requires notes_backend.kind = http.\n\
+            "error: `git-ai notes migrate` requires notes_backend.kind = http.\n\
              Current backend: {}\n\
              \n\
              To enable the HTTP backend, run:\n\
              \n\
-             \x20 dcc-ai-tracking config set notes_backend.kind http",
+             \x20 git-ai config set notes_backend.kind http",
             cfg.notes_backend_kind()
         );
         std::process::exit(1);
@@ -71,7 +71,7 @@ pub fn handle_notes_migrate(args: &[String]) {
                  \n\
                  Set it before running migrate, e.g.:\n\
                  \n\
-                 \x20 dcc-ai-tracking config set notes_backend.backend_url https://your-backend.example.com"
+                 \x20 git-ai config set notes_backend.backend_url https://your-backend.example.com"
             );
             std::process::exit(1);
         }
@@ -81,9 +81,7 @@ pub fn handle_notes_migrate(args: &[String]) {
 
     // Skip if not authenticated.
     if !client.is_logged_in() && !client.has_api_key() {
-        eprintln!(
-            "error: not authenticated. Log in first with `dcc-ai-tracking login` or set an API key."
-        );
+        eprintln!("error: not authenticated. Log in first with `git-ai login` or set an API key.");
         std::process::exit(1);
     }
 
@@ -399,9 +397,9 @@ fn cat_file_batch(
 }
 
 fn print_help() {
-    eprintln!("dcc-ai-tracking notes migrate - Bulk-upload existing git notes to the HTTP backend");
+    eprintln!("git-ai notes migrate - Bulk-upload existing git notes to the HTTP backend");
     eprintln!();
-    eprintln!("Usage: dcc-ai-tracking notes migrate [options]");
+    eprintln!("Usage: git-ai notes migrate [options]");
     eprintln!();
     eprintln!("Options:");
     eprintln!("  --force, --all  Re-upload all notes even if already cached locally.");
@@ -414,7 +412,7 @@ fn print_help() {
     eprintln!("  with synced = 1 so the local cache is warm immediately.");
     eprintln!();
     eprintln!("  This command requires notes_backend.kind = http. Set it with:");
-    eprintln!("    dcc-ai-tracking config set notes_backend.kind http");
+    eprintln!("    git-ai config set notes_backend.kind http");
     eprintln!();
     eprintln!("  You must be logged in or have an API key configured.");
 }

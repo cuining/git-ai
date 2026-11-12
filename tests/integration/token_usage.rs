@@ -711,7 +711,7 @@ fn disabled_flag_spawns_nothing_and_deletes_collected_data() {
     );
     let token_db_path = repo
         .test_home_path()
-        .join(".dcc-ai-tracking/internal/token-usage-db");
+        .join(".git-ai/internal/token-usage-db");
     assert!(
         !token_db_path.exists(),
         "token-usage database must not be created with the flag off"

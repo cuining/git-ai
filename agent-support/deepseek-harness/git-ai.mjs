@@ -8,7 +8,7 @@ export const inject = ['fs', 'subprocess', 'tools', 'workingDirectory']
 
 const canonicalPath = promisify(realpath.native)
 const CHECKPOINT_ARGS = ['checkpoint', 'agent-v1', '--hook-input', 'stdin']
-const CHECKPOINT_ERROR = /preset error|background worker unavailable|failed to send checkpoint|usage: dcc-ai-tracking checkpoint/i
+const CHECKPOINT_ERROR = /preset error|background worker unavailable|failed to send checkpoint|usage: git-ai checkpoint/i
 
 export function apply(ctx, {
   gitAiPath,
@@ -43,7 +43,7 @@ export function apply(ctx, {
     const signal = AbortSignal.any(signals)
     if (signal.aborted) return false
     try {
-      executable ??= await ctx.subprocess.resolveExecutable(gitAiPath ?? 'dcc-ai-tracking', undefined, signal)
+      executable ??= await ctx.subprocess.resolveExecutable(gitAiPath ?? 'git-ai', undefined, signal)
       const handle = ctx.subprocess.spawn({
         argv: [executable, ...CHECKPOINT_ARGS],
         cwd: payload.repo_working_dir,

@@ -21,7 +21,7 @@ NPM_REGISTRY = "https://npm.intra.xiaojukeji.com/"
 
 def read_package(data, platform, version, source_commit):
     os_name, cpu = PACKER.PLATFORMS[platform]
-    binary = "bin/dcc-ai-tracking.exe" if os_name == "win32" else "bin/dcc-ai-tracking"
+    binary = "bin/git-ai.exe" if os_name == "win32" else "bin/git-ai"
     installer = "install.ps1" if os_name == "win32" else "install.sh"
     files = [binary, "LICENSE", "THIRD-PARTY-NOTICES", installer]
     expected = {f"package/{name}" for name in ["package.json", *files]}

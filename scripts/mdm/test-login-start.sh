@@ -26,8 +26,8 @@ SCENARIO="${1:-lifecycle}"
 BINARY_SOURCE="${BINARY_SOURCE:-local}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 LOG_OUT="${MDM_TEST_LOG_DIR:-${RUNNER_TEMP:-/tmp}/mdm-logs}"
-BIN="$HOME/.dcc-ai-tracking/bin/dcc-ai-tracking"
-DAEMON_DIR="$HOME/.dcc-ai-tracking/internal/daemon"
+BIN="$HOME/.git-ai/bin/git-ai"
+DAEMON_DIR="$HOME/.git-ai/internal/daemon"
 LABEL="com.usegitai.bg"
 UNIT="git-ai-bg.service"
 
@@ -95,7 +95,7 @@ wait_for() {
 pid_changed_from() { local now; now="$(daemon_pid)"; [ -n "$now" ] && [ "$now" != "$1" ]; }
 
 # Only daemons under this HOME: a developer box may run its own git-ai daemon.
-no_daemon_process() { ! pgrep -f "^$HOME/.*dcc-ai-tracking bg run" >/dev/null; }
+no_daemon_process() { ! pgrep -f "^$HOME/.*git-ai bg run" >/dev/null; }
 
 # `bg shutdown` returns before the old process has released the daemon lock;
 # a login start racing that window would have to retry.
@@ -243,13 +243,13 @@ scenario_lifecycle() {
 scenario_unusual_binary_path() {
   local dir="$HOME/mdm test (weird) 100% 'quoted' ünïcode"
   mkdir -p "$dir"
-  cp "$BIN" "$dir/dcc-ai-tracking"
+  cp "$BIN" "$dir/git-ai"
 
-  run_mdm_script --bin "$dir/dcc-ai-tracking"
+  run_mdm_script --bin "$dir/git-ai"
   registered || fail "login start not registered with unusual --bin"
   wait_for 30 "daemon up from unusual binary path" daemon_up
   case "$(daemon_command_line)" in
-    *"$dir/dcc-ai-tracking"*) log "daemon runs from the unusual path" ;;
+    *"$dir/git-ai"*) log "daemon runs from the unusual path" ;;
     *) fail "daemon command line does not reference $dir: $(daemon_command_line)" ;;
   esac
   mechanism_sane
@@ -319,8 +319,8 @@ scenario_launcher_retry() {
   local fake_dir="$HOME/mdm-fake" attempts="$HOME/mdm-fake/attempts"
   mkdir -p "$fake_dir"
   rm -f "$attempts"
-  write_failing_binary "$fake_dir/dcc-ai-tracking" "$attempts"
-  run_mdm_script --bin "$fake_dir/dcc-ai-tracking" --no-start
+  write_failing_binary "$fake_dir/git-ai" "$attempts"
+  run_mdm_script --bin "$fake_dir/git-ai" --no-start
   trigger_login_expect_failure
   wait_for 45 "persistent launcher failure reported by the login mechanism" mechanism_failed
   [ "$(cat "$attempts")" = 1 ] || fail "launcher should invoke the binary once, got $(cat "$attempts")"

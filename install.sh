@@ -144,7 +144,7 @@ if [ "$(id -u)" = "0" ] && [ "${GIT_AI_ALLOW_SUPERUSER:-}" != "1" ]; then
 
     if [ "$IS_CI_OR_MDM" = "false" ]; then
         echo ""
-        echo -e "${YELLOW}Warning: installing dcc-ai-tracking as root/sudo is not recommended.${NC}"
+        echo -e "${YELLOW}Warning: installing git-ai as root/sudo is not recommended.${NC}"
         echo ""
         echo "Running with elevated privileges creates files owned by root that become"
         echo "inaccessible to your normal user account, causing persistent daemon lock"
@@ -155,7 +155,7 @@ if [ "$(id -u)" = "0" ] && [ "${GIT_AI_ALLOW_SUPERUSER:-}" != "1" ]; then
         echo "  - Set GIT_AI_ALLOW_SUPERUSER=1"
         echo ""
     fi
-    # Propagate to child dcc-ai-tracking invocations (install-hooks, exchange-nonce, login)
+    # Propagate to child git-ai invocations (install-hooks, exchange-nonce, login)
     export GIT_AI_ALLOW_SUPERUSER=1
 fi
 
@@ -191,7 +191,7 @@ case $OS in
 esac
 
 # Determine binary name
-BINARY_NAME="dcc-ai-tracking-${OS}-${ARCH}"
+BINARY_NAME="git-ai-${OS}-${ARCH}"
 
 # Determine release tag
 # Priority: 1. Local binary override, 2. Pinned version (for release builds), 3. Environment variable, 4. "latest"
@@ -212,31 +212,27 @@ else
     DOWNLOAD_URL="https://github.com/${REPO}/releases/latest/download/${BINARY_NAME}"
 fi
 
-# Install into the user's bin directory ~/.dcc-ai-tracking/bin
-INSTALL_DIR="$HOME/.dcc-ai-tracking/bin"
+# Install into the user's bin directory ~/.git-ai/bin
+INSTALL_DIR="$HOME/.git-ai/bin"
 
 if [ "${GIT_AI_NPM_UPGRADE:-}" = "1" ]; then
-    BINARY_NAME="dcc-ai-tracking"
+    BINARY_NAME="git-ai"
     [ -n "${GIT_AI_LOCAL_BINARY:-}" ] || error "npm upgrade requires a verified local binary"
-    OWNER_RECORD="$HOME/.dcc-ai-tracking/dcc-install.json"
-    if [ -e "$OWNER_RECORD" ] || [ -L "$OWNER_RECORD" ]; then
-        error "This installation is managed by DCC"
-    fi
 fi
 
 # Create directory if it doesn't exist
 mkdir -p "$INSTALL_DIR"
 
 # Download and install
-TMP_FILE="${INSTALL_DIR}/dcc-ai-tracking.tmp.$$"
+TMP_FILE="${INSTALL_DIR}/git-ai.tmp.$$"
 if [ -n "${GIT_AI_LOCAL_BINARY:-}" ]; then
-    echo "Using local dcc-ai-tracking binary (release: ${RELEASE_TAG})..."
+    echo "Using local git-ai binary (release: ${RELEASE_TAG})..."
     if [ ! -f "$GIT_AI_LOCAL_BINARY" ]; then
         error "Local binary not found at $GIT_AI_LOCAL_BINARY"
     fi
     cp "$GIT_AI_LOCAL_BINARY" "$TMP_FILE"
 else
-    echo "Downloading dcc-ai-tracking (release: ${RELEASE_TAG})..."
+    echo "Downloading git-ai (release: ${RELEASE_TAG})..."
     if ! curl --fail --location --silent --show-error -o "$TMP_FILE" "$DOWNLOAD_URL"; then
         rm -f "$TMP_FILE" 2>/dev/null || true
         error "Failed to download binary (HTTP error)"
@@ -253,7 +249,7 @@ fi
 verify_checksum "$TMP_FILE" "$BINARY_NAME"
 
 chmod +x "$TMP_FILE"
-mv -f "$TMP_FILE" "${INSTALL_DIR}/dcc-ai-tracking"
+mv -f "$TMP_FILE" "${INSTALL_DIR}/git-ai"
 
 # The upgrade caller owns the daemon restart. First-install actions stay below.
 if [ "${GIT_AI_NPM_UPGRADE:-}" = "1" ]; then
@@ -262,53 +258,53 @@ fi
 
 # Remove quarantine attribute on macOS
 if [ "$OS" = "macos" ]; then
-    xattr -d com.apple.quarantine "${INSTALL_DIR}/dcc-ai-tracking" 2>/dev/null || true
+    xattr -d com.apple.quarantine "${INSTALL_DIR}/git-ai" 2>/dev/null || true
 fi
 
-# Create ~/.local/bin/dcc-ai-tracking symlink for systems where ~/.local/bin is already on PATH
+# Create ~/.local/bin/git-ai symlink for systems where ~/.local/bin is already on PATH
 LOCAL_BIN_DIR="$HOME/.local/bin"
-if mkdir -p "$LOCAL_BIN_DIR" 2>/dev/null && ln -sf "${INSTALL_DIR}/dcc-ai-tracking" "${LOCAL_BIN_DIR}/dcc-ai-tracking" 2>/dev/null; then
-    success "Created symlink at ${LOCAL_BIN_DIR}/dcc-ai-tracking"
+if mkdir -p "$LOCAL_BIN_DIR" 2>/dev/null && ln -sf "${INSTALL_DIR}/git-ai" "${LOCAL_BIN_DIR}/git-ai" 2>/dev/null; then
+    success "Created symlink at ${LOCAL_BIN_DIR}/git-ai"
 else
-    warn "Failed to create ~/.local/bin/dcc-ai-tracking symlink. This is non-fatal."
+    warn "Failed to create ~/.local/bin/git-ai symlink. This is non-fatal."
 fi
 
-success "Successfully installed dcc-ai-tracking into ${INSTALL_DIR}"
-success "You can now run 'dcc-ai-tracking' from your terminal"
+success "Successfully installed git-ai into ${INSTALL_DIR}"
+success "You can now run 'git-ai' from your terminal"
 
 # Print installed version
-INSTALLED_VERSION=$(${INSTALL_DIR}/dcc-ai-tracking --version 2>&1 || echo "unknown")
-echo "Installed dcc-ai-tracking ${INSTALLED_VERSION}"
+INSTALLED_VERSION=$(${INSTALL_DIR}/git-ai --version 2>&1 || echo "unknown")
+echo "Installed git-ai ${INSTALLED_VERSION}"
 
 # Login user with install token if provided
 NEED_LOGIN=false
 if [ -n "${INSTALL_NONCE:-}" ] && [ -n "${API_BASE:-}" ]; then
-    if ! ${INSTALL_DIR}/dcc-ai-tracking exchange-nonce; then
+    if ! ${INSTALL_DIR}/git-ai exchange-nonce; then
         NEED_LOGIN=true
     fi
 fi
 
 echo "Setting up IDE/agent hooks..."
-# --env also adds dcc-ai-tracking to the PATH in all detected shell configurations;
+# --env also adds git-ai to the PATH in all detected shell configurations;
 # GIT_AI_INSTALL_USER lets it hand ownership of any files it creates back to
 # the target user in root/MDM installs.
-if ! GIT_AI_INSTALL_USER="$INSTALL_USER" "${INSTALL_DIR}/dcc-ai-tracking" install-hooks --env; then
-    warn "Warning: Failed to set up IDE/agent hooks. Please try running 'dcc-ai-tracking install-hooks' manually."
+if ! GIT_AI_INSTALL_USER="$INSTALL_USER" "${INSTALL_DIR}/git-ai" install-hooks --env; then
+    warn "Warning: Failed to set up IDE/agent hooks. Please try running 'git-ai install-hooks' manually."
 else
     success "Successfully set up IDE/agent hooks"
 fi
 
 # Fix file ownership when running as root for a different user (MDM deployments)
 if [ "$(id -u)" = "0" ] && [ -n "$INSTALL_USER" ]; then
-    chown -R "$INSTALL_USER" "$HOME/.dcc-ai-tracking" 2>/dev/null || true
+    chown -R "$INSTALL_USER" "$HOME/.git-ai" 2>/dev/null || true
 fi
 
 echo ""
-echo -e "${YELLOW}Close and reopen your terminal and IDE sessions to use dcc-ai-tracking.${NC}"
+echo -e "${YELLOW}Close and reopen your terminal and IDE sessions to use git-ai.${NC}"
 
 # If nonce exchange failed, run interactive login
 if [ "$NEED_LOGIN" = true ]; then
     echo ""
     echo "Launching login..."
-    ${INSTALL_DIR}/dcc-ai-tracking login
+    ${INSTALL_DIR}/git-ai login
 fi

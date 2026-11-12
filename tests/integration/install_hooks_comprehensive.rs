@@ -249,13 +249,13 @@ fn plain_install_hooks_preserves_the_invoking_user_home() {
     let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
     let invoking_home = repo.test_home_path();
     let installed_home = repo.path().join("installed-user");
-    let installed_bin_dir = installed_home.join(".dcc-ai-tracking").join("bin");
+    let installed_bin_dir = installed_home.join(".git-ai").join("bin");
     fs::create_dir_all(&installed_bin_dir).unwrap();
 
     #[cfg(windows)]
-    let installed_binary = installed_bin_dir.join("dcc-ai-tracking.exe");
+    let installed_binary = installed_bin_dir.join("git-ai.exe");
     #[cfg(not(windows))]
-    let installed_binary = installed_bin_dir.join("dcc-ai-tracking");
+    let installed_binary = installed_bin_dir.join("git-ai");
     fs::copy(get_binary_path(), &installed_binary).unwrap();
 
     let test_db = repo.path().join("install-hooks.db");
@@ -283,7 +283,7 @@ fn plain_install_hooks_preserves_the_invoking_user_home() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let invoking_config = fs::read_to_string(invoking_home.join(".dcc-ai-tracking/config.json"))
+    let invoking_config = fs::read_to_string(invoking_home.join(".git-ai/config.json"))
         .expect("install-hooks should update the invoking user's config");
     let invoking_config: serde_json::Value = serde_json::from_str(&invoking_config).unwrap();
     assert_eq!(
@@ -291,7 +291,7 @@ fn plain_install_hooks_preserves_the_invoking_user_home() {
         serde_json::Value::String("package-test-key".to_string())
     );
     assert!(
-        !installed_home.join(".dcc-ai-tracking/config.json").exists(),
+        !installed_home.join(".git-ai/config.json").exists(),
         "plain install-hooks must not retarget config to the binary owner's home"
     );
 }
@@ -315,10 +315,7 @@ fn install_hooks_env_flag_adds_path_to_detected_shell_configs() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let expected_line = format!(
-        "export PATH=\"{}/.dcc-ai-tracking/bin:$PATH\"",
-        home.display()
-    );
+    let expected_line = format!("export PATH=\"{}/.git-ai/bin:$PATH\"", home.display());
     let bashrc = fs::read_to_string(home.join(".bashrc")).unwrap();
     let zshrc = fs::read_to_string(home.join(".zshrc")).unwrap();
     assert!(
@@ -612,26 +609,31 @@ fn test_run_install_hooks_rejects_unknown_args() {
 }
 
 #[test]
-fn standalone_install_hooks_reports_optional_agent_failure() {
+fn install_hooks_reports_agent_failure_according_to_install_mode() {
     let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
     let codex_home = repo.test_home_path().join("codex-broken");
     fs::create_dir_all(&codex_home).unwrap();
     let config_path = codex_home.join("config.toml");
     fs::write(&config_path, "invalid = [").unwrap();
 
-    let output = repo
-        .git_ai_command_without_pre_sync_for_test(
-            &["install-hooks", "--env"],
-            &[("CODEX_HOME", codex_home.to_str().unwrap())],
-        )
-        .output()
-        .unwrap();
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("Failed to parse Codex config.toml"),
-        "{stderr}"
-    );
-    assert!(output.status.success(), "{stderr}");
+    for (flag, success) in [("--env", true), ("--profile=local", false)] {
+        let output = repo
+            .git_ai_command_without_pre_sync_for_test(
+                &["install-hooks", flag],
+                &[("CODEX_HOME", codex_home.to_str().unwrap())],
+            )
+            .env("CLAUDE_CONFIG_DIR", repo.test_home_path().join(".claude"))
+            .env("DSH_HOME", repo.test_home_path().join(".dsh"))
+            .env_remove("GIT_AI_TEST_CONFIG_PATCH")
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("Failed to parse Codex config.toml"),
+            "{stderr}"
+        );
+        assert_eq!(output.status.success(), success, "{stderr}");
+    }
     assert_eq!(fs::read_to_string(&config_path).unwrap(), "invalid = [");
 }
 
@@ -647,14 +649,19 @@ fn standalone_install_hooks_preserves_trace2_conflict_and_installs_hooks() {
     fs::write(&git_config, conflicting_config).unwrap();
     let env = [("CODEX_HOME", codex_home.to_str().unwrap())];
 
-    let managed = repo
-        .git_ai_command_without_pre_sync_for_test(&["install-hooks", "--agents=codex"], &env)
-        .output()
-        .unwrap();
-    let stderr = String::from_utf8_lossy(&managed.stderr);
-    assert!(!managed.status.success(), "{stderr}");
-    assert!(stderr.contains("trace2-conflict"), "{stderr}");
-    assert!(!codex_home.join("hooks.json").exists());
+    let engine_config = repo.test_home_path().join(".git-ai/config.json");
+    let original = fs::read(&engine_config).unwrap();
+    for flag in ["--agents=codex", "--profile=local"] {
+        let managed = repo
+            .git_ai_command_without_pre_sync_for_test(&["install-hooks", flag], &env)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&managed.stderr);
+        assert!(!managed.status.success(), "{stderr}");
+        assert!(stderr.contains("trace2-conflict"), "{stderr}");
+        assert!(!codex_home.join("hooks.json").exists());
+        assert_eq!(fs::read(&engine_config).unwrap(), original);
+    }
 
     let standalone = repo
         .git_ai_command_without_pre_sync_for_test(&["install-hooks", "--env"], &env)
@@ -707,23 +714,47 @@ fn npm_managed_agent_install_cli_isolated() {
 }
 
 #[test]
-fn managed_local_profile_applies_policy_and_preserves_other_config() {
+fn local_profile_applies_policy_and_preserves_other_config() {
     let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
     let codex_home = repo.test_home_path().join("codex-managed");
     fs::create_dir_all(&codex_home).unwrap();
-    let config_dir = repo.test_home_path().join(".dcc-ai-tracking");
+    let codex_config_path = codex_home.join("config.toml");
+    let codex_hooks_path = codex_home.join("hooks.json");
+    fs::write(
+        &codex_config_path,
+        r#"[[hooks.PreToolUse]]
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = "echo user-toml"
+"#,
+    )
+    .unwrap();
+    let user_json = serde_json::json!({
+        "hooks": {"PreToolUse": [{"hooks": [{"type": "command", "command": "echo user-json"}]}]}
+    });
+    fs::write(&codex_hooks_path, serde_json::to_vec(&user_json).unwrap()).unwrap();
+    let config_dir = repo.test_home_path().join(".git-ai");
     fs::create_dir_all(&config_dir).unwrap();
     let config_path = config_dir.join("config.json");
     fs::write(
         &config_path,
-        r#"{"remote_api_enabled":true,"prompt_storage":"notes","custom_attributes":{"team":"test"},"future_setting":{"value":123}}"#,
+        r#"{"remote_api_enabled":true,"prompt_storage":"notes","codex_hooks_format":"hooks_json","custom_attributes":{"team":"test"},"future_setting":{"value":123}}"#,
     )
     .unwrap();
 
+    let env = [("CODEX_HOME", codex_home.to_str().unwrap())];
+    repo.git_ai_with_env(&["install-hooks", "--agents=codex"], &env)
+        .unwrap();
+    assert!(
+        fs::read_to_string(&codex_hooks_path)
+            .unwrap()
+            .contains("checkpoint codex")
+    );
+
     let output = repo
         .git_ai_command_without_pre_sync_for_test(
-            &["install-hooks", "--agents=codex", "--profile=managed-local"],
-            &[("CODEX_HOME", codex_home.to_str().unwrap())],
+            &["install-hooks", "--agents=codex", "--profile=local"],
+            &env,
         )
         .env_remove("GIT_AI_TEST_CONFIG_PATCH")
         .output()
@@ -738,21 +769,200 @@ fn managed_local_profile_applies_policy_and_preserves_other_config() {
     assert!(output.status.success(), "{output:?}");
     let effective: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(effective["remote_api_enabled"], false);
-    assert_eq!(effective["disable_auto_updates"], true);
-    assert_eq!(effective["disable_version_checks"], true);
+    assert_eq!(effective["disable_auto_updates"], false);
+    assert_eq!(effective["disable_version_checks"], false);
     assert_eq!(effective["telemetry_oss_disabled"], true);
     assert_eq!(effective["prompt_storage"], "local");
-    assert_eq!(effective["codex_hooks_format"], "hooks_json");
+    assert_eq!(effective["codex_hooks_format"], "config_toml");
     let written: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&config_path).unwrap()).unwrap();
     assert_eq!(written["custom_attributes"]["team"], "test");
     assert_eq!(written["future_setting"]["value"], 123);
-    assert!(codex_home.join("hooks.json").is_file());
-    assert!(
-        fs::read_to_string(codex_home.join("config.toml"))
-            .unwrap()
-            .contains("trusted_hash")
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&fs::read(codex_hooks_path).unwrap()).unwrap(),
+        user_json
     );
+    let codex_config: toml::Value =
+        toml::from_str(&fs::read_to_string(codex_config_path).unwrap()).unwrap();
+    let groups = codex_config["hooks"]["PreToolUse"].as_array().unwrap();
+    assert_eq!(groups.len(), 2);
+    let user_hooks = groups[0]["hooks"].as_array().unwrap();
+    assert_eq!(user_hooks.len(), 1);
+    assert_eq!(user_hooks[0]["command"].as_str(), Some("echo user-toml"));
+    let git_ai_hooks = groups[1]["hooks"].as_array().unwrap();
+    assert_eq!(git_ai_hooks.len(), 1);
+    assert!(
+        git_ai_hooks[0]["command"]
+            .as_str()
+            .unwrap()
+            .contains("checkpoint codex")
+    );
+    let trust = codex_config["hooks"]["state"].as_table().unwrap();
+    assert!(trust.iter().any(|(key, state)| {
+        key.ends_with("config.toml:pre_tool_use:1:0")
+            && state
+                .get("trusted_hash")
+                .and_then(toml::Value::as_str)
+                .is_some()
+    }));
+}
+
+#[cfg(unix)]
+#[test]
+fn self_install_places_engine_and_hooks_at_the_user_installation() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let home = repo.test_home_path();
+    let mut install = repo.git_ai_command_without_pre_sync_for_test(
+        &["install", "--profile=local", "--if-missing"],
+        &[],
+    );
+    install
+        .env("CODEX_HOME", home.join(".codex"))
+        .env("CLAUDE_CONFIG_DIR", home.join(".claude"))
+        .env("DSH_HOME", home.join(".dsh"))
+        .env_remove("GIT_AI_TEST_CONFIG_PATCH");
+    stub_cursor(&repo, &mut install);
+
+    let output = install.output().unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let executable = home.join(".git-ai/bin/git-ai").canonicalize().unwrap();
+    let installed = Command::new(&executable).arg("--version").output().unwrap();
+    assert!(installed.status.success(), "{installed:?}");
+    let hooks_path = home.join(".cursor/hooks.json");
+    let hooks = fs::read_to_string(&hooks_path).unwrap();
+    assert!(hooks.contains(executable.to_str().unwrap()), "{hooks}");
+
+    fs::remove_file(&hooks_path).unwrap();
+    let output = install.output().unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert!(
+        !hooks_path.exists(),
+        "repeating install must skip hook setup"
+    );
+}
+
+#[test]
+fn self_install_can_retry_after_a_trace2_conflict() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let home = repo.test_home_path();
+    let codex_home = home.join(".codex");
+    fs::create_dir_all(&codex_home).unwrap();
+    let git_config = home.join(".gitconfig");
+    let conflicting_config = "[trace2]\n\teventTarget = 2\n";
+    fs::write(&git_config, conflicting_config).unwrap();
+    let mut install = repo.git_ai_command_without_pre_sync_for_test(
+        &[
+            "install",
+            "--profile=local",
+            "--if-missing",
+            "--agents=codex",
+        ],
+        &[],
+    );
+    install
+        .env("CODEX_HOME", &codex_home)
+        .env_remove("GIT_AI_TEST_CONFIG_PATCH");
+
+    let blocked = install.output().unwrap();
+    assert!(!blocked.status.success(), "{blocked:?}");
+    assert!(String::from_utf8_lossy(&blocked.stderr).contains("trace2-conflict"));
+    assert_eq!(fs::read_to_string(&git_config).unwrap(), conflicting_config);
+
+    fs::remove_file(git_config).unwrap();
+    let retried = install.output().unwrap();
+    assert!(retried.status.success(), "{retried:?}");
+    let config = fs::read_to_string(home.join(".git-ai/config.json")).unwrap();
+    let config: serde_json::Value = serde_json::from_str(&config).unwrap();
+    assert_eq!(config["remote_api_enabled"], false);
+}
+
+#[test]
+fn self_install_preserves_an_independent_installation() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let home = repo.test_home_path();
+    let bin = home.join(".git-ai/bin");
+    fs::create_dir_all(&bin).unwrap();
+    let executable = bin.join(format!("git-ai{}", std::env::consts::EXE_SUFFIX));
+    fs::copy(get_binary_path(), &executable).unwrap();
+    let config = home.join(".git-ai/config.json");
+    let user_config = r#"{"remote_api_enabled":true}"#;
+    fs::write(&config, user_config).unwrap();
+    fs::write(home.join(".gitconfig"), "[trace2]\n\teventTarget = 2\n").unwrap();
+
+    let mut install = repo.git_ai_command_without_pre_sync_for_test(
+        &["install", "--profile=local", "--if-missing"],
+        &[],
+    );
+    let mut dry_run = repo.git_ai_command_without_pre_sync_for_test(
+        &["install", "--profile=local", "--if-missing", "--dry-run"],
+        &[],
+    );
+
+    let preview = dry_run.output().unwrap();
+    assert!(preview.status.success(), "{preview:?}");
+    assert!(!home.join(".git-ai/install.lock").exists());
+
+    let output = install.output().unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let notice = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        notice.contains("Git AI is already installed at"),
+        "{notice}"
+    );
+    assert_eq!(preview.stdout, output.stdout);
+    assert_eq!(fs::read_to_string(config).unwrap(), user_config);
+    assert_eq!(
+        fs::read(executable).unwrap(),
+        fs::read(get_binary_path()).unwrap()
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn local_profile_discovers_agents_and_enables_updates() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let home = repo.test_home_path();
+    let config_dir = home.join(".git-ai");
+    let config_path = config_dir.join("config.json");
+    let codex_home = home.join(".codex");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::create_dir_all(&codex_home).unwrap();
+    fs::write(
+        &config_path,
+        r#"{"remote_api_enabled":true,"disable_auto_updates":true,"disable_version_checks":true,"future_setting":123}"#,
+    )
+    .unwrap();
+
+    let mut command =
+        repo.git_ai_command_without_pre_sync_for_test(&["install-hooks", "--profile=local"], &[]);
+    command
+        .env("CODEX_HOME", &codex_home)
+        .env("CLAUDE_CONFIG_DIR", home.join(".claude"))
+        .env("DSH_HOME", home.join(".dsh"))
+        .env("API_KEY", "installer-env-key")
+        .env_remove("GIT_AI_TEST_CONFIG_PATCH");
+    stub_cursor(&repo, &mut command);
+    let output = command.output().unwrap();
+    assert!(output.status.success(), "{output:?}");
+
+    let config: serde_json::Value =
+        serde_json::from_slice(&fs::read(&config_path).unwrap()).unwrap();
+    assert_eq!(config["remote_api_enabled"], false);
+    assert_eq!(config["disable_auto_updates"], false);
+    assert_eq!(config["disable_version_checks"], false);
+    assert_eq!(config["telemetry_oss"], "off");
+    assert_eq!(config["prompt_storage"], "local");
+    assert_eq!(config["future_setting"], 123);
+    assert!(config.get("api_key").is_none());
+    assert!(
+        fs::read_to_string(home.join(".cursor/hooks.json"))
+            .unwrap()
+            .contains("checkpoint cursor")
+    );
+    assert!(!codex_home.join("hooks.json").exists());
+    let codex_config = fs::read_to_string(codex_home.join("config.toml")).unwrap();
+    assert!(codex_config.contains("checkpoint codex"));
+    assert!(codex_config.contains("trusted_hash"));
 }
 
 #[test]
@@ -842,7 +1052,7 @@ impl Drop for StopDedicatedDaemon<'_> {
 
 #[cfg(unix)]
 #[test]
-fn managed_local_profile_restarts_only_when_policy_changes_and_shutdown_succeeds() {
+fn local_profile_restarts_only_when_policy_changes_and_shutdown_succeeds() {
     let repo = TestRepo::new_dedicated_daemon();
     let _stop = StopDedicatedDaemon(&repo);
     let codex_home = repo.test_home_path().join("codex-managed");
@@ -851,7 +1061,7 @@ fn managed_local_profile_restarts_only_when_policy_changes_and_shutdown_succeeds
     let pid = || git_ai::daemon::read_daemon_pid(&daemon_config).unwrap();
     let install = || {
         repo.git_ai_command_without_pre_sync_for_test(
-            &["install-hooks", "--agents=codex", "--profile=managed-local"],
+            &["install-hooks", "--agents=codex", "--profile=local"],
             &[("CODEX_HOME", codex_home.to_str().unwrap())],
         )
         .env_remove("GIT_AI_TEST_CONFIG_PATCH")
@@ -871,7 +1081,7 @@ fn managed_local_profile_restarts_only_when_policy_changes_and_shutdown_succeeds
     assert!(output.status.success(), "{output:?}");
     assert_eq!(pid(), local_pid);
 
-    let config_path = repo.test_home_path().join(".dcc-ai-tracking/config.json");
+    let config_path = repo.test_home_path().join(".git-ai/config.json");
     let existing = r#"{"remote_api_enabled":true}"#;
     fs::write(&config_path, existing).unwrap();
     fs::remove_file(repo.daemon_control_socket_path()).unwrap();
@@ -1293,11 +1503,11 @@ fn test_hashmap_conversion_stability() {
 #[test]
 fn test_git_hooks_remove_rejects_tracking_directory_and_preserves_other_dcc_hooks() {
     for (relative_path, allowed) in [
-        (".dcc-ai-tracking/hooks", false),
-        (".DCC-AI-TRACKING/hooks", false),
+        (".git-ai/hooks", false),
+        (".GIT-AI/hooks", false),
         (".dcc/custom-hooks", true),
-        (".dcc-ai-tracking-other/hooks", true),
-        ("other/.dcc-ai-tracking/hooks", false),
+        (".git-ai-other/hooks", true),
+        ("other/.git-ai/hooks", false),
     ] {
         let repo = TestRepo::new();
         let managed_hooks = repo.path().join(".git/ai/hooks");

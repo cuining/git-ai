@@ -548,14 +548,13 @@ fn attach_daemon_health(config: &DaemonConfig, output: &mut serde_json::Value) {
         }
         Ok(response) => {
             let error = response.error.unwrap_or_default();
-            let message = if error.contains("invalid control request")
-                && error.contains("status.daemon")
-            {
-                "the running background service predates status.daemon; run `dcc-ai-tracking bg restart`"
+            let message =
+                if error.contains("invalid control request") && error.contains("status.daemon") {
+                    "the running background service predates status.daemon; run `git-ai bg restart`"
                         .to_string()
-            } else {
-                error
-            };
+                } else {
+                    error
+                };
             output["daemon_error"] = serde_json::Value::String(message);
         }
         Err(error) => output["daemon_error"] = serde_json::Value::String(error.to_string()),
@@ -722,12 +721,14 @@ fn shutdown_daemon_if_running(config: &DaemonConfig) -> Result<(), String> {
     })
 }
 
-pub(crate) fn with_stopped_daemon<T>(action: impl FnOnce() -> T) -> Result<T, String> {
+pub(crate) fn with_stopped_daemon(
+    action: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
     let config = daemon_config_from_env_or_default_paths()?;
     shutdown_daemon_if_running(&config)?;
     let _lock = LockFile::try_acquire(&config.lock_path)
-        .ok_or_else(|| "background service started during managed installation".to_string())?;
-    Ok(action())
+        .ok_or_else(|| "background service started while updating configuration".to_string())?;
+    action()
 }
 
 fn daemon_confirmed_stopped(config: &DaemonConfig) -> Result<bool, String> {
@@ -921,14 +922,7 @@ pub(crate) fn restart_daemon(config: &DaemonConfig) -> Result<(), String> {
     ensure_daemon_running(Duration::from_secs(5)).map(|_| ())
 }
 
-pub(crate) fn repair_daemon(restart: bool) -> Result<(), String> {
-    repair_daemon_with_exe(restart, None)
-}
-
-pub(super) fn repair_daemon_with_exe(
-    restart: bool,
-    installed_exe: Option<&Path>,
-) -> Result<(), String> {
+pub(crate) fn repair_daemon(restart: bool, installed_exe: Option<&Path>) -> Result<(), String> {
     let config = daemon_config_from_env_or_default_paths()?;
     if !restart && check_daemon_health(&config).is_ok() {
         return Ok(());
@@ -975,14 +969,14 @@ fn is_help(value: &str) -> bool {
 }
 
 fn print_help() {
-    eprintln!("dcc-ai-tracking bg - run and control git-ai background service");
+    eprintln!("git-ai bg - run and control git-ai background service");
     eprintln!();
     eprintln!("Usage:");
-    eprintln!("  dcc-ai-tracking bg start [--retry-secs <n>]");
-    eprintln!("  dcc-ai-tracking bg run");
-    eprintln!("  dcc-ai-tracking bg status [--repo <path>]");
-    eprintln!("  dcc-ai-tracking bg health");
-    eprintln!("  dcc-ai-tracking bg shutdown [--hard | --if-running]");
-    eprintln!("  dcc-ai-tracking bg restart [--hard]");
-    eprintln!("  dcc-ai-tracking bg tail [-n <lines>] [--full] [-f | --follow]");
+    eprintln!("  git-ai bg start [--retry-secs <n>]");
+    eprintln!("  git-ai bg run");
+    eprintln!("  git-ai bg status [--repo <path>]");
+    eprintln!("  git-ai bg health");
+    eprintln!("  git-ai bg shutdown [--hard | --if-running]");
+    eprintln!("  git-ai bg restart [--hard]");
+    eprintln!("  git-ai bg tail [-n <lines>] [--full] [-f | --follow]");
 }

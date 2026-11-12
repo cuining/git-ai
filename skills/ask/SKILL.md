@@ -2,7 +2,7 @@
 name: ask
 description: "Use this when you are exploring the codebase. It lets you ask the AI who wrote code questions about how things work and why they chose to build things the way they did. Think of it as asking the engineer who wrote the code for help understanding it."
 argument-hint: "[a question to the AI who authored the code you're looking at]"
-allowed-tools: ["Bash(dcc-ai-tracking:*)", "Read", "Glob", "Grep", "Task"]
+allowed-tools: ["Bash(git-ai:*)", "Read", "Glob", "Grep", "Task"]
 ---
 
 # Ask Skill
@@ -51,11 +51,11 @@ The subagent gets **only** `Bash` and `Read`. It does NOT get Glob, Grep, or Tas
 
 ## Choosing Between `blame --show-prompt` and `search`
 
-**If you want to read an entire file or range of lines AND the corresponding prompts behind them, use `dcc-ai-tracking blame --show-prompt`.** This is better than `search` for this use case — it gives you every line's authorship plus the full prompt JSON in one call.
+**If you want to read an entire file or range of lines AND the corresponding prompts behind them, use `git-ai blame --show-prompt`.** This is better than `search` for this use case — it gives you every line's authorship plus the full prompt JSON in one call.
 
 ```
 # Get blame + prompts for a line range (pipe to get prompt dump appended):
-dcc-ai-tracking blame src/commands/blame.rs -L 23,54 --show-prompt | cat
+git-ai blame src/commands/blame.rs -L 23,54 --show-prompt | cat
 
 # Interactive (TTY) mode shows prompt hashes inline:
 # 7a4471d (cursor [abc123e] 2026-02-06 14:20:05 -0800   23)     code_here
@@ -66,7 +66,7 @@ dcc-ai-tracking blame src/commands/blame.rs -L 23,54 --show-prompt | cat
 # [{"type":"user","text":"Write a function..."},{"type":"assistant","text":"Here is..."}]
 ```
 
-Use `dcc-ai-tracking search` when you need to find prompts by **commit**, **keyword**, or when you don't have a specific file/line range in mind.
+Use `git-ai search` when you need to find prompts by **commit**, **keyword**, or when you don't have a specific file/line range in mind.
 
 ## Subagent Prompt Template
 
@@ -84,8 +84,8 @@ LINES: {start}-{end}
 You have exactly 3 steps. Do them in order, then stop.
 
 STEP 1 — Search (one command):
-  Run: dcc-ai-tracking search --file {file_path} --lines {start}-{end} --verbose
-  If no results, try ONE fallback: dcc-ai-tracking search --file {file_path} --verbose
+  Run: git-ai search --file {file_path} --lines {start}-{end} --verbose
+  If no results, try ONE fallback: git-ai search --file {file_path} --verbose
   That's it. Do not run more than 2 git-ai commands total.
 
 STEP 2 — Read the code (one Read call):
@@ -112,7 +112,7 @@ HARD CONSTRAINTS:
 - Do NOT run more than 2 git-ai commands.
 - Do NOT read .claude/, .cursor/, .agents/, or any agent log directories.
 - Do NOT search JSONL transcripts or session logs directly.
-- All conversation data comes from `dcc-ai-tracking search` only.
+- All conversation data comes from `git-ai search` only.
 ```
 
 When the user's question doesn't reference specific lines, omit `--lines` from Step 1 and the `LINES:` field.

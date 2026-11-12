@@ -7,7 +7,7 @@
 That extension emits canonical Pi `before_edit` / `after_edit` checkpoint payloads and runs:
 
 ```bash
-dcc-ai-tracking checkpoint pi --hook-input stdin
+git-ai checkpoint pi --hook-input stdin
 ```
 
 ## Override file

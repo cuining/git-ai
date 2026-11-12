@@ -31,7 +31,7 @@ assert ("SDKROOT" in os.environ) == target.endswith("apple-darwin")
 assert (args[:2] == ["xwin", "build"]) == target.endswith("windows-msvc")
 if target == os.environ.get("FAIL_TARGET"):
     sys.exit(37)
-binary = pathlib.Path(args[args.index("--target-dir") + 1]) / target / "release" / "dcc-ai-tracking"
+binary = pathlib.Path(args[args.index("--target-dir") + 1]) / target / "release" / "git-ai"
 if target.endswith("windows-msvc"):
     assert "target-feature=+crt-static" in os.environ["RUSTFLAGS"]
     binary = binary.with_suffix(".exe")
@@ -109,7 +109,7 @@ class OeNpmBuildTests(unittest.TestCase):
             with self.subTest(platform=platform):
                 package = self.output / platform
                 manifest = json.loads((package / "package.json").read_text())
-                executable = "dcc-ai-tracking.exe" if platform == "win32-x64" else "dcc-ai-tracking"
+                executable = "git-ai.exe" if platform == "win32-x64" else "git-ai"
                 content = (package / "bin" / executable).read_bytes()
                 self.assertEqual(manifest["name"], f"@dcc/git-ai-{platform}")
                 self.assertEqual(manifest["version"], VERSION)
