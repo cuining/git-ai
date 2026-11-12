@@ -1,0 +1,37 @@
+docs/superpowers/specs/2026-06-29-daemon-log-upload-client.md
+  s_268d23c8869b26::t_432fe2e4cb6845 25-26
+src/api/client.rs
+  s_268d23c8869b26::t_5100230ab488a0 294,302
+src/commands/config.rs
+  s_268d23c8869b26::t_3cf375d2d2f171 113-116
+src/commands/install_wsl.rs
+  s_268d23c8869b26::t_13093f1fc0c381 23
+src/commands/upgrade/npm.rs
+  s_268d23c8869b26::t_7b2c1a61b31030 542
+src/config.rs
+  s_268d23c8869b26::t_38e7697d2020e8 19-21,1036-1039,1196-1198
+src/feature_flags.rs
+  s_268d23c8869b26::t_711de0a97f47fc 88-90,142-145
+tests/config_fresh_test.rs
+  s_268d23c8869b26::t_25b14e736fae77 5,208,222,332,338,353
+tests/integration/config_cli_coverage.rs
+  s_268d23c8869b26::t_c0badcb58e1524 110,119,167-208,717-724,726-734
+tests/integration/install_hooks_comprehensive.rs
+  s_268d23c8869b26::t_32ec1e3a8effe7 841
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-dcc.14",
+  "base_commit_sha": "3e52e2f5fcb9d95f401b3d705f905ca48dba2259",
+  "prompts": {},
+  "sessions": {
+    "s_268d23c8869b26": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cfb2-478c-7b20-a801-1446532c7919",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
