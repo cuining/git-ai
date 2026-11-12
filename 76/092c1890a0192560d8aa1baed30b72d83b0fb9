@@ -1,0 +1,31 @@
+src/commands/git_ai_handlers.rs
+  s_85655b3e3c188d::t_a5f58e06c1a4a3 386
+tests/integration/install_hooks_comprehensive.rs
+  s_85655b3e3c188d::t_314cf21cc73b34 811,829-832,834-855,857-891,893-902
+  s_85655b3e3c188d::t_20824f4ce761e9 812-828,833,903-904
+  s_85655b3e3c188d::t_ebd30f048a48b8 810,856,892
+Cargo.toml
+  s_85655b3e3c188d::t_a5f58e06c1a4a3 45
+src/commands/install_hooks.rs
+  s_85655b3e3c188d::t_a5f58e06c1a4a3 8,11-12,33,312-317,322,336-340,375-428,471-474,489-492,512,550,604-608,1391-1392
+src/commands/daemon.rs
+  s_85655b3e3c188d::t_a5f58e06c1a4a3 925,931
+Cargo.lock
+  s_85655b3e3c188d::t_b8ce006ddeb962 1102
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-dcc.11",
+  "base_commit_sha": "76092c1890a0192560d8aa1baed30b72d83b0fb9",
+  "prompts": {},
+  "sessions": {
+    "s_85655b3e3c188d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1caa0-3eaf-7e32-abd3-1c5dacb03dd8",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}

@@ -1,0 +1,21 @@
+src/daemon.rs
+  s_c9044ad8be93d0::t_90e7a20332a1ee 1383-1405,7648-7656
+tests/notes_sync_regression.rs
+  s_c9044ad8be93d0::t_681bf747bba830 7,600-655
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-dcc.11",
+  "base_commit_sha": "6cbcf0401c1e025735199f3b87017e822d40f0e4",
+  "prompts": {},
+  "sessions": {
+    "s_c9044ad8be93d0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c973-e7a1-7ea2-8472-f0321c82f5e2",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}

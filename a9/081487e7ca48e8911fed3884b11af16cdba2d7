@@ -1,0 +1,332 @@
+agent-support/visualstudio/README.md
+  s_d4dbfca73d81be::t_f06193501bf04f 10
+.github/workflows/install-scripts-nightly.yml
+  s_d4dbfca73d81be::t_f06193501bf04f 32,52,57-58,80,105,122-123
+src/authorship/post_commit.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 570
+agent-support/deepseek-harness/test/plugin.spec.ts
+  s_d4dbfca73d81be::t_f06193501bf04f 135
+  s_d4dbfca73d81be::t_c894de38069c8f 139-142,144,156
+agent-support/vscode/src/utils/host-kind.ts
+  s_d4dbfca73d81be::t_f06193501bf04f 29
+.github/workflows/release.yml
+  s_d4dbfca73d81be::t_f06193501bf04f 67-70,72-76,123,168,170,174,182,187,192,201,206,267-268,342-343,347,355,368-369,394-395,400-401,412-414,429,443,448,463,485-486,510,516,524-525,549,571,577,619-621,623,625-627,655,675,681,684-685,754,756,768,782-785,837,846,857,911-914,919,925,964-974,977-980,990,993,1115,1134
+.github/workflows/git-core-compat.yml
+  s_d4dbfca73d81be::t_f06193501bf04f 128,136
+.github/workflows/mdm-login-start.yml
+  s_d4dbfca73d81be::t_f06193501bf04f 56,79,109,115
+scripts/dev.ps1
+  s_d4dbfca73d81be::t_f06193501bf04f 10-12,88,125,135
+scripts/benchmarks/git/benchmark_nasty_rebases.sh
+  s_d4dbfca73d81be::t_f06193501bf04f 21,65,69,111,114
+src/commands/config.rs
+  s_d4dbfca73d81be::t_269e5e6cc1a40a 96,156
+  s_d4dbfca73d81be::t_f06193501bf04f 89,92-95,97,151-155,157-167,195-196,204,219,225,234,239,242
+tests/config_fresh_test.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 90,126,153,199,240,270,300,338,388,442
+tests/integration/bash_tool_benchmark.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 53-54
+src/commands/install_wsl.sh
+  s_d4dbfca73d81be::t_f06193501bf04f 9,13,37,39-41,49
+src/mdm/agents/amp.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 218
+  s_d4dbfca73d81be::t_269e5e6cc1a40a 223
+scripts/stage-oe-npm.py
+  s_d4dbfca73d81be::t_f06193501bf04f 24
+tests/integration/untraced_commit_fixup.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 686
+src/metrics/db.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 278
+  s_d4dbfca73d81be::t_269e5e6cc1a40a 3304
+agent-support/pi/README.md
+  s_d4dbfca73d81be::t_f06193501bf04f 10
+scripts/test-stage-oe-npm.py
+  s_d4dbfca73d81be::t_f06193501bf04f 31,66,105
+src/commands/logout.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 3
+src/mdm/agents/firebender.rs
+  s_d4dbfca73d81be::t_269e5e6cc1a40a 21
+src/commands/log.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 676,833,838
+  s_d4dbfca73d81be::t_269e5e6cc1a40a 355
+tests/git-compat/run-core-tests.py
+  s_d4dbfca73d81be::t_f06193501bf04f 26,74,100,442
+flake.nix
+  s_d4dbfca73d81be::t_f06193501bf04f 36,78,84,86,89,92,99,107,110,113,120,122,177-178,205,213,221-222,225,231,244,267,274,293,419,691-692,696-699,704,706,771,1011,1044
+agent-support/deepseek-harness/README.md
+  s_d4dbfca73d81be::t_f06193501bf04f 7,10-11,14,35,53
+.github/ISSUE_TEMPLATE/bug_report.yml
+  s_d4dbfca73d81be::t_f06193501bf04f 2,44-45,48-49
+agent-support/vscode/README.md
+  s_d4dbfca73d81be::t_f06193501bf04f 3,10,16,35
+packaging/README.md
+  s_d4dbfca73d81be::t_10529e049b680f 50-53
+  s_d4dbfca73d81be::t_f06193501bf04f 15,17-18,95,98,107,111,116-117,123
+  s_d4dbfca73d81be::t_3c793d6d363bcf 36
+mdm/macos/install-login-start.sh
+  s_d4dbfca73d81be::t_f06193501bf04f 2,33,119,134,140
+scripts/build-oe-npm.py
+  s_d4dbfca73d81be::t_f06193501bf04f 105,108
+agent-support/vscode/src/extension.ts
+  s_d4dbfca73d81be::t_f06193501bf04f 16,25
+scripts/nightly/start-async-daemon.sh
+  s_d4dbfca73d81be::t_f06193501bf04f 7,41,44
+skills/prompt-analysis/SKILL.md
+  s_d4dbfca73d81be::t_f06193501bf04f 5,33,37,63,72-73,78,82,84,88,96,101,106,108,112,115,127-128,133,148,170-171,176,192,203-205,210,224,235-237,242,256,277-279,284,301,329-331,333-334,339,362,386-389,394,437,581
+src/mdm/agents/codex.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 113-114,1104-1106,1133,1177,1663
+scripts/pack-npm.py
+  s_d4dbfca73d81be::t_f06193501bf04f 1,55
+tests/daemon_mode.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 72,76,8544,8652,8713,8871,8925
+src/commands/notes_migrate.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 1,21,35,45,50,74,400,402,415
+  s_d4dbfca73d81be::t_269e5e6cc1a40a 84
+docs/bash-attribution-recovery-plan.md
+  s_d4dbfca73d81be::t_f06193501bf04f 32
+src/commands/await.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 23,139
+src/notes/mod.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 3
+skills/git-ai-search/SKILL.md
+  s_d4dbfca73d81be::t_f06193501bf04f 5,10,23-31,41,44,47,56,59,62,71,74,77,80,94,100,109,112,115,124-125,128,137,140,143,147,156,161,184,189,211,216,305,315,320,330,333,342,345,361,364,367,374,377,384,387
+src/commands/git_handlers.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 260,288
+src/streams/mod.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 23
+agent-support/visualstudio/src/GitAiVS/Services/BinaryResolver.cs
+  s_d4dbfca73d81be::t_f06193501bf04f 9,11,44,77-78,105-106
+install.sh
+  s_d4dbfca73d81be::t_f06193501bf04f 147,158,194,215-216,219,227,229,235,252,261,264,266-267,269,272-273,276-277,282,288,291-292,299,303,309
+src/commands/install_env.rs
+  s_d4dbfca73d81be::t_269e5e6cc1a40a 945,972
+  s_d4dbfca73d81be::t_f06193501bf04f 625,716,960-961,964-965,973,980-981,984-985,993-994,1004-1005,1040,1062
+tests/notes_sync_regression.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 478,1170
+docs/telemetry-examples.md
+  s_d4dbfca73d81be::t_f06193501bf04f 3,204
+src/commands/analyze/sessions.rs
+  s_d4dbfca73d81be::t_269e5e6cc1a40a 422
+  s_d4dbfca73d81be::t_f06193501bf04f 1,192,588,606,811,1327,1366,1388,1391,1405,1408,1460,1482,1484,1497,1506-1508,1513,1515,1520,1522
+agent-support/vscode/src/ai-edit-manager.ts
+  s_d4dbfca73d81be::t_f06193501bf04f 469-470,473,482-483,486,503
+agent-support/intellij/src/main/kotlin/org/jetbrains/plugins/template/services/TelemetryService.kt
+  s_d4dbfca73d81be::t_f06193501bf04f 218,231
+packaging/macos/scripts/postinstall
+  s_d4dbfca73d81be::t_f06193501bf04f 10,19,29,31,37
+src/main.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 6,49,58,76,96
+  s_d4dbfca73d81be::t_269e5e6cc1a40a 73
+tests/async_mode.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 83
+install.ps1
+  s_d4dbfca73d81be::t_f06193501bf04f 9,11,18,100,124,145,265,342,353,357-358,361-362,392,417,419,423,463,486-487,489
+  s_d4dbfca73d81be::t_10529e049b680f 268-269
+agent-support/vscode/src/utils/binary-path.ts
+  s_d4dbfca73d81be::t_f06193501bf04f 7,75
+packaging/windows/git-ai.wxs
+  s_d4dbfca73d81be::t_f06193501bf04f 22,28
+src/notes/db.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 1,949,959
+  s_d4dbfca73d81be::t_269e5e6cc1a40a 958
+scripts/test-build-oe-npm.py
+  s_d4dbfca73d81be::t_f06193501bf04f 34,112
+mdm/linux/install-login-start.sh
+  s_d4dbfca73d81be::t_f06193501bf04f 2,16,32,121-122
+src/commands/upgrade/npm.rs
+  s_d4dbfca73d81be::t_37fa2131dd54b5 21,24-25,27,31-32,230
+  s_d4dbfca73d81be::t_4f76d0d416db45 363,365-366,368-369
+  s_d4dbfca73d81be::t_f06193501bf04f 11,70,72,172,178,379,386,439,488
+Taskfile.yml
+  s_d4dbfca73d81be::t_f06193501bf04f 35
+tests/windows_install_script.rs
+  s_d4dbfca73d81be::t_269e5e6cc1a40a 404
+  s_d4dbfca73d81be::t_f06193501bf04f 29,31,36,57,67,286,350,402,465,469,505
+  s_d4dbfca73d81be::t_37bb1308cbb463 410,434,439-440,444-445
+src/ci/workflow_templates/github.yaml
+  s_d4dbfca73d81be::t_f06193501bf04f 15,21-23,28
+src/commands/daemon.rs
+  s_d4dbfca73d81be::t_0739f714a54b8d 724-726,730-731,931
+  s_d4dbfca73d81be::t_269e5e6cc1a40a 551-553,555-557
+  s_d4dbfca73d81be::t_f06193501bf04f 972,975-981
+src/commands/diff.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 207-208
+agent-support/intellij/src/main/kotlin/org/jetbrains/plugins/template/services/GitAiService.kt
+  s_d4dbfca73d81be::t_f06193501bf04f 69,74,76,94-95,123,125,184
+src/commands/install_hooks.rs
+  s_d4dbfca73d81be::t_81b49e9241fd7e 34,37,412-413,957,961-963
+  s_d4dbfca73d81be::t_f06193501bf04f 1139,1150,1218,1223,1280
+  s_d4dbfca73d81be::t_269e5e6cc1a40a 905,1609,1614
+  s_d4dbfca73d81be::t_0739f714a54b8d 5,31,35-36,310,314,364,367-368,390,395-396,401,409-410,422-427,433-434,441-442,454,478,517,524,527,529,695,782,861-863,889,953
+  s_d4dbfca73d81be::t_13be38f381fe49 32-33
+tests/integration/debug_diagnostics.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 53
+scripts/benchmarks/commit/benchmark_commit_mostly_human_few_ai.py
+  s_d4dbfca73d81be::t_f06193501bf04f 98,102-103,370
+src/mdm/agents/opencode.rs
+  s_d4dbfca73d81be::t_269e5e6cc1a40a 389
+  s_d4dbfca73d81be::t_f06193501bf04f 383
+src/commands/exchange_nonce.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 5,8,15
+src/diagnostics.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 1314
+scripts/nightly/verify-synthetic-attribution.sh
+  s_d4dbfca73d81be::t_f06193501bf04f 10,12,89,106,108-109,133,135,144-145,147,149,152
+src/commands/upgrade.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 117,130,179,672,731,795,861,869,943,1470-1471,1477,1481,1492,1497
+  s_d4dbfca73d81be::t_37fa2131dd54b5 543,559,580,1013,1082
+src/commands/fetch_notes.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 42,81,196,205-207
+  s_d4dbfca73d81be::t_269e5e6cc1a40a 194
+scripts/nightly/test-synthetic-checkpoint.sh
+  s_d4dbfca73d81be::t_f06193501bf04f 52-53,70
+scripts/nightly/verify-attribution.sh
+  s_d4dbfca73d81be::t_f06193501bf04f 13,157-158,160,164,166,169,172
+scripts/test-pack-npm.py
+  s_d4dbfca73d81be::t_4f76d0d416db45 24,48,61-62,81,91,106
+build.sh
+  s_d4dbfca73d81be::t_f06193501bf04f 82,99
+tests/integration/config_cli_coverage.rs
+  s_d4dbfca73d81be::t_269e5e6cc1a40a 466
+  s_d4dbfca73d81be::t_f06193501bf04f 6,23,25,40,64,93,98-99,107
+scripts/benchmarks/checkpoint/benchmark_human_non_ai_checkpoint.py
+  s_d4dbfca73d81be::t_f06193501bf04f 59-60,66-68,278
+.github/workflows/nightly-agent-integration.yml
+  s_d4dbfca73d81be::t_f06193501bf04f 218,220,225,249,325,327,332,363
+agent-support/deepseek-harness/git-ai.mjs
+  s_d4dbfca73d81be::t_f06193501bf04f 11,46
+src/commands/reingest.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 84,198-200,297
+tests/integration/repos/test_repo.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 3657,3660,3678,3680,4055,4057
+  s_d4dbfca73d81be::t_269e5e6cc1a40a 537,543,549,3721,3726,3731,4034
+src/mdm/skills_installer.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 118,122,155,164,172,182,199,324
+README-nix.md
+  s_d4dbfca73d81be::t_f06193501bf04f 24,73,81,218,226
+scripts/benchmarks/git/test_daemon_runtime.py
+  s_d4dbfca73d81be::t_f06193501bf04f 17,61,87
+src/commands/analyze/mod.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 1,39,122,207,231,235,244,250,274,289-291,293,301
+scripts/mdm/test-login-start.ps1
+  s_d4dbfca73d81be::t_f06193501bf04f 24-25,83,145,203,205
+tests/mdm_scripts.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 3,71,187-189,201
+src/daemon.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 405
+CONTRIBUTING.md
+  s_d4dbfca73d81be::t_f06193501bf04f 36,42,46,55,58,61-62
+packaging/macos/build-pkg.sh
+  s_d4dbfca73d81be::t_f06193501bf04f 43
+src/commands/debug.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 54,57-58,107,118
+src/authorship/internal_db.rs
+  s_d4dbfca73d81be::t_269e5e6cc1a40a 621
+  s_d4dbfca73d81be::t_f06193501bf04f 174
+src/commands/usage.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 1,67,77,93,188,190
+src/utils.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 19,21,280,572,574,589,613,615,628
+tests/integration/commit_post_stats_benchmark.rs
+  s_d4dbfca73d81be::t_269e5e6cc1a40a 201-202
+docs/telemetry-streams-summary.md
+  s_d4dbfca73d81be::t_f06193501bf04f 83,86,89,92
+scripts/benchmarks/git/benchmark_nasty_modes_vs_main.py
+  s_d4dbfca73d81be::t_f06193501bf04f 165,225
+src/mdm/utils.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 706,904,907,1270,1273,1301,1305,1323,1340
+  s_d4dbfca73d81be::t_269e5e6cc1a40a 538
+src/config.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 1541,1569,1576,1584,1590,1596,1604,1641,2712,2728,2731,2740
+  s_d4dbfca73d81be::t_269e5e6cc1a40a 1740,1754-1765
+src/commands/analyze/cube.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 1,6,46
+src/commands/install_wsl.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 1,72,83,88,313
+  s_d4dbfca73d81be::t_269e5e6cc1a40a 188
+  s_d4dbfca73d81be::t_37fa2131dd54b5 336,343-346
+tests/integration/install_hooks_comprehensive.rs
+  s_d4dbfca73d81be::t_87da5ee996d201 612,620-636,652-653,655-664
+  s_d4dbfca73d81be::t_f06193501bf04f 252,256,258,286,294,721,732,748-749,765-814,902,911,931,1353-1354,1356-1357
+  s_d4dbfca73d81be::t_269e5e6cc1a40a 318
+  s_d4dbfca73d81be::t_ab67937299ee65 619,654,717
+tests/integration/streams_e2e.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 840
+src/mdm/agents/claude_code.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 1184,1209,1216,1221
+src/commands/ci_handlers.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 387,397,417,438,450
+scripts/mdm/test-login-start.sh
+  s_d4dbfca73d81be::t_f06193501bf04f 29-30,98,246,248,252,322-323
+scripts/repro_runaway_memory.py
+  s_d4dbfca73d81be::t_f06193501bf04f 367-368,420
+skills/ask/SKILL.md
+  s_d4dbfca73d81be::t_f06193501bf04f 5,54,58,69,87-88,115
+AGENTS.md
+  s_d4dbfca73d81be::t_f06193501bf04f 21,58,63-66,88,240
+src/commands/whoami.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 67,271,274-275
+src/metrics/model_pricing.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 7
+src/mdm/agents/github_copilot.rs
+  s_d4dbfca73d81be::t_269e5e6cc1a40a 36
+  s_d4dbfca73d81be::t_f06193501bf04f 483,496,502,522,529,541,559,575
+Cargo.toml
+  s_d4dbfca73d81be::t_f06193501bf04f 3,5
+.github/workflows/install-scripts-local.yml
+  s_d4dbfca73d81be::t_f06193501bf04f 68,86,94,96,107-108,126-128,132,145,151,153,157,160,162,184-185,224,247,264-265,292-293,324-325,335,355-356,397-398,526-527
+scripts/benchmarks/git/benchmark_modes_vs_main.py
+  s_d4dbfca73d81be::t_f06193501bf04f 228,274
+scripts/dev.sh
+  s_d4dbfca73d81be::t_f06193501bf04f 48-49,64,70-74,78
+README.md
+  s_d4dbfca73d81be::t_f06193501bf04f 20,37,94-95,127,174,193
+src/token_usage/db.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 3
+src/commands/login.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 3,11
+src/commands/git_ai_handlers.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 258,260,265,269,295,297,320,322,375,405,1129
+  s_d4dbfca73d81be::t_269e5e6cc1a40a 307,470,727
+mdm/README.md
+  s_d4dbfca73d81be::t_f06193501bf04f 5,10-12,15,20,38,62,80,85,93,97-98,104,114
+agent-support/visualstudio/DESIGN.md
+  s_d4dbfca73d81be::t_f06193501bf04f 10,90,163-165
+agent-support/intellij/README.md
+  s_d4dbfca73d81be::t_f06193501bf04f 22
+packaging/windows/build-msi.ps1
+  s_d4dbfca73d81be::t_f06193501bf04f 18
+docs/token-usage-events-spec.md
+  s_d4dbfca73d81be::t_f06193501bf04f 55
+tests/integration/token_usage.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 714
+src/mdm/agents/cursor.rs
+  s_d4dbfca73d81be::t_269e5e6cc1a40a 29
+  s_d4dbfca73d81be::t_f06193501bf04f 543
+mdm/windows/install-login-start.ps1
+  s_d4dbfca73d81be::t_f06193501bf04f 1,18,20,39
+tests/integration/checkpoint_debug_log.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 18,50,76
+src/ci/workflow_templates/gitlab.yaml
+  s_d4dbfca73d81be::t_f06193501bf04f 3,26-28,33
+src/commands/status.rs
+  s_d4dbfca73d81be::t_f06193501bf04f 92
+Cargo.lock
+  s_d4dbfca73d81be::t_b80579a1001cb3 1069
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-dcc.11",
+  "base_commit_sha": "a9081487e7ca48e8911fed3884b11af16cdba2d7",
+  "prompts": {},
+  "sessions": {
+    "s_d4dbfca73d81be": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c948-f0e7-7191-aa23-bf2ebb24de21",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}

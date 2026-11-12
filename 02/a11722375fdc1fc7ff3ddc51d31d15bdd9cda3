@@ -1,0 +1,31 @@
+Cargo.toml
+  s_d4dbfca73d81be::t_255ec6b9b8c4dd 50-52
+src/commands/git_ai_handlers.rs
+  s_d4dbfca73d81be::t_ba244fe6acc9a4 47,105-111,385-388
+src/daemon.rs
+  s_d4dbfca73d81be::t_fa9408040ed3eb 64-65,10770-10778,10975-10979
+src/daemon/claude_trace2_relay.rs
+  s_d4dbfca73d81be::t_d6234c538ac033 1-341
+src/mdm/utils.rs
+  s_d4dbfca73d81be::t_99a6ce166c91d1 487-494
+tests/integration/claude_trace2_relay.rs
+  s_d4dbfca73d81be::t_335a7c93343cfc 1-236
+tests/integration/main.rs
+  s_d4dbfca73d81be::t_ce79bf75221448 43-44
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-dcc.11",
+  "base_commit_sha": "02a11722375fdc1fc7ff3ddc51d31d15bdd9cda3",
+  "prompts": {},
+  "sessions": {
+    "s_d4dbfca73d81be": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c948-f0e7-7191-aa23-bf2ebb24de21",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}

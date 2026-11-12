@@ -1,0 +1,14 @@
+.github/workflows/managed-install-ci-probe.yml
+  h_e26e3d7eeaef56 1,11,13,15,17,24,29,33-34
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-dcc.11",
+  "base_commit_sha": "0f78b8ed592d7caaf97e6c570f83b10856994c46",
+  "prompts": {},
+  "humans": {
+    "h_e26e3d7eeaef56": {
+      "author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}

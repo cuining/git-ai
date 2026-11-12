@@ -1,0 +1,23 @@
+src/commands/install_hooks.rs
+  s_1061fb934135e8::t_d1ffbbe4e8fe56 371,399
+src/mdm/agents/codex.rs
+  s_1061fb934135e8::t_d1ffbbe4e8fe56 285-295,304-309,311-321,323,326-331,347,349
+tests/integration/install_hooks_comprehensive.rs
+  s_1061fb934135e8::t_c087e372b884d8 721-735,741,745-753,757,776,781-793,795-796,798,800-807,852-855
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-dcc.11",
+  "base_commit_sha": "ad732cc96992a7ed18c71bc9f51738f83c4c0767",
+  "prompts": {},
+  "sessions": {
+    "s_1061fb934135e8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cae9-d725-7422-a833-7a2af290a2c5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}

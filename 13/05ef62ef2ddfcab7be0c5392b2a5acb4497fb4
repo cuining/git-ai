@@ -1,0 +1,19 @@
+tests/integration/managed_install.rs
+  s_c9044ad8be93d0::t_c00d6cc0b1ce0e 341-342,348-350,356,359-362
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-dcc.11",
+  "base_commit_sha": "1305ef62ef2ddfcab7be0c5392b2a5acb4497fb4",
+  "prompts": {},
+  "sessions": {
+    "s_c9044ad8be93d0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c973-e7a1-7ea2-8472-f0321c82f5e2",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}

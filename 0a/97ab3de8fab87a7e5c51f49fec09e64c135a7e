@@ -1,0 +1,28 @@
+src/commands/upgrade/npm.rs
+  s_c742b5412a70e1::t_5c53b87e6d21a4 8-10
+  s_c742b5412a70e1::t_64dd5f23aeb889 268-273,281-283,288-292,298-300,305,312-316,319-324,326-329,331-332,511
+  s_c742b5412a70e1::t_3affc8a9f55690 293-297
+  s_c742b5412a70e1::t_ccd019b23dbf5f 496,505,508-510
+  s_c742b5412a70e1::t_fafc9a6f2ba3fd 333
+  s_c742b5412a70e1::t_896aec013bca06 342
+src/commands/upgrade.rs
+  s_c742b5412a70e1::t_3e07bbd8721bda 582-584
+src/commands/daemon.rs
+  s_c742b5412a70e1::t_946edf6b84ec26 930-938
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "0a97ab3de8fab87a7e5c51f49fec09e64c135a7e",
+  "prompts": {},
+  "sessions": {
+    "s_c742b5412a70e1": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "99121b93-53e9-46a3-b8a0-c97841b936df",
+        "model": "grok-4.7"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}

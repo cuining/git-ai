@@ -1,0 +1,21 @@
+build.sh
+  s_d61d509046732f::t_0834d88181e222 84,106
+packaging/README.md
+  s_d61d509046732f::t_0834d88181e222 94-97
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.7-dcc.4",
+  "base_commit_sha": "a350abb9ce054d775d575223498e4127c22889ad",
+  "prompts": {},
+  "sessions": {
+    "s_d61d509046732f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c5a4-1b18-78d2-a32b-5a8c54727ccf",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
