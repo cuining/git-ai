@@ -1,11 +1,13 @@
 use crate::authorship::ignore::effective_ignore_patterns;
 use crate::authorship::internal_db::InternalDatabase;
 use crate::authorship::range_authorship;
-use crate::authorship::stats::stats_command;
+use crate::authorship::stats::{commit_summaries, stats_command};
 use crate::commands;
 use crate::config;
+use crate::error::GitAiError;
 use crate::git::find_repository;
 use crate::git::find_repository_in_path;
+use crate::git::repo_state::is_valid_git_oid;
 use crate::git::repository::{CommitRange, Repository};
 use crate::git::sync_authorship::{NotesExistence, fetch_authorship_notes, push_authorship_notes};
 use crate::observability::log_message;
@@ -25,6 +27,14 @@ pub fn handle_git_ai(args: &[String]) {
 
     if args.is_empty() {
         print_help();
+        return;
+    }
+
+    if args[0] == "stats" && args[1..].iter().any(|arg| arg == "--commits-stdin") {
+        if let Err(error) = handle_commit_summaries(&args[1..]) {
+            eprintln!("Commit summaries failed: {error}");
+            std::process::exit(1);
+        }
         return;
     }
 
@@ -349,6 +359,9 @@ fn print_help() {
     );
     eprintln!("  stats [commit]     Show AI authorship statistics for a commit");
     eprintln!("    --json                 Output in JSON format");
+    eprintln!(
+        "    --commits-stdin --json  Summarize up to 500 full commit hashes read one per line"
+    );
     eprintln!("  usage              Show local AI usage statistics");
     eprintln!("    --period <1d|3d|7d|30d>  Time window (default: 30d)");
     eprintln!("    --json                 Output in JSON format");
@@ -969,6 +982,41 @@ fn handle_ai_diff(args: &[String]) {
         eprintln!("Diff failed: {}", e);
         std::process::exit(1);
     }
+}
+
+fn handle_commit_summaries(args: &[String]) -> Result<(), GitAiError> {
+    if args.len() != 2 || !args.iter().any(|arg| arg == "--json") {
+        return Err(GitAiError::Generic(
+            "Usage: git-ai stats --commits-stdin --json".into(),
+        ));
+    }
+    const MAX_COMMITS: usize = 500;
+    const MAX_INPUT_BYTES: usize = MAX_COMMITS * (64 + 2);
+    let mut input = String::new();
+    std::io::stdin()
+        .take(MAX_INPUT_BYTES as u64 + 1)
+        .read_to_string(&mut input)?;
+    if input.len() > MAX_INPUT_BYTES || input.lines().count() > MAX_COMMITS {
+        return Err(GitAiError::Generic(format!(
+            "Expected at most {MAX_COMMITS} commit hashes"
+        )));
+    }
+    let commits = input
+        .lines()
+        .map(|line| {
+            is_valid_git_oid(line)
+                .then(|| line.to_ascii_lowercase())
+                .ok_or_else(|| {
+                    GitAiError::Generic("Expected a full commit hash on each line".into())
+                })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let repo = find_repository(&[])?;
+    println!(
+        "{}",
+        serde_json::to_string(&commit_summaries(&repo, &commits)?)?
+    );
+    Ok(())
 }
 
 fn handle_stats(args: &[String]) {
