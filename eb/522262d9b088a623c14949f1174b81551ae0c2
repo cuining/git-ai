@@ -1,0 +1,20 @@
+src/commands/upgrade/npm.rs
+  s_6111a7c46defbd::t_95d847f78d8322 1,4,110,271-280,355,520
+  s_6111a7c46defbd::t_1f98f4d5a5233a 499,502-519,521,523-527
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "eb522262d9b088a623c14949f1174b81551ae0c2",
+  "prompts": {},
+  "sessions": {
+    "s_6111a7c46defbd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cee1-1a71-71f3-9a98-c7d76eada852",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
