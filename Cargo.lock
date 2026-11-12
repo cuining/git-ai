@@ -1066,7 +1066,7 @@ dependencies = [
 
 [[package]]
 name = "git-ai"
-version = "1.7.7-dcc.13"
+version = "1.7.7-dcc.14"
 dependencies = [
  "base64",
  "chrono",
