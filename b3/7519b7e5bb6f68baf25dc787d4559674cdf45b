@@ -1,0 +1,24 @@
+src/commands/install_hooks.rs
+  s_88c5eab69e8590::t_0da8fe18f5e1f5 200,204,263,270,272-277,280,283-300,302-306,308-313,315-330,448,493,509,522,1264,1272-1285,1287-1289
+tests/integration/install_hooks_comprehensive.rs
+  s_88c5eab69e8590::t_e7488b6e7af8c8 804,808-816
+  s_88c5eab69e8590::t_34eff4d99fff77 10,641,648-652,663-679,779,786,789,797,806
+  s_88c5eab69e8590::t_0da8fe18f5e1f5 827-829,841
+  s_88c5eab69e8590::t_1185688307d72c 801
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.7-dcc.14",
+  "base_commit_sha": "b37519b7e5bb6f68baf25dc787d4559674cdf45b",
+  "prompts": {},
+  "sessions": {
+    "s_88c5eab69e8590": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cfe9-71b9-7db1-b087-20afcaca8fbd",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
