@@ -197,11 +197,11 @@ fn find_running_pids(process_names: &[&str]) -> Vec<(u32, String)> {
     results
 }
 
-fn set_global_git_config_value(git_cmd: &str, key: &str, value: &str) -> Result<(), GitAiError> {
+fn add_global_git_config_value(git_cmd: &str, key: &str, value: &str) -> Result<(), GitAiError> {
     let mut command = Command::new(git_cmd);
     command
         .current_dir(crate::mdm::utils::home_dir())
-        .args(["config", "--global", key, value])
+        .args(["config", "--global", "--add", key, value])
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     crate::git::repository::apply_internal_git_env(&mut command);
@@ -238,6 +238,8 @@ fn global_git_config_values(git_cmd: &str, key: &str) -> Result<Vec<String>, Git
     command.current_dir(crate::mdm::utils::home_dir()).args([
         "config",
         "--global",
+        "--includes",
+        "--null",
         "--get-all",
         key,
     ]);
@@ -253,36 +255,57 @@ fn global_git_config_values(git_cmd: &str, key: &str) -> Result<Vec<String>, Git
         )));
     }
     Ok(String::from_utf8_lossy(&output.stdout)
-        .lines()
+        .split_terminator('\0')
         .map(str::to_owned)
         .collect())
 }
 
-fn configure_daemon_trace2(dry_run: bool) -> Result<(), GitAiError> {
-    let runtime_config = config::Config::fresh();
+fn trace2_conflict(key: &str) -> GitAiError {
+    GitAiError::Generic(format!(
+        "trace2-conflict: global Git config key '{key}' is already configured"
+    ))
+}
+
+fn missing_trace2_config(git_cmd: &str) -> Result<Vec<(&'static str, String)>, GitAiError> {
     let daemon_config = DaemonConfig::from_env_or_default_paths()?;
     let event_target = daemon_config.trace2_event_target();
     let required = [
-        (TRACE2_EVENT_TARGET_KEY, event_target.as_str()),
         (TRACE2_EVENT_NESTING_KEY, TRACE2_EVENT_NESTING_VALUE),
+        (TRACE2_EVENT_TARGET_KEY, event_target.as_str()),
     ];
     // Check both keys before changing either. Preserve other Trace2 consumers.
     let mut missing = Vec::new();
     for (key, expected) in required {
-        let values = global_git_config_values(runtime_config.git_cmd(), key)?;
-        if values.iter().any(|value| value != expected) {
-            return Err(GitAiError::Generic(format!(
-                "trace2-conflict: global Git config key '{key}' is already configured"
-            )));
-        }
+        let values = global_git_config_values(git_cmd, key)?;
         if values.is_empty() {
-            missing.push((key, expected));
+            missing.push((key, expected.to_owned()));
+        } else if values.iter().any(|value| value != expected) {
+            return Err(trace2_conflict(key));
         }
     }
-    if !dry_run && !missing.is_empty() {
-        ensure_global_git_config_dirs()?;
-        for (key, value) in missing {
-            set_global_git_config_value(runtime_config.git_cmd(), key, value)?;
+    Ok(missing)
+}
+
+fn add_missing_trace2_config(
+    git_cmd: &str,
+    missing: &[(&str, String)],
+    dry_run: bool,
+) -> Result<(), GitAiError> {
+    if dry_run || missing.is_empty() {
+        return Ok(());
+    }
+    ensure_global_git_config_dirs()?;
+    for (key, value) in missing {
+        if !global_git_config_values(git_cmd, key)?.is_empty() {
+            return Err(trace2_conflict(key));
+        }
+        add_global_git_config_value(git_cmd, key, value)?;
+        if !global_git_config_values(git_cmd, key)?
+            .iter()
+            .map(String::as_str)
+            .eq(Some(value.as_str()))
+        {
+            return Err(trace2_conflict(key));
         }
     }
     Ok(())
@@ -302,7 +325,9 @@ fn ensure_daemon(
     if skip_install_daemon(dry_run) {
         return Ok(());
     }
-    crate::commands::daemon::repair_daemon(restart, installed_exe).map_err(GitAiError::Generic)
+    crate::commands::daemon::repair_daemon(restart, installed_exe).map_err(|error| {
+        GitAiError::Generic(format!("could not start the background service: {error}"))
+    })
 }
 
 /// Main entry point for install-hooks command
@@ -379,7 +404,7 @@ fn install_executable(options: &InstallOptions) -> Result<HashMap<String, String
     let pending = bin.join(".git-ai-install-pending");
     match fs::symlink_metadata(&executable) {
         Ok(_) if executable.is_file() => {
-            let setup_pending = match same_file::is_same_file(&pending, &executable) {
+            let mut setup_pending = match same_file::is_same_file(&pending, &executable) {
                 Ok(true) => true,
                 Ok(false) => {
                     if !options.dry_run {
@@ -390,13 +415,24 @@ fn install_executable(options: &InstallOptions) -> Result<HashMap<String, String
                 Err(error) if error.kind() == ErrorKind::NotFound => false,
                 Err(error) => return Err(error.into()),
             };
-            if !setup_pending {
-                if !options.if_missing {
-                    let current = get_current_binary_path()?;
-                    if same_file::is_same_file(&current, &executable)? {
-                        return run_hooks_install(options, Some(&current));
-                    }
+            if !setup_pending && same_file::is_same_file(get_current_binary_path()?, &executable)? {
+                let runtime_config = config::Config::fresh();
+                let git_cmd = runtime_config.git_cmd();
+                check_git_version(git_cmd)?;
+                let explicit_setup = !options.if_missing
+                    && (options.configure_env
+                        || options.install_skills
+                        || options.include_visual_studio_extension
+                        || options.api_base.is_some()
+                        || options.api_key.is_some());
+                setup_pending = !missing_trace2_config(git_cmd)?.is_empty() || explicit_setup;
+                if !setup_pending {
+                    ensure_daemon(options.dry_run, false, Some(&executable))?;
+                } else if !options.dry_run {
+                    fs::hard_link(&executable, &pending)?;
                 }
+            }
+            if !setup_pending {
                 println!(
                     "Git AI is already installed at {}. Skipping setup.",
                     executable.display()
@@ -434,7 +470,17 @@ fn run_hooks_install(
     options: &InstallOptions,
     installed_exe: Option<&Path>,
 ) -> Result<HashMap<String, String>, GitAiError> {
-    check_git_version(config::Config::fresh().git_cmd())?;
+    let runtime_config = config::Config::fresh();
+    let git_cmd = runtime_config.git_cmd();
+    check_git_version(git_cmd)?;
+    let self_install = installed_exe.is_some();
+    let missing = match missing_trace2_config(git_cmd) {
+        Err(error) if !self_install => {
+            eprintln!("Warning: could not configure Git trace2: {error}");
+            Vec::new()
+        }
+        result => result?,
+    };
     let fallback = install_config_from_environment();
     let install_config = InstallConfig {
         api_base: options.api_base.clone().or(fallback.api_base),
@@ -449,13 +495,22 @@ fn run_hooks_install(
     let config_changed =
         persist_install_config_with_values(&binary_path, options.dry_run, &install_config)?;
     let params = HookInstallerParams { binary_path };
-    if let Err(error) = configure_daemon_trace2(options.dry_run) {
+    if !self_install
+        && let Err(error) = add_missing_trace2_config(git_cmd, &missing, options.dry_run)
+    {
         eprintln!("Warning: could not configure Git trace2: {error}");
     }
     // The package installers pass --env after installing a new executable.
     let restart_daemon = config_changed || options.configure_env;
     if let Err(error) = ensure_daemon(options.dry_run, restart_daemon, installed_exe) {
-        eprintln!("Warning: could not start the background service: {error}");
+        if self_install {
+            return Err(error);
+        }
+        eprintln!("Warning: {error}");
+    }
+    if self_install {
+        // Publish the Trace2 target after the daemon can accept events.
+        add_missing_trace2_config(git_cmd, &missing, options.dry_run)?;
     }
 
     if !options.dry_run {
@@ -464,6 +519,16 @@ fn run_hooks_install(
 
     // Run async operations and convert result.
     let statuses = crate::tokio_runtime::block_on(async_run_install(&params, options))?;
+    if self_install
+        && !options.dry_run
+        && statuses
+            .values()
+            .any(|status| *status == InstallStatus::Failed)
+    {
+        return Err(GitAiError::Generic(
+            "Git AI hook setup is incomplete; rerun install after resolving the errors".into(),
+        ));
+    }
 
     // Clean up legacy envelope logs directory and related artifacts.
     // These are no longer used — all telemetry now routes through the daemon.
@@ -1195,16 +1260,22 @@ mod tests {
         let _system = EnvVarGuard::set("GIT_CONFIG_NOSYSTEM", "1");
         let _daemon_home = EnvVarGuard::remove("GIT_AI_DAEMON_HOME");
         let _trace = EnvVarGuard::remove("GIT_AI_DAEMON_TRACE_SOCKET");
+        let configure_trace2 = || {
+            let config = config::Config::fresh();
+            let git_cmd = config.git_cmd();
+            let missing = missing_trace2_config(git_cmd)?;
+            add_missing_trace2_config(git_cmd, &missing, false)
+        };
         fs::write(&gitconfig, "[trace2]\n\tperfTarget = /tmp/keep-perf\n").unwrap();
-        configure_daemon_trace2(false).unwrap();
+        configure_trace2().unwrap();
         let installed = fs::read_to_string(&gitconfig).unwrap();
         assert!(installed.contains("perfTarget = /tmp/keep-perf"));
-        configure_daemon_trace2(false).unwrap();
+        configure_trace2().unwrap();
         assert_eq!(installed, fs::read_to_string(&gitconfig).unwrap());
 
         let conflict = "[trace2]\n\teventTarget = /tmp/user-target\n\teventNesting = 7\n";
         fs::write(&gitconfig, conflict).unwrap();
-        assert!(configure_daemon_trace2(false).is_err());
+        assert!(configure_trace2().is_err());
         assert_eq!(fs::read_to_string(&gitconfig).unwrap(), conflict);
     }
 

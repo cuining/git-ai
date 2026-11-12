@@ -736,33 +736,42 @@ fn self_install_places_engine_and_hooks_at_the_user_installation() {
         "repeating install from the bundle must skip hook setup"
     );
 
-    let mut refresh = Command::new(&executable);
-    refresh.arg("install").current_dir(repo.path());
-    for (key, value) in install.get_envs() {
-        match value {
-            Some(value) => refresh.env(key, value),
-            None => refresh.env_remove(key),
-        };
-    }
-    let output = refresh.output().unwrap();
+    let installed_command = |command| {
+        let mut child = Command::new(&executable);
+        child.arg(command).current_dir(repo.path());
+        for (key, value) in install.get_envs() {
+            match value {
+                Some(value) => child.env(key, value),
+                None => child.env_remove(key),
+            };
+        }
+        child.output().unwrap()
+    };
+    let output = installed_command("install");
+    assert!(output.status.success(), "{output:?}");
+    assert!(!hooks_path.exists(), "ready install must not refresh hooks");
+    let output = installed_command("install-hooks");
     assert!(output.status.success(), "{output:?}");
     let hooks = fs::read_to_string(hooks_path).unwrap();
     assert!(hooks.contains(executable.to_str().unwrap()), "{hooks}");
 }
 
 #[test]
-fn self_install_continues_after_a_trace2_conflict() {
+fn self_install_retries_after_foreign_trace2_is_resolved() {
+    use git_ai::daemon::DaemonConfig;
+
     let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
     let home = repo.test_home_path();
     let codex_home = home.join(".codex");
     fs::create_dir_all(&codex_home).unwrap();
     let git_config = home.join(".gitconfig");
+    let include_config = "[include]\n\tpath = trace2-user.config\n";
     let conflicting_config = "[trace2]\n\teventTarget = 2\n";
-    fs::write(&git_config, conflicting_config).unwrap();
-    let config_path = home.join(".git-ai/config.json");
-    let config_before = fs::read_to_string(&config_path).ok();
-    let mut install =
-        repo.git_ai_command_without_pre_sync_for_test(&["install", "--if-missing"], &[]);
+    let foreign_config = home.join("trace2-user.config");
+    fs::write(&git_config, include_config).unwrap();
+    fs::write(&foreign_config, conflicting_config).unwrap();
+    let pending = home.join(".git-ai/bin/.git-ai-install-pending");
+    let mut install = repo.git_ai_command_without_pre_sync_for_test(&["install"], &[]);
     install
         .env("CODEX_HOME", &codex_home)
         .env("CLAUDE_CONFIG_DIR", home.join(".claude"))
@@ -771,10 +780,53 @@ fn self_install_continues_after_a_trace2_conflict() {
     stub_cursor(&repo, &mut install);
 
     let output = install.output().unwrap();
-    assert!(output.status.success(), "{output:?}");
+    assert!(!output.status.success(), "{output:?}");
     assert!(String::from_utf8_lossy(&output.stderr).contains("trace2-conflict"));
-    assert_eq!(fs::read_to_string(&git_config).unwrap(), conflicting_config);
-    assert_eq!(fs::read_to_string(&config_path).ok(), config_before);
+    assert_eq!(fs::read_to_string(&git_config).unwrap(), include_config);
+    assert_eq!(
+        fs::read_to_string(&foreign_config).unwrap(),
+        conflicting_config
+    );
+    assert!(!codex_home.join("config.toml").exists());
+    assert!(pending.is_file());
+
+    fs::write(&foreign_config, "").unwrap();
+    let output = install.output().unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let trace_socket = install
+        .get_envs()
+        .find_map(|(key, value)| (key == "GIT_AI_DAEMON_TRACE_SOCKET").then(|| value.unwrap()))
+        .unwrap();
+    let expected = DaemonConfig::trace2_event_target_for_path(std::path::Path::new(trace_socket));
+    assert_eq!(
+        repo.git(&["config", "--global", "--get-all", "trace2.eventTarget"])
+            .unwrap()
+            .trim(),
+        expected
+    );
+    assert!(!pending.exists());
+    assert!(codex_home.join("config.toml").is_file());
+}
+
+#[test]
+fn self_install_keeps_incomplete_setup_retryable_when_daemon_start_fails() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let home = repo.test_home_path();
+    let blocked_daemon_home = home.join("blocked-daemon-home");
+    fs::write(&blocked_daemon_home, "not a directory").unwrap();
+    let mut install = repo.git_ai_command_without_pre_sync_for_test(&["install"], &[]);
+    install
+        .env("GIT_AI_DAEMON_HOME", &blocked_daemon_home)
+        .env_remove("GIT_AI_TEST_DB_PATH")
+        .env_remove("GITAI_TEST_DB_PATH");
+    let output = install.output().unwrap();
+    assert!(!output.status.success(), "{output:?}");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("background service"));
+    assert!(home.join(".git-ai/bin/.git-ai-install-pending").is_file());
+    assert!(
+        repo.git(&["config", "--global", "--get", "trace2.eventTarget"])
+            .is_err()
+    );
 }
 
 #[test]
