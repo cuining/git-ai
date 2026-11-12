@@ -1,0 +1,45 @@
+src/config.rs
+  s_e23bf86cad936b::t_5c1871f08be336 19-21,1053-1056,1213-1215
+docs/superpowers/specs/2026-06-29-daemon-log-upload-client.md
+  s_e23bf86cad936b::t_cfafdb99f16e47 25-26
+src/api/client.rs
+  s_e23bf86cad936b::t_57a9cacc20c709 294,302
+src/commands/config.rs
+  s_e23bf86cad936b::t_a697e19ccbc4f4 113-116
+src/commands/install_wsl.rs
+  s_e23bf86cad936b::t_4ba7afcff8e56f 23
+src/commands/upgrade/npm.rs
+  s_e23bf86cad936b::t_780dae3d5dc42e 542
+src/feature_flags.rs
+  s_268d23c8869b26::t_01a887782f75d6 88-90,142-145
+tests/config_fresh_test.rs
+  s_e23bf86cad936b::t_86f9978a0c12f5 5,208,222,332,338,353
+tests/integration/config_cli_coverage.rs
+  s_268d23c8869b26::t_f70294a22a70d8 110,119,167-208,717-724,726-734
+tests/integration/install_hooks_comprehensive.rs
+  s_e23bf86cad936b::t_dd162b303fb401 841
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-dcc.14",
+  "base_commit_sha": "0fd50ccd235d4fc648d6f2eefeb30965a3e121c0",
+  "prompts": {},
+  "sessions": {
+    "s_268d23c8869b26": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cfb2-478c-7b20-a801-1446532c7919",
+        "model": "unknown"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    },
+    "s_e23bf86cad936b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d02d-f6cc-74d3-b83c-bfaa1075f497",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
