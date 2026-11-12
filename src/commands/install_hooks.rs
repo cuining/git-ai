@@ -197,11 +197,11 @@ fn find_running_pids(process_names: &[&str]) -> Vec<(u32, String)> {
     results
 }
 
-fn add_global_git_config_value(git_cmd: &str, key: &str, value: &str) -> Result<(), GitAiError> {
+fn set_global_git_config_value(git_cmd: &str, key: &str, value: &str) -> Result<(), GitAiError> {
     let mut command = Command::new(git_cmd);
     command
         .current_dir(crate::mdm::utils::home_dir())
-        .args(["config", "--global", "--add", key, value])
+        .args(["config", "--global", key, value])
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     crate::git::repository::apply_internal_git_env(&mut command);
@@ -260,54 +260,74 @@ fn global_git_config_values(git_cmd: &str, key: &str) -> Result<Vec<String>, Git
         .collect())
 }
 
-fn trace2_conflict(key: &str) -> GitAiError {
-    GitAiError::Generic(format!(
-        "trace2-conflict: global Git config key '{key}' is already configured"
-    ))
-}
-
-fn missing_trace2_config(git_cmd: &str) -> Result<Vec<(&'static str, String)>, GitAiError> {
+fn trace2_config_is_current(git_cmd: &str) -> Result<bool, GitAiError> {
     let daemon_config = DaemonConfig::from_env_or_default_paths()?;
     let event_target = daemon_config.trace2_event_target();
     let required = [
         (TRACE2_EVENT_NESTING_KEY, TRACE2_EVENT_NESTING_VALUE),
         (TRACE2_EVENT_TARGET_KEY, event_target.as_str()),
     ];
-    // Check both keys before changing either. Preserve other Trace2 consumers.
-    let mut missing = Vec::new();
+    // Git uses the last configured value, including values from included files.
     for (key, expected) in required {
-        let values = global_git_config_values(git_cmd, key)?;
-        if values.is_empty() {
-            missing.push((key, expected.to_owned()));
-        } else if values.iter().any(|value| value != expected) {
-            return Err(trace2_conflict(key));
+        if global_git_config_values(git_cmd, key)?
+            .last()
+            .map(String::as_str)
+            != Some(expected)
+        {
+            return Ok(false);
         }
     }
-    Ok(missing)
+    Ok(true)
 }
 
-fn add_missing_trace2_config(
-    git_cmd: &str,
-    missing: &[(&str, String)],
-    dry_run: bool,
-) -> Result<(), GitAiError> {
-    if dry_run || missing.is_empty() {
+fn remove_global_git_config_section(git_cmd: &str, section: &str) -> Result<(), GitAiError> {
+    let mut command = Command::new(git_cmd);
+    command
+        .current_dir(crate::mdm::utils::home_dir())
+        .args(["config", "--global", "--remove-section", section])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    crate::git::repository::apply_internal_git_env(&mut command);
+
+    let status = command.status()?;
+    // Exit code 128 means the section doesn't exist, which is fine.
+    if status.success() || status.code() == Some(128) {
+        Ok(())
+    } else {
+        Err(GitAiError::Generic(format!(
+            "failed to remove global git config section '{}'",
+            section
+        )))
+    }
+}
+
+fn configure_daemon_trace2(dry_run: bool) -> Result<(), GitAiError> {
+    let runtime_config = config::Config::fresh();
+
+    ensure_global_git_config_dirs()?;
+
+    let daemon_config = DaemonConfig::from_env_or_default_paths()?;
+    let event_target = daemon_config.trace2_event_target();
+
+    if dry_run {
         return Ok(());
     }
-    ensure_global_git_config_dirs()?;
-    for (key, value) in missing {
-        if !global_git_config_values(git_cmd, key)?.is_empty() {
-            return Err(trace2_conflict(key));
-        }
-        add_global_git_config_value(git_cmd, key, value)?;
-        if !global_git_config_values(git_cmd, key)?
-            .iter()
-            .map(String::as_str)
-            .eq(Some(value.as_str()))
-        {
-            return Err(trace2_conflict(key));
-        }
-    }
+
+    // Fully reset any existing trace2 config the user may have set
+    // (e.g. trace2.normalTarget, trace2.perfTarget, trace2.configParams, etc.)
+    // before writing only the keys we need.
+    remove_global_git_config_section(runtime_config.git_cmd(), "trace2")?;
+
+    set_global_git_config_value(
+        runtime_config.git_cmd(),
+        TRACE2_EVENT_TARGET_KEY,
+        &event_target,
+    )?;
+    set_global_git_config_value(
+        runtime_config.git_cmd(),
+        TRACE2_EVENT_NESTING_KEY,
+        TRACE2_EVENT_NESTING_VALUE,
+    )?;
     Ok(())
 }
 
@@ -425,7 +445,7 @@ fn install_executable(options: &InstallOptions) -> Result<HashMap<String, String
                         || options.include_visual_studio_extension
                         || options.api_base.is_some()
                         || options.api_key.is_some());
-                setup_pending = !missing_trace2_config(git_cmd)?.is_empty() || explicit_setup;
+                setup_pending = !trace2_config_is_current(git_cmd)? || explicit_setup;
                 if !setup_pending {
                     ensure_daemon(options.dry_run, false, Some(&executable))?;
                 } else if !options.dry_run {
@@ -470,17 +490,8 @@ fn run_hooks_install(
     options: &InstallOptions,
     installed_exe: Option<&Path>,
 ) -> Result<HashMap<String, String>, GitAiError> {
-    let runtime_config = config::Config::fresh();
-    let git_cmd = runtime_config.git_cmd();
-    check_git_version(git_cmd)?;
+    check_git_version(config::Config::fresh().git_cmd())?;
     let self_install = installed_exe.is_some();
-    let missing = match missing_trace2_config(git_cmd) {
-        Err(error) if !self_install => {
-            eprintln!("Warning: could not configure Git trace2: {error}");
-            Vec::new()
-        }
-        result => result?,
-    };
     let fallback = install_config_from_environment();
     let install_config = InstallConfig {
         api_base: options.api_base.clone().or(fallback.api_base),
@@ -495,9 +506,7 @@ fn run_hooks_install(
     let config_changed =
         persist_install_config_with_values(&binary_path, options.dry_run, &install_config)?;
     let params = HookInstallerParams { binary_path };
-    if !self_install
-        && let Err(error) = add_missing_trace2_config(git_cmd, &missing, options.dry_run)
-    {
+    if !self_install && let Err(error) = configure_daemon_trace2(options.dry_run) {
         eprintln!("Warning: could not configure Git trace2: {error}");
     }
     // The package installers pass --env after installing a new executable.
@@ -510,7 +519,7 @@ fn run_hooks_install(
     }
     if self_install {
         // Publish the Trace2 target after the daemon can accept events.
-        add_missing_trace2_config(git_cmd, &missing, options.dry_run)?;
+        configure_daemon_trace2(options.dry_run)?;
     }
 
     if !options.dry_run {
@@ -1252,7 +1261,7 @@ mod tests {
 
     #[test]
     #[serial]
-    fn npm_managed_trace2_preserves_existing_configuration_and_rejects_conflicts() {
+    fn npm_managed_install_resets_trace2_on_reinstall() {
         let temp = tempdir().unwrap();
         let gitconfig = temp.path().join(".gitconfig");
         let _home = EnvVarGuard::set("HOME", temp.path().to_str().unwrap());
@@ -1260,23 +1269,25 @@ mod tests {
         let _system = EnvVarGuard::set("GIT_CONFIG_NOSYSTEM", "1");
         let _daemon_home = EnvVarGuard::remove("GIT_AI_DAEMON_HOME");
         let _trace = EnvVarGuard::remove("GIT_AI_DAEMON_TRACE_SOCKET");
-        let configure_trace2 = || {
-            let config = config::Config::fresh();
-            let git_cmd = config.git_cmd();
-            let missing = missing_trace2_config(git_cmd)?;
-            add_missing_trace2_config(git_cmd, &missing, false)
-        };
-        fs::write(&gitconfig, "[trace2]\n\tperfTarget = /tmp/keep-perf\n").unwrap();
-        configure_trace2().unwrap();
-        let installed = fs::read_to_string(&gitconfig).unwrap();
-        assert!(installed.contains("perfTarget = /tmp/keep-perf"));
-        configure_trace2().unwrap();
-        assert_eq!(installed, fs::read_to_string(&gitconfig).unwrap());
+        let original = "[user]\n\tname = Example\n[include]\n\tpath = trace2-user.config\n[trace2]\n\tperfTarget = 2\n";
+        fs::write(&gitconfig, original).unwrap();
+        fs::write(
+            temp.path().join("trace2-user.config"),
+            "[trace2]\n\teventTarget = 2\n\teventNesting = 7\n",
+        )
+        .unwrap();
+        let config = config::Config::fresh();
+        assert!(!trace2_config_is_current(config.git_cmd()).unwrap());
+        configure_daemon_trace2(true).unwrap();
+        assert_eq!(fs::read_to_string(&gitconfig).unwrap(), original);
 
-        let conflict = "[trace2]\n\teventTarget = /tmp/user-target\n\teventNesting = 7\n";
-        fs::write(&gitconfig, conflict).unwrap();
-        assert!(configure_trace2().is_err());
-        assert_eq!(fs::read_to_string(&gitconfig).unwrap(), conflict);
+        configure_daemon_trace2(false).unwrap();
+        assert!(trace2_config_is_current(config.git_cmd()).unwrap());
+        let installed = fs::read_to_string(&gitconfig).unwrap();
+        assert!(installed.contains("[user]\n\tname = Example\n"));
+        assert!(!installed.contains("perfTarget"));
+        configure_daemon_trace2(false).unwrap();
+        assert_eq!(installed, fs::read_to_string(&gitconfig).unwrap());
     }
 
     #[test]

@@ -7,6 +7,7 @@ use crate::repos::test_repo::{DaemonTestScope, TestRepo, get_binary_path};
 use git_ai::commands::install_hooks::{
     InstallResult, InstallStatus, run, run_uninstall, to_hashmap,
 };
+use git_ai::daemon::DaemonConfig;
 use std::collections::HashMap;
 use std::fs;
 use std::process::Command;
@@ -637,15 +638,18 @@ fn install_hooks_reports_agent_failure_according_to_install_mode() {
 }
 
 #[test]
-fn standalone_install_hooks_preserves_trace2_conflict_and_installs_hooks() {
+fn standalone_install_resets_trace2_and_installs_hooks() {
     let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
     let codex_home = repo.test_home_path().join("codex-managed");
     fs::create_dir_all(&codex_home).unwrap();
     repo.git_ai(&["config", "set", "codex_hooks_format", "hooks_json"])
         .unwrap();
     let git_config = repo.test_home_path().join(".gitconfig");
-    let conflicting_config = "[trace2]\n\teventTarget = 2\n";
-    fs::write(&git_config, conflicting_config).unwrap();
+    fs::write(
+        &git_config,
+        "[trace2]\n\teventTarget = 2\n\teventTarget = 3\n\teventNesting = 7\n\tnormalTarget = 2\n",
+    )
+    .unwrap();
     let env = [("CODEX_HOME", codex_home.to_str().unwrap())];
 
     let mut standalone_command =
@@ -655,9 +659,24 @@ fn standalone_install_hooks_preserves_trace2_conflict_and_installs_hooks() {
     let standalone = standalone_command.output().unwrap();
     let stderr = String::from_utf8_lossy(&standalone.stderr);
     assert!(standalone.status.success(), "{stderr}");
-    assert!(stderr.contains("trace2-conflict"), "{stderr}");
     assert!(codex_home.join("hooks.json").is_file());
-    assert_eq!(fs::read_to_string(git_config).unwrap(), conflicting_config);
+    let expected = DaemonConfig::trace2_event_target_for_path(&repo.daemon_trace_socket_path());
+    assert_eq!(
+        repo.git(&["config", "--global", "--get-all", "trace2.eventTarget"])
+            .unwrap()
+            .trim(),
+        expected
+    );
+    assert_eq!(
+        repo.git(&["config", "--global", "--get", "trace2.eventNesting"])
+            .unwrap()
+            .trim(),
+        "0"
+    );
+    assert!(
+        repo.git(&["config", "--global", "--get", "trace2.normalTarget"])
+            .is_err()
+    );
 }
 
 #[test]
@@ -757,19 +776,17 @@ fn self_install_places_engine_and_hooks_at_the_user_installation() {
 }
 
 #[test]
-fn self_install_retries_after_foreign_trace2_is_resolved() {
-    use git_ai::daemon::DaemonConfig;
-
+fn self_install_resets_trace2_with_global_include() {
     let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
     let home = repo.test_home_path();
     let codex_home = home.join(".codex");
     fs::create_dir_all(&codex_home).unwrap();
     let git_config = home.join(".gitconfig");
     let include_config = "[include]\n\tpath = trace2-user.config\n";
-    let conflicting_config = "[trace2]\n\teventTarget = 2\n";
+    let included_trace2 = "[trace2]\n\teventTarget = 2\n\teventNesting = 7\n";
     let foreign_config = home.join("trace2-user.config");
     fs::write(&git_config, include_config).unwrap();
-    fs::write(&foreign_config, conflicting_config).unwrap();
+    fs::write(&foreign_config, included_trace2).unwrap();
     let pending = home.join(".git-ai/bin/.git-ai-install-pending");
     let mut install = repo.git_ai_command_without_pre_sync_for_test(&["install"], &[]);
     install
@@ -777,31 +794,26 @@ fn self_install_retries_after_foreign_trace2_is_resolved() {
         .env("CLAUDE_CONFIG_DIR", home.join(".claude"))
         .env("DSH_HOME", home.join(".dsh"))
         .env_remove("GIT_AI_TEST_CONFIG_PATCH");
+    #[cfg(unix)]
     stub_cursor(&repo, &mut install);
 
     let output = install.output().unwrap();
-    assert!(!output.status.success(), "{output:?}");
-    assert!(String::from_utf8_lossy(&output.stderr).contains("trace2-conflict"));
-    assert_eq!(fs::read_to_string(&git_config).unwrap(), include_config);
+    assert!(output.status.success(), "{output:?}");
     assert_eq!(
         fs::read_to_string(&foreign_config).unwrap(),
-        conflicting_config
+        included_trace2
     );
-    assert!(!codex_home.join("config.toml").exists());
-    assert!(pending.is_file());
-
-    fs::write(&foreign_config, "").unwrap();
-    let output = install.output().unwrap();
-    assert!(output.status.success(), "{output:?}");
-    let trace_socket = install
-        .get_envs()
-        .find_map(|(key, value)| (key == "GIT_AI_DAEMON_TRACE_SOCKET").then(|| value.unwrap()))
-        .unwrap();
-    let expected = DaemonConfig::trace2_event_target_for_path(std::path::Path::new(trace_socket));
+    let expected = DaemonConfig::trace2_event_target_for_path(&repo.daemon_trace_socket_path());
     assert_eq!(
-        repo.git(&["config", "--global", "--get-all", "trace2.eventTarget"])
-            .unwrap()
-            .trim(),
+        repo.git(&[
+            "config",
+            "--global",
+            "--includes",
+            "--get",
+            "trace2.eventTarget"
+        ])
+        .unwrap()
+        .trim(),
         expected
     );
     assert!(!pending.exists());
@@ -812,6 +824,9 @@ fn self_install_retries_after_foreign_trace2_is_resolved() {
 fn self_install_keeps_incomplete_setup_retryable_when_daemon_start_fails() {
     let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
     let home = repo.test_home_path();
+    let git_config = home.join(".gitconfig");
+    let original = "[trace2]\n\teventTarget = 2\n";
+    fs::write(&git_config, original).unwrap();
     let blocked_daemon_home = home.join("blocked-daemon-home");
     fs::write(&blocked_daemon_home, "not a directory").unwrap();
     let mut install = repo.git_ai_command_without_pre_sync_for_test(&["install"], &[]);
@@ -823,10 +838,7 @@ fn self_install_keeps_incomplete_setup_retryable_when_daemon_start_fails() {
     assert!(!output.status.success(), "{output:?}");
     assert!(String::from_utf8_lossy(&output.stderr).contains("background service"));
     assert!(home.join(".git-ai/bin/.git-ai-install-pending").is_file());
-    assert!(
-        repo.git(&["config", "--global", "--get", "trace2.eventTarget"])
-            .is_err()
-    );
+    assert_eq!(fs::read_to_string(&git_config).unwrap(), original);
 }
 
 #[test]
