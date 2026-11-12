@@ -721,16 +721,6 @@ fn shutdown_daemon_if_running(config: &DaemonConfig) -> Result<(), String> {
     })
 }
 
-pub(crate) fn with_stopped_daemon(
-    action: impl FnOnce() -> Result<(), String>,
-) -> Result<(), String> {
-    let config = daemon_config_from_env_or_default_paths()?;
-    shutdown_daemon_if_running(&config)?;
-    let _lock = LockFile::try_acquire(&config.lock_path)
-        .ok_or_else(|| "background service started while updating configuration".to_string())?;
-    action()
-}
-
 fn daemon_confirmed_stopped(config: &DaemonConfig) -> Result<bool, String> {
     config
         .ensure_parent_dirs()

@@ -44,7 +44,6 @@ pub fn handle_git_ai(args: &[String]) {
             | "--version"
             | "-v"
             | "config"
-            | "claude-trace2"
             | "bg"
             | "d"
             | "daemon"
@@ -100,13 +99,6 @@ pub fn handle_git_ai(args: &[String]) {
         }
         "debug" => {
             commands::debug::handle_debug(&args[1..]);
-        }
-        #[cfg(unix)]
-        "claude-trace2" => {
-            if let Err(error) = crate::daemon::claude_trace2_relay::configure(&args[1..]) {
-                eprintln!("Claude Trace2 relay: {error}");
-                std::process::exit(1);
-            }
         }
         "bg" | "d" | "daemon" => {
             commands::daemon::handle_daemon(&args[1..]);
@@ -377,21 +369,14 @@ fn print_help() {
     eprintln!("    --add <key> <value>   Add to array or upsert into object");
     eprintln!("    unset <key>           Remove config value (reverts to default)");
     eprintln!("  debug              Print support/debug diagnostics");
-    #[cfg(unix)]
-    eprintln!(
-        "  claude-trace2 <enable|disable>   Forward Claude Git Trace2 to MOSS and the global target"
-    );
     eprintln!("  bg                 Run and control git-ai background service");
     eprintln!("  install, install-hooks  Install hooks for AI authorship tracking");
-    eprintln!("    --profile=local --if-missing  Install the executable and set up local tracking");
+    eprintln!("    --if-missing           Install this executable when it is not already present");
     eprintln!(
         "    --env                  Also add git-ai to shell PATH configs (used by the install scripts)"
     );
     eprintln!(
         "    --wsl                  Install the matching DCC Linux npm package in eligible WSL distributions"
-    );
-    eprintln!(
-        "    --agents <list>        Only install claude,codex,opencode hooks (no IDE extras)"
     );
     eprintln!("    --skills               Also install agent skill files");
     eprintln!("    --visual-studio-extension");
