@@ -157,17 +157,19 @@ pub fn handle_git_ai(args: &[String]) {
             println!("{}", config.git_cmd());
             std::process::exit(0);
         }
-        "install-hooks" | "install" => match commands::install_hooks::run(&args[1..]) {
-            Ok(statuses) => {
-                if let Ok(statuses_value) = serde_json::to_value(&statuses) {
-                    log_message("install-hooks", "info", Some(statuses_value));
+        command @ ("install-hooks" | "install") => {
+            match commands::install_hooks::run_command(&args[1..], command == "install") {
+                Ok(statuses) => {
+                    if let Ok(statuses_value) = serde_json::to_value(&statuses) {
+                        log_message("install-hooks", "info", Some(statuses_value));
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Install hooks failed: {}", e);
+                    std::process::exit(1);
                 }
             }
-            Err(e) => {
-                eprintln!("Install hooks failed: {}", e);
-                std::process::exit(1);
-            }
-        },
+        }
         "uninstall" | "uninstall-hooks" => match commands::install_hooks::run_uninstall(&args[1..])
         {
             Ok(statuses) => {
@@ -370,8 +372,9 @@ fn print_help() {
     eprintln!("    unset <key>           Remove config value (reverts to default)");
     eprintln!("  debug              Print support/debug diagnostics");
     eprintln!("  bg                 Run and control git-ai background service");
-    eprintln!("  install, install-hooks  Install hooks for AI authorship tracking");
-    eprintln!("    --if-missing           Install this executable when it is not already present");
+    eprintln!("  install            Install Git AI and set up agent hooks");
+    eprintln!("  install-hooks      Set up agent hooks for the current executable");
+    eprintln!("    --if-missing           Install only if there is no completed installation");
     eprintln!(
         "    --env                  Also add git-ai to shell PATH configs (used by the install scripts)"
     );

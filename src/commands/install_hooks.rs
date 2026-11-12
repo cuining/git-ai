@@ -122,12 +122,6 @@ pub fn to_hashmap(statuses: HashMap<String, InstallStatus>) -> HashMap<String, S
         .collect()
 }
 
-fn print_amp_plugins_note(installer_id: &str) {
-    if installer_id == "amp" {
-        println!("  Note: Amp plugins are experimental. Run amp with `PLUGINS=all amp`.");
-    }
-}
-
 /// Find PIDs of running processes that match any of the given process names.
 /// Returns a list of (pid, process_name) tuples for each match found.
 fn find_running_pids(process_names: &[&str]) -> Vec<(u32, String)> {
@@ -303,29 +297,26 @@ fn skip_install_daemon(dry_run: bool) -> bool {
 fn ensure_daemon(
     dry_run: bool,
     restart: bool,
-    strict: bool,
     installed_exe: Option<&Path>,
 ) -> Result<(), GitAiError> {
     if skip_install_daemon(dry_run) {
         return Ok(());
     }
-    if strict {
-        crate::commands::daemon::repair_daemon(restart, installed_exe)
-    } else if restart {
-        let daemon_config = DaemonConfig::from_env_or_default_paths()?;
-        crate::commands::daemon::restart_daemon(&daemon_config)
-    } else {
-        crate::commands::daemon::ensure_daemon_running(std::time::Duration::from_secs(5))
-            .map(|_| ())
-    }
-    .map_err(GitAiError::Generic)
+    crate::commands::daemon::repair_daemon(restart, installed_exe).map_err(GitAiError::Generic)
 }
 
 /// Main entry point for install-hooks command
 pub fn run(args: &[String]) -> Result<HashMap<String, String>, GitAiError> {
+    run_command(args, false)
+}
+
+pub(crate) fn run_command(
+    args: &[String],
+    self_install: bool,
+) -> Result<HashMap<String, String>, GitAiError> {
     let options = parse_install_options(args)?;
-    let result = if options.if_missing {
-        install_if_missing(&options)
+    let result = if self_install || options.if_missing {
+        install_executable(&options)
     } else {
         run_hooks_install(&options, None)
     };
@@ -364,7 +355,7 @@ pub fn run(args: &[String]) -> Result<HashMap<String, String>, GitAiError> {
 }
 
 /// A packaged executable can install itself without any knowledge of its caller.
-fn install_if_missing(options: &InstallOptions) -> Result<HashMap<String, String>, GitAiError> {
+fn install_executable(options: &InstallOptions) -> Result<HashMap<String, String>, GitAiError> {
     let root = config::git_ai_dir_path()
         .ok_or_else(|| GitAiError::Generic("Cannot determine the installation directory".into()))?;
     let bin = root.join("bin");
@@ -400,6 +391,12 @@ fn install_if_missing(options: &InstallOptions) -> Result<HashMap<String, String
                 Err(error) => return Err(error.into()),
             };
             if !setup_pending {
+                if !options.if_missing {
+                    let current = get_current_binary_path()?;
+                    if same_file::is_same_file(&current, &executable)? {
+                        return run_hooks_install(options, Some(&current));
+                    }
+                }
                 println!(
                     "Git AI is already installed at {}. Skipping setup.",
                     executable.display()
@@ -457,7 +454,7 @@ fn run_hooks_install(
     }
     // The package installers pass --env after installing a new executable.
     let restart_daemon = config_changed || options.configure_env;
-    if let Err(error) = ensure_daemon(options.dry_run, restart_daemon, false, installed_exe) {
+    if let Err(error) = ensure_daemon(options.dry_run, restart_daemon, installed_exe) {
         eprintln!("Warning: could not start the background service: {error}");
     }
 
@@ -527,9 +524,8 @@ fn non_empty_value(value: &str) -> Option<String> {
 fn should_include_installer(id: &str, options: &InstallOptions) -> bool {
     match id {
         VISUAL_STUDIO_INSTALLER_ID => options.include_visual_studio_extension,
-        "amp" | "cline" | "droid" | "firebender" | "gemini" | "github-copilot" | "jetbrains"
-        | "vscode" | "windsurf" => false,
-        _ => true,
+        "claude-code" | "codex" | "cursor" | "opencode" | "pi" | "deepseek-harness" => true,
+        _ => false,
     }
 }
 
@@ -706,7 +702,6 @@ async fn async_run_install(
                                 spinner.pending(&format!("{}: Pending updates", name));
                             } else {
                                 spinner.success(&format!("{}: Hooks updated", name));
-                                print_amp_plugins_note(id);
                             }
                             if options.verbose {
                                 println!();
@@ -730,7 +725,6 @@ async fn async_run_install(
                         }
                         Ok(None) => {
                             spinner.success(&format!("{}: Hooks already up to date", name));
-                            print_amp_plugins_note(id);
                             statuses.insert(id.to_string(), InstallStatus::AlreadyInstalled);
                             detailed_results
                                 .push((id.to_string(), InstallResult::already_installed()));
@@ -850,8 +844,7 @@ async fn async_run_install(
         {
             has_changes = true;
         }
-    } else if let Ok(result) =
-        skills_installer::uninstall_skills(options.dry_run, options.verbose)
+    } else if let Ok(result) = skills_installer::uninstall_skills(options.dry_run, options.verbose)
         && result.changed
     {
         has_changes = true;
@@ -1187,6 +1180,7 @@ mod tests {
         assert!(should_include_installer("codex", &options));
         assert!(should_include_installer("opencode", &options));
         assert!(should_include_installer("cursor", &options));
+        assert!(should_include_installer("pi", &options));
         assert!(should_include_installer("deepseek-harness", &options));
         assert!(!should_include_installer("vscode", &options));
     }
@@ -1259,8 +1253,8 @@ mod tests {
         let _legacy_db = EnvVarGuard::remove("GITAI_TEST_DB_PATH");
         let _control = EnvVarGuard::remove("GIT_AI_DAEMON_CONTROL_SOCKET");
         let _trace = EnvVarGuard::remove("GIT_AI_DAEMON_TRACE_SOCKET");
-        assert!(ensure_daemon(false, false, true, None).is_err());
-        assert!(ensure_daemon(true, false, true, None).is_ok());
+        assert!(ensure_daemon(false, false, None).is_err());
+        assert!(ensure_daemon(true, false, None).is_ok());
     }
 
     #[test]
@@ -1303,6 +1297,7 @@ mod tests {
             "gemini",
             "cline",
             "amp",
+            "new-agent",
         ] {
             assert!(!should_include_installer(id, &default), "{id}");
             assert!(!should_include_installer(id, &with_visual_studio), "{id}");

@@ -9,63 +9,49 @@ case "$build_npm" in
     0|1) ;;
     *) printf '%s\n' 'DCC_OE_BUILD_NPM must be 0 or 1' >&2; exit 1 ;;
 esac
+if [ -z "${DCC_OE_BOOTSTRAP_URL:-}" ] || [ -z "${DCC_OE_BOOTSTRAP_SHA256:-}" ]; then
+    printf '%s\n' 'OE bootstrap requires both URL and SHA-256' >&2
+    exit 1
+fi
 scratch=$(mktemp -d)
 trap 'rm -rf "$scratch"' EXIT
 
-if [ -n "${DCC_OE_BOOTSTRAP_URL:-}${DCC_OE_BOOTSTRAP_SHA256:-}" ]; then
-    if [ -z "${DCC_OE_BOOTSTRAP_URL:-}" ] || [ -z "${DCC_OE_BOOTSTRAP_SHA256:-}" ]; then
-        printf '%s\n' 'OE bootstrap requires both URL and SHA-256' >&2
+archive=$scratch/bootstrap.tar.gz
+bootstrap=$scratch/bootstrap
+curl --proto '=https' --proto-redir '=https' --connect-timeout 15 --max-time 600 \
+    -fsSL --output "$archive" -- "$DCC_OE_BOOTSTRAP_URL"
+digest=$(sha256sum "$archive")
+if [ "${digest%% *}" != "$DCC_OE_BOOTSTRAP_SHA256" ]; then
+    printf '%s\n' 'OE bootstrap SHA-256 mismatch' >&2
+    exit 1
+fi
+mkdir "$bootstrap"
+# The release bootstrap joins separately verified test and cross-tool tar members.
+tar -xizf "$archive" -C "$bootstrap"
+rm "$archive"
+if [ -f "$bootstrap/toolchain/release-tools-manifest.json" ]; then
+    build_npm=${DCC_OE_BUILD_NPM:-1}
+    release_sdk=$bootstrap/toolchain/darwin-sysroot
+fi
+for binary in cargo rustc; do
+    version=$("$bootstrap/toolchain/bin/$binary" --version)
+    case "$version" in
+        "$binary $toolchain "*) ;;
+        *) printf 'Expected %s %s, got %s\n' "$binary" "$toolchain" "$version" >&2; exit 1 ;;
+    esac
+done
+export PATH="$bootstrap/toolchain/bin:$PATH"
+export RUSTC="$bootstrap/toolchain/bin/rustc"
+set -- "$bootstrap/toolchain/bin/cargo"
+if [ -d "$bootstrap/vendor" ] || [ -f "$bootstrap/cargo-vendor.toml" ]; then
+    if [ ! -d "$bootstrap/vendor" ] || [ ! -f "$bootstrap/cargo-vendor.toml" ]; then
+        printf '%s\n' 'OE bootstrap must include both vendor/ and cargo-vendor.toml' >&2
         exit 1
     fi
-    archive=$scratch/bootstrap.tar.gz
-    bootstrap=$scratch/bootstrap
-    curl --proto '=https' --proto-redir '=https' --connect-timeout 15 --max-time 600 \
-        -fsSL --output "$archive" -- "$DCC_OE_BOOTSTRAP_URL"
-    digest=$(sha256sum "$archive")
-    if [ "${digest%% *}" != "$DCC_OE_BOOTSTRAP_SHA256" ]; then
-        printf '%s\n' 'OE bootstrap SHA-256 mismatch' >&2
-        exit 1
-    fi
-    mkdir "$bootstrap"
-    # The release bootstrap joins separately verified test and cross-tool tar members.
-    tar -xizf "$archive" -C "$bootstrap"
-    rm "$archive"
-    if [ -f "$bootstrap/toolchain/release-tools-manifest.json" ]; then
-        build_npm=${DCC_OE_BUILD_NPM:-1}
-        release_sdk=$bootstrap/toolchain/darwin-sysroot
-    fi
-    for binary in cargo rustc; do
-        version=$("$bootstrap/toolchain/bin/$binary" --version)
-        case "$version" in
-            "$binary $toolchain "*) ;;
-            *) printf 'Expected %s %s, got %s\n' "$binary" "$toolchain" "$version" >&2; exit 1 ;;
-        esac
-    done
-    export PATH="$bootstrap/toolchain/bin:$PATH"
-    export RUSTC="$bootstrap/toolchain/bin/rustc"
-    set -- "$bootstrap/toolchain/bin/cargo"
-    if [ -d "$bootstrap/vendor" ] || [ -f "$bootstrap/cargo-vendor.toml" ]; then
-        if [ ! -d "$bootstrap/vendor" ] || [ ! -f "$bootstrap/cargo-vendor.toml" ]; then
-            printf '%s\n' 'OE bootstrap must include both vendor/ and cargo-vendor.toml' >&2
-            exit 1
-        fi
-        mkdir "$bootstrap/.cargo"
-        cp "$bootstrap/cargo-vendor.toml" "$bootstrap/.cargo/config.toml"
-        export CARGO_HOME="$scratch/cargo-home"
-        set -- "$@" --offline --config "$bootstrap/.cargo/config.toml"
-    fi
-else
-    export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
-    if ! command -v rustup >/dev/null 2>&1; then
-        installer=$scratch/rustup-init.sh
-        curl --proto '=https' --proto-redir '=https' --connect-timeout 15 --max-time 60 \
-            -fsSL https://sh.rustup.rs -o "$installer"
-        timeout -k 5 180 sh "$installer" -y --no-modify-path --profile minimal --default-toolchain none
-    fi
-    if ! timeout -k 5 20 rustup run "$toolchain" cargo --version; then
-        timeout -k 5 180 rustup toolchain install "$toolchain" --profile minimal
-    fi
-    set -- rustup run "$toolchain" cargo
+    mkdir "$bootstrap/.cargo"
+    cp "$bootstrap/cargo-vendor.toml" "$bootstrap/.cargo/config.toml"
+    export CARGO_HOME="$scratch/cargo-home"
+    set -- "$@" --offline --config "$bootstrap/.cargo/config.toml"
 fi
 
 if [ "$build_npm" = 1 ] && [ -n "${DCC_NPM_BUNDLE_URL:-}${DCC_NPM_BUNDLE_SHA256:-}" ]; then

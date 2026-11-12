@@ -1,14 +1,12 @@
 """Cross-build and stage the five enterprise npm packages on a prepared OE runner."""
 
 import argparse
-import hashlib
 import importlib.util
 import os
 from pathlib import Path
 import re
 import shutil
 import subprocess
-import zipfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -29,9 +27,8 @@ def load_script(name):
 
 
 def cargo_command(cargo, subcommand, *args):
-    # build.sh passes an executable (possibly via rustup) followed by Cargo options.
-    first_option = next((index for index, value in enumerate(cargo) if value.startswith("-")), len(cargo))
-    return [*cargo[:first_option], *subcommand, *cargo[first_option:], *args]
+    executable, *options = cargo
+    return [executable, *subcommand, *options, *args]
 
 
 def sign_macos(binary):
@@ -87,7 +84,7 @@ def build(cargo, work_dir, output):
         subprocess.run(cargo_command(cargo, ["metadata"], "--locked", "--format-version", "1"),
                        cwd=ROOT, env=env, stdout=file, check=True)
 
-    archives = []
+    packages = work_dir / "packages"
     for platform, (target, _, _) in TARGETS.items():
         target_env = env.copy()
         subcommand = ["zigbuild"]
@@ -108,15 +105,12 @@ def build(cargo, work_dir, output):
         executable = "git-ai.exe" if platform == "win32-x64" else "git-ai"
         binary = target_dir / target / "release" / executable
         verify_binary(binary, platform, version, work_dir)
-        archives.append(packer.pack(ROOT, binary, platform, work_dir / "packages", source, metadata))
+        packer.pack(ROOT, binary, platform, packages, source, metadata)
 
     if subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip() != source:
         raise ValueError("checkout changed during the release build")
-    bundle = work_dir / "platform-packages.zip"
-    with zipfile.ZipFile(bundle, "x") as archive:
-        for package in archives:
-            archive.write(package, arcname=package.name)
-    stager.stage(bundle, hashlib.sha256(bundle.read_bytes()).hexdigest(), source, output)
+    stager.stage_packages([archive.name for archive in packages.iterdir()],
+                          lambda name: (packages / name).read_bytes(), source, output)
 
 
 def main():

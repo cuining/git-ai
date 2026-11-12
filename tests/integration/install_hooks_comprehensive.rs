@@ -3,9 +3,9 @@
 //! This module tests the git-ai install-hooks and uninstall-hooks commands,
 //! which handle installation of git hooks for various IDEs and coding agents.
 
-use crate::repos::test_repo::{get_binary_path, DaemonTestScope, TestRepo};
+use crate::repos::test_repo::{DaemonTestScope, TestRepo, get_binary_path};
 use git_ai::commands::install_hooks::{
-    run, run_uninstall, to_hashmap, InstallResult, InstallStatus,
+    InstallResult, InstallStatus, run, run_uninstall, to_hashmap,
 };
 use std::collections::HashMap;
 use std::fs;
@@ -600,10 +600,12 @@ fn test_run_install_hooks_with_dry_run_false() {
 #[test]
 fn test_run_install_hooks_rejects_unknown_args() {
     let result = run(&["--unknown-flag".into()]);
-    assert!(result
-        .unwrap_err()
-        .to_string()
-        .contains("unknown install-hooks argument"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("unknown install-hooks argument")
+    );
 }
 
 #[test]
@@ -672,12 +674,15 @@ fn npm_managed_default_install_keeps_codex_hooks_when_config_breaks() {
     let installed = install.output().unwrap();
     assert!(installed.status.success(), "{installed:?}");
     assert!(codex_home.join("hooks.json").is_file());
-    assert!(fs::read_to_string(codex_home.join("config.toml"))
-        .unwrap()
-        .contains("trusted_hash"));
-    assert!(repo
-        .git_ai_with_env(&["install-hooks", "--unknown"], &env)
-        .is_err());
+    assert!(
+        fs::read_to_string(codex_home.join("config.toml"))
+            .unwrap()
+            .contains("trusted_hash")
+    );
+    assert!(
+        repo.git_ai_with_env(&["install-hooks", "--unknown"], &env)
+            .is_err()
+    );
     let broken = "invalid = [";
     fs::write(codex_home.join("config.toml"), broken).unwrap();
     let mut failed_command =
@@ -698,10 +703,11 @@ fn npm_managed_default_install_keeps_codex_hooks_when_config_breaks() {
 fn self_install_places_engine_and_hooks_at_the_user_installation() {
     let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
     let home = repo.test_home_path();
-    let mut install =
-        repo.git_ai_command_without_pre_sync_for_test(&["install", "--if-missing"], &[]);
+    let codex_home = home.join(".codex");
+    fs::create_dir_all(&codex_home).unwrap();
+    let mut install = repo.git_ai_command_without_pre_sync_for_test(&["install"], &[]);
     install
-        .env("CODEX_HOME", home.join(".codex"))
+        .env("CODEX_HOME", &codex_home)
         .env("CLAUDE_CONFIG_DIR", home.join(".claude"))
         .env("DSH_HOME", home.join(".dsh"))
         .env_remove("GIT_AI_TEST_CONFIG_PATCH");
@@ -715,14 +721,33 @@ fn self_install_places_engine_and_hooks_at_the_user_installation() {
     let hooks_path = home.join(".cursor/hooks.json");
     let hooks = fs::read_to_string(&hooks_path).unwrap();
     assert!(hooks.contains(executable.to_str().unwrap()), "{hooks}");
+    let codex_config = fs::read_to_string(codex_home.join("config.toml")).unwrap();
+    assert!(
+        codex_config.contains(executable.to_str().unwrap()),
+        "{codex_config}"
+    );
+    assert!(!codex_home.join("hooks.json").exists());
 
     fs::remove_file(&hooks_path).unwrap();
     let output = install.output().unwrap();
     assert!(output.status.success(), "{output:?}");
     assert!(
         !hooks_path.exists(),
-        "repeating install must skip hook setup"
+        "repeating install from the bundle must skip hook setup"
     );
+
+    let mut refresh = Command::new(&executable);
+    refresh.arg("install").current_dir(repo.path());
+    for (key, value) in install.get_envs() {
+        match value {
+            Some(value) => refresh.env(key, value),
+            None => refresh.env_remove(key),
+        };
+    }
+    let output = refresh.output().unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let hooks = fs::read_to_string(hooks_path).unwrap();
+    assert!(hooks.contains(executable.to_str().unwrap()), "{hooks}");
 }
 
 #[test]
@@ -765,10 +790,8 @@ fn self_install_preserves_an_independent_installation() {
     fs::write(&config, user_config).unwrap();
     fs::write(home.join(".gitconfig"), "[trace2]\n\teventTarget = 2\n").unwrap();
 
-    let mut install =
-        repo.git_ai_command_without_pre_sync_for_test(&["install", "--if-missing"], &[]);
-    let mut dry_run = repo
-        .git_ai_command_without_pre_sync_for_test(&["install", "--if-missing", "--dry-run"], &[]);
+    let mut install = repo.git_ai_command_without_pre_sync_for_test(&["install"], &[]);
+    let mut dry_run = repo.git_ai_command_without_pre_sync_for_test(&["install", "--dry-run"], &[]);
 
     let preview = dry_run.output().unwrap();
     assert!(preview.status.success(), "{preview:?}");
@@ -1146,22 +1169,30 @@ fn test_uninstall_workflow_dry_run_does_not_modify_system() {
 
 #[test]
 fn test_all_status_strings_are_lowercase() {
-    assert!(InstallStatus::NotFound
-        .as_str()
-        .chars()
-        .all(|c| !c.is_uppercase()));
-    assert!(InstallStatus::Installed
-        .as_str()
-        .chars()
-        .all(|c| !c.is_uppercase()));
-    assert!(InstallStatus::AlreadyInstalled
-        .as_str()
-        .chars()
-        .all(|c| !c.is_uppercase()));
-    assert!(InstallStatus::Failed
-        .as_str()
-        .chars()
-        .all(|c| !c.is_uppercase()));
+    assert!(
+        InstallStatus::NotFound
+            .as_str()
+            .chars()
+            .all(|c| !c.is_uppercase())
+    );
+    assert!(
+        InstallStatus::Installed
+            .as_str()
+            .chars()
+            .all(|c| !c.is_uppercase())
+    );
+    assert!(
+        InstallStatus::AlreadyInstalled
+            .as_str()
+            .chars()
+            .all(|c| !c.is_uppercase())
+    );
+    assert!(
+        InstallStatus::Failed
+            .as_str()
+            .chars()
+            .all(|c| !c.is_uppercase())
+    );
 }
 
 #[test]

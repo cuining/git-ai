@@ -54,34 +54,21 @@ def read_package(data, platform, version, source_commit):
     return payload
 
 
-def stage(bundle, sha256, source_commit, output):
+def stage_packages(archive_names, read_archive, source_commit, output):
     if not re.fullmatch(r"[0-9a-f]{40}", source_commit):
         raise ValueError("source commit must be a full lowercase Git SHA")
     if output.exists() or output.is_symlink():
         raise ValueError(f"output already exists: {output}")
     version = PACKER.cargo_version(Path(__file__).resolve().parents[1])
     archives = {f"dcc-git-ai-{platform}-{version}.tgz": platform for platform in PACKER.PLATFORMS}
-    with bundle.open("rb") as source:
-        digest = hashlib.sha256()
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(chunk)
-        if digest.hexdigest() != sha256:
-            raise ValueError("bundle SHA-256 mismatch")
-        with zipfile.ZipFile(source) as zipped:
-            entries = zipped.infolist()
-            if len(entries) != len(archives) or {entry.filename for entry in entries} != set(archives):
-                raise ValueError("bundle must contain the five platform tarballs for this version")
-            packages = {}
-            for entry in entries:
-                if stat.S_IFMT(entry.external_attr >> 16) not in (0, stat.S_IFREG):
-                    raise ValueError(f"unexpected ZIP file type: {entry.filename}")
-                platform = archives[entry.filename]
-                packages[platform] = read_package(zipped.read(entry), platform, version, source_commit)
+    if len(archive_names) != len(archives) or set(archive_names) != archives.keys():
+        raise ValueError("bundle must contain the five platform tarballs for this version")
 
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=output.parent) as temporary:
         staged = Path(temporary) / "packages"
-        for platform, package in packages.items():
+        for archive, platform in archives.items():
+            package = read_package(read_archive(archive), platform, version, source_commit)
             for name, (data, mode) in package.items():
                 path = staged / platform / name
                 path.parent.mkdir(parents=True, exist_ok=True)
@@ -89,6 +76,20 @@ def stage(bundle, sha256, source_commit, output):
                 path.chmod(mode)
             (staged / platform / ".npmrc").write_text(f"@dcc:registry={NPM_REGISTRY}\n")
         staged.rename(output)
+
+
+def stage(bundle, sha256, source_commit, output):
+    with bundle.open("rb") as source:
+        digest = hashlib.sha256()
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+        if digest.hexdigest() != sha256:
+            raise ValueError("bundle SHA-256 mismatch")
+        with zipfile.ZipFile(source) as zipped:
+            for entry in zipped.infolist():
+                if stat.S_IFMT(entry.external_attr >> 16) not in (0, stat.S_IFREG):
+                    raise ValueError(f"unexpected ZIP file type: {entry.filename}")
+            stage_packages(zipped.namelist(), zipped.read, source_commit, output)
 
 
 def main():

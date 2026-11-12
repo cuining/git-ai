@@ -102,6 +102,7 @@ class OeNpmBuildTests(unittest.TestCase):
     def test_build_stages_verified_platforms_with_exact_source_and_final_signed_bytes(self):
         result = self.build()
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.root / "work" / "platform-packages.zip").exists())
         source = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
         platforms = {"darwin-arm64", "darwin-x64", "linux-arm64-musl", "linux-x64-musl", "win32-x64"}
         self.assertEqual({path.name for path in self.output.iterdir()}, platforms)
@@ -131,6 +132,22 @@ class OeNpmBuildTests(unittest.TestCase):
                 )
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(result.stderr.strip(), "DCC_OE_BUILD_NPM must be 0 or 1")
+
+    def test_oe_requires_bootstrap_before_running_tools(self):
+        env = {**os.environ, "PATH": f"{self.root}{os.pathsep}/usr/bin:/bin",
+               "CARGO_HOME": str(self.root), "DCC_OE_BUILD_NPM": "1"}
+        env.pop("DCC_OE_BOOTSTRAP_URL", None)
+        env.pop("DCC_OE_BOOTSTRAP_SHA256", None)
+        for name in ("curl", "rustup", "timeout"):
+            tool = self.root / name
+            tool.write_text(f"#!/bin/sh\necho unexpected {name} >&2\nexit 1\n")
+            tool.chmod(0o755)
+        result = subprocess.run(
+            ["sh", str(ROOT / "build.sh")], cwd=ROOT, env=env,
+            text=True, capture_output=True, timeout=5,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stderr.strip(), "OE bootstrap requires both URL and SHA-256")
 
     def test_failed_windows_build_cannot_expose_partial_output(self):
         result = self.build(FAIL_TARGET="x86_64-pc-windows-msvc")
