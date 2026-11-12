@@ -222,10 +222,8 @@ def resolve_real_git_binary(repo_root: Path) -> Path:
         raise BenchmarkError("Unable to resolve system git from PATH.")
 
     fallback_path = Path(fallback).resolve()
-    fallback_name = fallback_path.name.lower()
     if (
-        "git-ai" in fallback_name
-        or "git-ai" in fallback_name
+        "git-ai" in fallback_path.name.lower()
         or str(repo_root / "target") in str(fallback_path)
     ):
         raise BenchmarkError(
