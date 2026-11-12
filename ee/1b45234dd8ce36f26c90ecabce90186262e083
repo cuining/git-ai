@@ -1,0 +1,43 @@
+.github/workflows/nightly-agent-integration.yml
+  s_e23bf86cad936b::t_a4b7e05a0f2160 214,217,321,324
+agent-support/intellij/README.md
+  s_e23bf86cad936b::t_7100afe202790c 22
+agent-support/intellij/src/main/kotlin/org/jetbrains/plugins/template/services/GitAiService.kt
+  s_e23bf86cad936b::t_fb1e4b1f09b6ae 69,73-74,88,93-102,130,132,191-194
+agent-support/visualstudio/DESIGN.md
+  s_e23bf86cad936b::t_746ebd39f7fdf7 10,90,165,167
+agent-support/visualstudio/README.md
+  s_e23bf86cad936b::t_7807cf6bdd0575 10
+agent-support/visualstudio/src/GitAiVS/Services/BinaryResolver.cs
+  s_e23bf86cad936b::t_b6f5462ca493d2 11-13,44,78-88,107
+agent-support/vscode/README.md
+  s_e23bf86cad936b::t_cb0c8f977b32f4 3,7-8,12,18
+agent-support/vscode/src/ai-edit-manager.ts
+  s_e23bf86cad936b::t_84fcd858b78322 4,6,497,502
+agent-support/vscode/src/consts.ts
+  s_e23bf86cad936b::t_8f5d4b3a358552 7
+agent-support/vscode/src/utils/binary-path.ts
+  s_e23bf86cad936b::t_384b33a52fbadd 17-19,24,40-41,55,71-74,76
+scripts/benchmarks/git/benchmark_modes_vs_main.py
+  s_e23bf86cad936b::t_b144ab3c38ab57 226
+scripts/benchmarks/git/benchmark_nasty_modes_vs_main.py
+  s_e23bf86cad936b::t_56b1dec29498e8 163
+scripts/benchmarks/git/benchmark_nasty_rebases.sh
+  s_e23bf86cad936b::t_625412c21d1dde 21
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.7-dcc.14",
+  "base_commit_sha": "ee1b45234dd8ce36f26c90ecabce90186262e083",
+  "prompts": {},
+  "sessions": {
+    "s_e23bf86cad936b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d02d-f6cc-74d3-b83c-bfaa1075f497",
+        "model": "unknown"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
