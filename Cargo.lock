@@ -1099,6 +1099,7 @@ dependencies = [
  "regex",
  "rstest",
  "rusqlite",
+ "same-file",
  "semver",
  "serde",
  "serde_json",

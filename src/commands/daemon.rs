@@ -922,13 +922,13 @@ pub(crate) fn restart_daemon(config: &DaemonConfig) -> Result<(), String> {
     ensure_daemon_running(Duration::from_secs(5)).map(|_| ())
 }
 
-pub(crate) fn repair_daemon(restart: bool) -> Result<(), String> {
+pub(crate) fn repair_daemon(restart: bool, installed_exe: Option<&Path>) -> Result<(), String> {
     let config = daemon_config_from_env_or_default_paths()?;
     if !restart && check_daemon_health(&config).is_ok() {
         return Ok(());
     }
     shutdown_daemon_if_running(&config)?;
-    let config = start_daemon_detached_with_config(config, Duration::from_secs(5), None)?;
+    let config = start_daemon_detached_with_config(config, Duration::from_secs(5), installed_exe)?;
     check_daemon_health(&config)
 }
 

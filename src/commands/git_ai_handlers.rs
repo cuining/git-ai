@@ -383,6 +383,7 @@ fn print_help() {
     );
     eprintln!("  bg                 Run and control git-ai background service");
     eprintln!("  install, install-hooks  Install hooks for AI authorship tracking");
+    eprintln!("    --profile=local --if-missing  Install the executable and set up local tracking");
     eprintln!(
         "    --env                  Also add git-ai to shell PATH configs (used by the install scripts)"
     );

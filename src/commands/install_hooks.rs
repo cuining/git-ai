@@ -5,10 +5,11 @@ use crate::mdm::agents::get_all_installers;
 use crate::mdm::hook_installer::HookInstallerParams;
 use crate::mdm::skills_installer;
 use crate::mdm::spinner::{Spinner, print_diff};
-use crate::mdm::utils::get_current_binary_path;
+use crate::mdm::utils::{clean_path, get_current_binary_path};
 use serde_json::{Map, Value, json};
 use std::collections::{HashMap, HashSet};
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -29,6 +30,7 @@ struct InstallOptions {
     api_key: Option<String>,
     agents: Option<HashSet<String>>,
     local_profile: bool,
+    if_missing: bool,
 }
 
 impl InstallOptions {
@@ -307,12 +309,17 @@ fn skip_install_daemon(dry_run: bool) -> bool {
         || std::env::var_os("GITAI_TEST_DB_PATH").is_some()
 }
 
-fn ensure_daemon(dry_run: bool, restart: bool, strict: bool) -> Result<(), GitAiError> {
+fn ensure_daemon(
+    dry_run: bool,
+    restart: bool,
+    strict: bool,
+    installed_exe: Option<&Path>,
+) -> Result<(), GitAiError> {
     if skip_install_daemon(dry_run) {
         return Ok(());
     }
     if strict {
-        crate::commands::daemon::repair_daemon(restart)
+        crate::commands::daemon::repair_daemon(restart, installed_exe)
     } else if restart {
         let daemon_config = DaemonConfig::from_env_or_default_paths()?;
         crate::commands::daemon::restart_daemon(&daemon_config)
@@ -326,7 +333,11 @@ fn ensure_daemon(dry_run: bool, restart: bool, strict: bool) -> Result<(), GitAi
 /// Main entry point for install-hooks command
 pub fn run(args: &[String]) -> Result<HashMap<String, String>, GitAiError> {
     let options = parse_install_options(args)?;
-    let result = run_hooks_install(&options);
+    let result = if options.if_missing {
+        install_if_missing(&options)
+    } else {
+        run_hooks_install(&options, None)
+    };
 
     // The install scripts previously applied shell/PATH config even when
     // install-hooks failed, so --env must run regardless of the hooks result.
@@ -359,6 +370,76 @@ pub fn run(args: &[String]) -> Result<HashMap<String, String>, GitAiError> {
     }
 
     result
+}
+
+/// A packaged executable can install itself without any knowledge of its caller.
+fn install_if_missing(options: &InstallOptions) -> Result<HashMap<String, String>, GitAiError> {
+    let root = config::git_ai_dir_path()
+        .ok_or_else(|| GitAiError::Generic("Cannot determine the installation directory".into()))?;
+    let bin = root.join("bin");
+    let executable = bin.join(format!("git-ai{}", std::env::consts::EXE_SUFFIX));
+    let _lock = if options.dry_run {
+        None
+    } else {
+        fs::create_dir_all(&bin)?;
+        let lock = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(root.join("install.lock"))?;
+        lock.lock()?;
+        Some(lock)
+    };
+
+    // Keep a hard link until setup finishes. An interrupted setup can be retried,
+    // and an executable placed by a different installer is never replaced.
+    let pending = bin.join(".git-ai-install-pending");
+    match fs::symlink_metadata(&executable) {
+        Ok(_) if executable.is_file() => {
+            let setup_pending = match same_file::is_same_file(&pending, &executable) {
+                Ok(true) => true,
+                Ok(false) => {
+                    if !options.dry_run {
+                        fs::remove_file(&pending)?;
+                    }
+                    false
+                }
+                Err(error) if error.kind() == ErrorKind::NotFound => false,
+                Err(error) => return Err(error.into()),
+            };
+            if !setup_pending {
+                println!(
+                    "Git AI is already installed at {}. Skipping setup.",
+                    executable.display()
+                );
+                return Ok(HashMap::new());
+            }
+        }
+        Ok(_) => {
+            return Err(GitAiError::Generic(format!(
+                "Git AI executable path is occupied: {}",
+                executable.display()
+            )));
+        }
+        Err(error) if error.kind() == ErrorKind::NotFound && options.dry_run => {}
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            let staged = tempfile::NamedTempFile::new_in(&bin)?;
+            fs::copy(get_current_binary_path()?, staged.path())?;
+            staged.as_file().sync_all()?;
+            drop(staged.persist(&pending).map_err(|error| error.error)?);
+            fs::hard_link(&pending, &executable)?;
+        }
+        Err(error) => return Err(error.into()),
+    }
+
+    if options.dry_run {
+        return run_hooks_install(options, Some(&executable));
+    }
+    let executable = clean_path(executable.canonicalize()?);
+    let statuses = run_hooks_install(options, Some(&executable))?;
+    fs::remove_file(pending)?;
+    Ok(statuses)
 }
 
 fn apply_local_profile() -> Result<(), String> {
@@ -403,7 +484,10 @@ fn apply_local_profile() -> Result<(), String> {
     Ok(())
 }
 
-fn run_hooks_install(options: &InstallOptions) -> Result<HashMap<String, String>, GitAiError> {
+fn run_hooks_install(
+    options: &InstallOptions,
+    installed_exe: Option<&Path>,
+) -> Result<HashMap<String, String>, GitAiError> {
     check_git_version(config::Config::fresh().git_cmd())?;
     // Package installer environment is only inherited by the standalone installer.
     let hooks_only = options.hooks_only();
@@ -418,7 +502,10 @@ fn run_hooks_install(options: &InstallOptions) -> Result<HashMap<String, String>
     };
 
     // Persist configuration before any daemon can start and observe it.
-    let binary_path = get_current_binary_path()?;
+    let binary_path = match installed_exe {
+        Some(path) => path.to_path_buf(),
+        None => get_current_binary_path()?,
+    };
     let config_changed = if options.local_profile {
         if !options.dry_run {
             // Preserve the current configuration and daemon if Trace2 has a conflict.
@@ -438,7 +525,7 @@ fn run_hooks_install(options: &InstallOptions) -> Result<HashMap<String, String>
     }
     // The package installers pass --env after installing a new executable.
     let restart_daemon = config_changed || options.configure_env;
-    if let Err(error) = ensure_daemon(options.dry_run, restart_daemon, hooks_only) {
+    if let Err(error) = ensure_daemon(options.dry_run, restart_daemon, hooks_only, installed_exe) {
         if hooks_only {
             return Err(error);
         }
@@ -476,6 +563,7 @@ fn parse_install_options(args: &[String]) -> Result<InstallOptions, GitAiError> 
             "--dry-run=false" => options.dry_run = false,
             "--verbose" | "-v" => options.verbose = true,
             "--profile=local" => options.local_profile = true,
+            "--if-missing" => options.if_missing = true,
             "--skills" => options.install_skills = true,
             "--visual-studio-extension" => options.include_visual_studio_extension = true,
             "--env" | "--env=true" => options.configure_env = true,
@@ -527,6 +615,11 @@ fn parse_install_options(args: &[String]) -> Result<InstallOptions, GitAiError> 
     if options.local_profile && (options.api_base.is_some() || options.api_key.is_some()) {
         return Err(GitAiError::Generic(
             "--profile=local does not accept API credentials".into(),
+        ));
+    }
+    if options.if_missing && !options.local_profile {
+        return Err(GitAiError::Generic(
+            "--if-missing requires --profile=local".into(),
         ));
     }
     Ok(options)
@@ -1311,8 +1404,8 @@ mod tests {
         let _legacy_db = EnvVarGuard::remove("GITAI_TEST_DB_PATH");
         let _control = EnvVarGuard::remove("GIT_AI_DAEMON_CONTROL_SOCKET");
         let _trace = EnvVarGuard::remove("GIT_AI_DAEMON_TRACE_SOCKET");
-        assert!(ensure_daemon(false, false, true).is_err());
-        assert!(ensure_daemon(true, false, true).is_ok());
+        assert!(ensure_daemon(false, false, true, None).is_err());
+        assert!(ensure_daemon(true, false, true, None).is_ok());
     }
 
     #[test]

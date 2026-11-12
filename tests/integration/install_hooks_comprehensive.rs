@@ -809,6 +809,116 @@ command = "echo user-toml"
 
 #[cfg(unix)]
 #[test]
+fn self_install_places_engine_and_hooks_at_the_user_installation() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let home = repo.test_home_path();
+    let mut install = repo.git_ai_command_without_pre_sync_for_test(
+        &["install", "--profile=local", "--if-missing"],
+        &[],
+    );
+    install
+        .env("CODEX_HOME", home.join(".codex"))
+        .env("CLAUDE_CONFIG_DIR", home.join(".claude"))
+        .env("DSH_HOME", home.join(".dsh"))
+        .env_remove("GIT_AI_TEST_CONFIG_PATCH");
+    stub_cursor(&repo, &mut install);
+
+    let output = install.output().unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let executable = home.join(".git-ai/bin/git-ai").canonicalize().unwrap();
+    let installed = Command::new(&executable).arg("--version").output().unwrap();
+    assert!(installed.status.success(), "{installed:?}");
+    let hooks_path = home.join(".cursor/hooks.json");
+    let hooks = fs::read_to_string(&hooks_path).unwrap();
+    assert!(hooks.contains(executable.to_str().unwrap()), "{hooks}");
+
+    fs::remove_file(&hooks_path).unwrap();
+    let output = install.output().unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert!(
+        !hooks_path.exists(),
+        "repeating install must skip hook setup"
+    );
+}
+
+#[test]
+fn self_install_can_retry_after_a_trace2_conflict() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let home = repo.test_home_path();
+    let codex_home = home.join(".codex");
+    fs::create_dir_all(&codex_home).unwrap();
+    let git_config = home.join(".gitconfig");
+    let conflicting_config = "[trace2]\n\teventTarget = 2\n";
+    fs::write(&git_config, conflicting_config).unwrap();
+    let mut install = repo.git_ai_command_without_pre_sync_for_test(
+        &[
+            "install",
+            "--profile=local",
+            "--if-missing",
+            "--agents=codex",
+        ],
+        &[],
+    );
+    install
+        .env("CODEX_HOME", &codex_home)
+        .env_remove("GIT_AI_TEST_CONFIG_PATCH");
+
+    let blocked = install.output().unwrap();
+    assert!(!blocked.status.success(), "{blocked:?}");
+    assert!(String::from_utf8_lossy(&blocked.stderr).contains("trace2-conflict"));
+    assert_eq!(fs::read_to_string(&git_config).unwrap(), conflicting_config);
+
+    fs::remove_file(git_config).unwrap();
+    let retried = install.output().unwrap();
+    assert!(retried.status.success(), "{retried:?}");
+    let config = fs::read_to_string(home.join(".git-ai/config.json")).unwrap();
+    let config: serde_json::Value = serde_json::from_str(&config).unwrap();
+    assert_eq!(config["remote_api_enabled"], false);
+}
+
+#[test]
+fn self_install_preserves_an_independent_installation() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let home = repo.test_home_path();
+    let bin = home.join(".git-ai/bin");
+    fs::create_dir_all(&bin).unwrap();
+    let executable = bin.join(format!("git-ai{}", std::env::consts::EXE_SUFFIX));
+    fs::copy(get_binary_path(), &executable).unwrap();
+    let config = home.join(".git-ai/config.json");
+    let user_config = r#"{"remote_api_enabled":true}"#;
+    fs::write(&config, user_config).unwrap();
+    fs::write(home.join(".gitconfig"), "[trace2]\n\teventTarget = 2\n").unwrap();
+
+    let mut install = repo.git_ai_command_without_pre_sync_for_test(
+        &["install", "--profile=local", "--if-missing"],
+        &[],
+    );
+    let mut dry_run = repo.git_ai_command_without_pre_sync_for_test(
+        &["install", "--profile=local", "--if-missing", "--dry-run"],
+        &[],
+    );
+
+    let preview = dry_run.output().unwrap();
+    assert!(preview.status.success(), "{preview:?}");
+    assert!(!home.join(".git-ai/install.lock").exists());
+
+    let output = install.output().unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let notice = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        notice.contains("Git AI is already installed at"),
+        "{notice}"
+    );
+    assert_eq!(preview.stdout, output.stdout);
+    assert_eq!(fs::read_to_string(config).unwrap(), user_config);
+    assert_eq!(
+        fs::read(executable).unwrap(),
+        fs::read(get_binary_path()).unwrap()
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn local_profile_discovers_agents_and_enables_updates() {
     let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
     let home = repo.test_home_path();
