@@ -10,6 +10,7 @@ use crate::metrics::types::{MetricEvent, MetricEventId};
 use chrono::{Local, NaiveDate, TimeZone};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
+use url::Url;
 
 type CommitKey = (String, String);
 
@@ -174,23 +175,22 @@ impl Rewrite {
     }
 }
 
-fn commit_key(record: &MetricHistoryRecord) -> Option<CommitKey> {
-    let attrs = &record.event.attrs;
-    let sha = sparse_get_string(attrs, attr_pos::COMMIT_SHA).flatten()?;
-    if !is_valid_git_oid(&sha) {
-        return None;
-    }
-    let repo = record
+fn repository_id(record: &MetricHistoryRecord) -> Option<String> {
+    record
         .repo_url
         .as_deref()
         .and_then(|remote| crate::repo_url::normalize_repo_url(remote).ok())
         .or_else(|| {
-            sparse_get_string(attrs, attr_pos::LOCAL_REPO_ID)
+            sparse_get_string(&record.event.attrs, attr_pos::LOCAL_REPO_ID)
                 .flatten()
                 .filter(|id| !id.is_empty())
                 .map(|id| format!("local:{id}"))
-        })?;
-    Some((repo, sha.to_ascii_lowercase()))
+        })
+}
+
+fn commit_sha(record: &MetricHistoryRecord) -> Option<String> {
+    let sha = sparse_get_string(&record.event.attrs, attr_pos::COMMIT_SHA).flatten()?;
+    is_valid_git_oid(&sha).then(|| sha.to_ascii_lowercase())
 }
 
 fn record_link(
@@ -288,7 +288,11 @@ fn anchored_commits(
     anchored
 }
 
-pub(crate) fn query(start: NaiveDate, end: NaiveDate) -> Result<PersonalUsage, GitAiError> {
+pub(crate) fn query(
+    start: NaiveDate,
+    end: NaiveDate,
+    repo_host: Option<&str>,
+) -> Result<PersonalUsage, GitAiError> {
     let history = MetricsDatabase::global()?
         .lock()
         .map_err(|_| GitAiError::Generic("metrics DB lock poisoned".into()))?
@@ -310,8 +314,17 @@ pub(crate) fn query(start: NaiveDate, end: NaiveDate) -> Result<PersonalUsage, G
     };
     let in_window = |date: &NaiveDate| (start..=end).contains(date);
     for record in history {
+        let repo = repository_id(&record);
+        if let Some(host) = repo_host
+            && repo
+                .as_deref()
+                .and_then(|repo| Url::parse(repo).ok())
+                .is_none_or(|url| url.host_str() != Some(host))
+        {
+            continue;
+        }
         let relevant = local_date(record.ts).as_ref().is_some_and(in_window);
-        let Some(key) = commit_key(&record) else {
+        let Some(key) = repo.zip(commit_sha(&record)) else {
             result.pending_events += usize::from(relevant);
             continue;
         };

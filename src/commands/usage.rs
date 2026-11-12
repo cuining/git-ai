@@ -36,6 +36,7 @@ pub fn handle_usage(args: &[String]) {
     let mut period = DEFAULT_PERIOD.to_string();
     let mut start_date = None;
     let mut end_date = None;
+    let mut repo_host = None;
 
     let mut i = 0;
     while i < args.len() {
@@ -46,7 +47,7 @@ pub fn handle_usage(args: &[String]) {
                 print_help();
                 return;
             }
-            "--start-date" | "--end-date" => {
+            "--start-date" | "--end-date" | "--repo-host" => {
                 let flag = args[i].as_str();
                 i += 1;
                 let Some(value) = args.get(i).filter(|value| !value.starts_with("--")) else {
@@ -55,7 +56,8 @@ pub fn handle_usage(args: &[String]) {
                 };
                 match flag {
                     "--start-date" => start_date = Some(value.as_str()),
-                    _ => end_date = Some(value.as_str()),
+                    "--end-date" => end_date = Some(value.as_str()),
+                    _ => repo_host = Some(value.as_str()),
                 }
             }
             "--period" => {
@@ -81,8 +83,8 @@ pub fn handle_usage(args: &[String]) {
         i += 1;
     }
 
-    if start_date.is_some() || end_date.is_some() {
-        print_dated_usage(start_date, end_date);
+    if start_date.is_some() || end_date.is_some() || repo_host.is_some() {
+        print_dated_usage(start_date, end_date, repo_host);
         return;
     }
 
@@ -151,7 +153,7 @@ pub fn handle_usage(args: &[String]) {
     }
 }
 
-fn print_dated_usage(start: Option<&str>, end: Option<&str>) {
+fn print_dated_usage(start: Option<&str>, end: Option<&str>, repo_host: Option<&str>) {
     let parse_date = |value: Option<&str>| {
         let value = value?;
         let date = NaiveDate::parse_from_str(value, "%Y-%m-%d").ok()?;
@@ -165,7 +167,14 @@ fn print_dated_usage(start: Option<&str>, end: Option<&str>) {
         eprintln!("--start-date must not be later than --end-date.");
         std::process::exit(1);
     }
-    match crate::metrics::personal_usage::query(start, end)
+    let repo_host = match repo_host.map(url::Host::parse).transpose() {
+        Ok(host) => host.map(|host| host.to_string()),
+        Err(_) => {
+            eprintln!("--repo-host requires a hostname.");
+            std::process::exit(1);
+        }
+    };
+    match crate::metrics::personal_usage::query(start, end, repo_host.as_deref())
         .and_then(|stats| serde_json::to_string(&stats).map_err(Into::into))
     {
         Ok(json) => println!("{json}"),
@@ -198,6 +207,7 @@ fn print_help() {
     eprintln!(
         "  --end-date <YYYY-MM-DD>            Inclusive last date for committed contributions"
     );
+    eprintln!("  --repo-host <HOST>                Include only this host in dated usage");
     eprintln!("  --help                            Show this help");
     eprintln!();
     eprintln!("Shows activity over the selected window from locally recorded metric events.");

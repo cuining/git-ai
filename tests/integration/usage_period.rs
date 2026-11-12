@@ -3,7 +3,7 @@ use crate::repos::test_repo::TestRepo;
 use crate::test_utils::{extract_json_object, isolated_metrics_db_path};
 use chrono::{Days, NaiveDate, Utc};
 use git_ai::metrics::PosEncoded;
-use git_ai::metrics::attrs::EventAttributes;
+use git_ai::metrics::attrs::{EventAttributes, attr_pos};
 use git_ai::metrics::db::MetricsDatabase;
 use git_ai::metrics::events::CommittedValues;
 use git_ai::metrics::types::MetricEvent;
@@ -143,10 +143,11 @@ fn usage_date_json(
     metrics_db_path: &str,
     start: NaiveDate,
     end: NaiveDate,
+    repo_host: Option<&str>,
 ) -> Value {
     let start = start.to_string();
     let end = end.to_string();
-    let args = [
+    let mut args = vec![
         "usage",
         "--start-date",
         &start,
@@ -154,6 +155,9 @@ fn usage_date_json(
         &end,
         "--json",
     ];
+    if let Some(host) = repo_host {
+        args.extend(["--repo-host", host]);
+    }
     let output = repo
         .git_ai_with_env(
             &args,
@@ -235,7 +239,7 @@ fn usage_machine_reports_local_id1_lines_and_the_inclusive_day() {
         )],
     );
 
-    let actual = usage_date_json(&repo, &metrics_db_path, date, date);
+    let actual = usage_date_json(&repo, &metrics_db_path, date, date, None);
     assert_eq!(
         actual,
         json!({
@@ -245,6 +249,63 @@ fn usage_machine_reports_local_id1_lines_and_the_inclusive_day() {
             "pending_events": 0,
         })
     );
+}
+
+#[test]
+fn usage_machine_filters_totals_and_daily_by_exact_repo_host() {
+    let (_metrics_db_dir, metrics_db_path) = isolated_metrics_db_path();
+    let repo = TestRepo::new();
+    let first = personal_usage_date();
+    let second = first.succ_opt().unwrap();
+    let internal = "git@git.xiaojukeji.com:team/first.git";
+    let other_internal = "https://git.xiaojukeji.com:443/team/second.git";
+    let external = "https://github.com/team/first";
+    let similar_host = "https://git.xiaojukeji.com.example.invalid/team/second";
+    let a = "a".repeat(40);
+    let b = "b".repeat(40);
+    let mut local: Value =
+        serde_json::from_str(&usage_commit_row(first, "", &b, None, [19, 2, 0])).unwrap();
+    let attrs = local["a"].as_object_mut().unwrap();
+    attrs.remove(&attr_pos::REPO_URL.to_string());
+    attrs.insert(attr_pos::LOCAL_REPO_ID.to_string(), json!("local-repo"));
+    insert_personal_rows(
+        &metrics_db_path,
+        &[
+            usage_commit_row(first, internal, &a, None, [5, 2, 1]),
+            usage_commit_row(second, other_internal, &b, None, [7, 4, 1]),
+            usage_commit_row(first, external, &a, None, [20, 20, 0]),
+            usage_commit_row(second, similar_host, &b, None, [11, 5, 0]),
+            local.to_string(),
+            usage_commit_row(first, internal, "missing-sha", None, [1, 1, 0]),
+            usage_commit_row(first, external, "missing-sha", None, [1, 1, 0]),
+        ],
+    );
+
+    let scoped = usage_date_json(
+        &repo,
+        &metrics_db_path,
+        first,
+        second,
+        Some("GIT.XIAOJUKEJI.COM"),
+    );
+    assert_eq!(
+        scoped,
+        json!({
+            "totals": {"commit_count": 2, "added_lines": 12, "ai_lines": 6, "human_lines": 2, "unknown_lines": 4},
+            "daily": [
+                {"date": first.to_string(), "commit_count": 1, "added_lines": 5, "ai_lines": 2, "human_lines": 1, "unknown_lines": 2},
+                {"date": second.to_string(), "commit_count": 1, "added_lines": 7, "ai_lines": 4, "human_lines": 1, "unknown_lines": 2},
+            ],
+            "repos": [
+                {"repo": "https://git.xiaojukeji.com/team/first", "commit_count": 1, "added_lines": 5, "ai_lines": 2, "human_lines": 1, "unknown_lines": 2},
+                {"repo": "https://git.xiaojukeji.com/team/second", "commit_count": 1, "added_lines": 7, "ai_lines": 4, "human_lines": 1, "unknown_lines": 2},
+            ],
+            "pending_events": 1,
+        })
+    );
+    let unscoped = usage_date_json(&repo, &metrics_db_path, first, second, None);
+    assert_eq!(unscoped["totals"]["added_lines"], 62);
+    assert_eq!(unscoped["pending_events"], 2);
 }
 
 #[test]
@@ -299,7 +360,7 @@ fn usage_machine_scopes_duplicate_and_rewrite_evidence_without_moving_original_d
         ],
     );
 
-    let actual = usage_date_json(&repo, &metrics_db_path, first, second);
+    let actual = usage_date_json(&repo, &metrics_db_path, first, second, None);
     assert_eq!(
         actual,
         json!({
@@ -362,7 +423,7 @@ fn usage_machine_reports_relevant_conflicts_and_unresolved_derivatives() {
             usage_commit_row(second, remote, &target, None, [1, 1, 0]),
         ],
     );
-    let actual = usage_date_json(&repo, &metrics_db_path, second, second);
+    let actual = usage_date_json(&repo, &metrics_db_path, second, second, None);
     assert_eq!(actual["totals"]["commit_count"], 0);
     assert_eq!(actual["daily"], json!([]));
     assert_eq!(actual["repos"], json!([]));
@@ -405,7 +466,7 @@ fn usage_machine_counts_dated_local_commits_without_owner_filtering() {
     ];
     insert_personal_rows(&metrics_db_path, &rows);
 
-    let actual = usage_date_json(&repo, &metrics_db_path, first, second);
+    let actual = usage_date_json(&repo, &metrics_db_path, first, second, None);
     assert_eq!(
         actual,
         json!({
