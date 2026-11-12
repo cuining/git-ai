@@ -1,0 +1,21 @@
+Cargo.lock
+  s_268d23c8869b26::t_c11709aaeee63a 1069
+Cargo.toml
+  s_268d23c8869b26::t_1cd872cbfec67c 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.7-dcc.12",
+  "base_commit_sha": "b532aff365a0681ee003299be2c41cf2d5b68355",
+  "prompts": {},
+  "sessions": {
+    "s_268d23c8869b26": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cfb2-478c-7b20-a801-1446532c7919",
+        "model": "unknown"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
