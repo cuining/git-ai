@@ -1,0 +1,34 @@
+scripts/test-build-oe-npm.py
+  s_129b8405666867::t_7fb8943abf270f 127,131,156-159,181-203
+  s_6111a7c46defbd::t_02f5fd3090da4a 204
+build.sh
+  s_129b8405666867::t_aca4aae9b92365 58-62
+packaging/oe-binary-release.md
+  s_129b8405666867::t_aca4aae9b92365 35-38,41
+scripts/oe-release.py
+  s_129b8405666867::t_aca4aae9b92365 121-129,213-216,228-232
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-dcc.12",
+  "base_commit_sha": "ac19b65a0e6e4932dc7bea93804386f15f566f91",
+  "prompts": {},
+  "sessions": {
+    "s_129b8405666867": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cf56-3ffe-79c0-8889-2fa9cd49a0bb",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    },
+    "s_6111a7c46defbd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cee1-1a71-71f3-9a98-c7d76eada852",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
