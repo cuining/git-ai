@@ -1,0 +1,23 @@
+src/commands/usage.rs
+  s_268d23c8869b26::t_1cc8a8be084050 39,50,59-60,86-87,156,170-177,210
+tests/integration/usage_period.rs
+  s_268d23c8869b26::t_52a83942245e83 6,146,150,158-160,242,254-310,363,426,469
+src/metrics/personal_usage.rs
+  s_268d23c8869b26::t_1cc8a8be084050 13,178-179,184,188-193,291-295,317-325,327
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.7-dcc.14",
+  "base_commit_sha": "c1e7938ef6cc89c0be6f6a727736d04ce82504c0",
+  "prompts": {},
+  "sessions": {
+    "s_268d23c8869b26": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cfb2-478c-7b20-a801-1446532c7919",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
