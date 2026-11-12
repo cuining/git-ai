@@ -329,6 +329,8 @@ pub struct ConfigPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allow_repositories: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exclude_prompts_in_repositories: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub untraced_fixup_ignored_paths: Option<Vec<String>>,
@@ -439,53 +441,46 @@ impl Config {
     }
 
     pub fn is_allowed_repository(&self, repository: &Option<Repository>) -> bool {
-        // Fetch remotes once and reuse for both exclude and allow checks
-        let remotes = repository
-            .as_ref()
-            .and_then(|repo| repo.remotes_with_urls().ok());
-
-        self.is_allowed_repository_with_remotes(remotes.as_ref())
+        self.is_allowed_repository_ref(repository.as_ref())
     }
 
-    /// Helper that accepts pre-fetched remotes to avoid multiple git operations
-    #[cfg_attr(test, allow(dead_code))]
+    pub(crate) fn is_allowed_repository_ref(&self, repository: Option<&Repository>) -> bool {
+        if !self.has_repository_filters() {
+            return true;
+        }
+        let remotes = repository.and_then(|repo| repo.fetch_remotes().ok());
+        self.is_allowed_repository_with_remotes(remotes.as_deref())
+    }
+
+    pub(crate) fn is_allowed_repository_at_path(&self, worktree: Option<&Path>) -> bool {
+        if !self.has_repository_filters() {
+            return true;
+        }
+        let remotes = worktree.and_then(|path| crate::git::repository::remotes_for_path(path).ok());
+        self.is_allowed_repository_with_remotes(remotes.as_deref())
+    }
+
+    pub(crate) fn is_allowed_repository_url(&self, url: Option<&str>) -> bool {
+        (self.allow_repositories.is_empty()
+            || url.is_some_and(|url| remote_matches_patterns(&self.allow_repositories, url)))
+            && (self.exclude_repositories.is_empty()
+                || !url.is_some_and(|url| remote_matches_patterns(&self.exclude_repositories, url)))
+    }
+
+    /// Allow by the remote that identifies the repository in metrics and sessions.
+    /// Exclusions on any configured remote still take precedence.
     pub(crate) fn is_allowed_repository_with_remotes(
         &self,
-        remotes: Option<&Vec<(String, String)>>,
+        remotes: Option<&[(String, String)]>,
     ) -> bool {
-        if remotes.is_some_and(|remotes| {
-            remotes.iter().any(|(_, remote_url)| {
-                crate::diagnostic_sentinels::is_debug_self_check_remote_url(remote_url)
-            })
-        }) {
-            return true;
-        }
-
-        // First check if repository is in exclusion list - exclusions take precedence
-        if !self.exclude_repositories.is_empty()
-            && let Some(remotes) = remotes
-        {
-            // If any remote matches the exclusion patterns, deny access
-            if remotes
-                .iter()
-                .any(|remote| remote_matches_patterns(&self.exclude_repositories, &remote.1))
-            {
-                return false;
-            }
-        }
-
-        // If allowlist is empty, allow everything (unless excluded above)
-        if self.allow_repositories.is_empty() {
-            return true;
-        }
-
-        // If allowlist is defined, only allow repos whose remotes match the patterns
-        match remotes {
-            Some(remotes) => remotes
-                .iter()
-                .any(|remote| remote_matches_patterns(&self.allow_repositories, &remote.1)),
-            None => false, // Can't verify, deny by default when allowlist is active
-        }
+        let remotes = remotes.unwrap_or_default();
+        let default_url =
+            crate::git::repository::default_remote(remotes).map(|(_, url)| url.as_str());
+        self.is_allowed_repository_url(default_url)
+            && (self.exclude_repositories.is_empty()
+                || !remotes
+                    .iter()
+                    .any(|(_, url)| remote_matches_patterns(&self.exclude_repositories, url)))
     }
 
     /// Returns true if prompts should be excluded (not shared) for the given repository.
@@ -791,65 +786,53 @@ where
 }
 
 fn remote_matches_patterns(patterns: &[Pattern], remote_url: &str) -> bool {
-    let remote_candidates = repo_remote_match_candidates(remote_url);
+    let remote_url = remote_url.trim();
+    let remote_parts = repo_match_parts(remote_url);
     patterns.iter().any(|pattern| {
-        repo_pattern_match_candidates(pattern.as_str())
-            .iter()
-            .filter_map(|candidate| Pattern::new(candidate).ok())
-            .any(|candidate_pattern| {
-                remote_candidates
-                    .iter()
-                    .any(|candidate| candidate_pattern.matches(candidate))
-            })
+        let Ok(pattern) = Pattern::new(pattern.as_str().trim()) else {
+            return false;
+        };
+        let Some((host_pattern, path_patterns)) = repo_match_parts(pattern.as_str()) else {
+            return pattern.matches(remote_url)
+                || remote_parts.as_ref().is_some_and(|(host, paths)| {
+                    paths.iter().any(|path| {
+                        pattern.matches(path) || pattern.matches(&format!("{host}/{path}"))
+                    })
+                });
+        };
+        let Some((host, paths)) = &remote_parts else {
+            return false;
+        };
+        Pattern::new(&host_pattern).is_ok_and(|pattern| pattern.matches(host))
+            && (pattern.matches(remote_url)
+                || path_patterns.iter().any(|pattern| {
+                    Pattern::new(pattern)
+                        .is_ok_and(|pattern| paths.iter().any(|path| pattern.matches(path)))
+                }))
     })
-}
-
-fn repo_pattern_match_candidates(value: &str) -> Vec<String> {
-    let mut candidates = vec![value.trim().to_string()];
-
-    if let Some((host, path_variants)) = repo_match_parts(value) {
-        for path in path_variants {
-            candidates.push(format!("{}/{}", host, path));
-        }
-    }
-
-    candidates.sort();
-    candidates.dedup();
-    candidates
-}
-
-fn repo_remote_match_candidates(value: &str) -> Vec<String> {
-    let mut candidates = vec![value.trim().to_string()];
-
-    if let Some((host, path_variants)) = repo_match_parts(value) {
-        for path in path_variants {
-            candidates.push(format!("{}/{}", host, path));
-            candidates.push(path);
-        }
-    }
-
-    candidates.sort();
-    candidates.dedup();
-    candidates
 }
 
 fn repo_match_parts(value: &str) -> Option<(String, Vec<String>)> {
     let value = value.trim();
 
-    if let Some((_, rest)) = value.split_once("://") {
+    if value.chars().any(char::is_control) {
+        return None;
+    }
+    if let Some((scheme, rest)) = value.split_once("://") {
+        if !crate::repo_url::is_git_network_scheme(scheme) {
+            return None;
+        }
         let (authority, path) = rest.split_once('/')?;
+        if authority.contains('\\') {
+            return None;
+        }
         return Some((
             normalize_repo_authority(authority)?,
             normalize_repo_path_variants(path)?,
         ));
     }
 
-    let (user_host, path) = value.split_once(':')?;
-    if value.starts_with('/') || !user_host.contains('@') || path.is_empty() {
-        return None;
-    }
-
-    let (_, host) = user_host.rsplit_once('@')?;
+    let (host, path) = crate::repo_url::scp_remote_parts(value)?;
     Some((
         normalize_repo_host(host)?,
         normalize_repo_path_variants(path)?,

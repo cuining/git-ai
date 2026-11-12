@@ -52,6 +52,7 @@ use tokio::sync::Notify;
 use tokio::time::{MissedTickBehavior, interval};
 
 use crate::authorship::authorship_log_serialization::generate_session_id;
+use crate::config::Config;
 use crate::daemon::telemetry_worker::DaemonTelemetryWorkerHandle;
 use crate::error::GitAiError;
 use crate::metrics::{EventAttributes, MetricEvent, PosEncoded, TokenUsageValues};
@@ -736,30 +737,13 @@ impl SessionIdentity {
     }
 }
 
-/// Resolve the repo_url for emission attributes: the stream's stored working
-/// directory, falling back to the agent's cwd inference (persisted back like
-/// the SessionEvent path does) so the repo exclude gate sees a repo_url
-/// whenever one is resolvable.
-fn resolve_repo_url_for_stream(
-    streams_db: &StreamsDatabase,
-    stream: &StreamRecord,
-) -> Option<String> {
-    let work_dir = stream
-        .repo_work_dir
-        .as_ref()
-        .map(PathBuf::from)
-        .or_else(|| {
-            let inferred = crate::streams::agent::get_agent(&stream.tool)?
-                .infer_cwd(Path::new(&stream.stream_path))?;
-            let _ = streams_db.update_repo_work_dir(
-                &stream.session_id,
-                &stream.stream_kind,
-                &stream.stream_path,
-                &inferred.display().to_string(),
-            );
-            Some(inferred)
-        })?;
-    crate::repo_url::resolve_repo_url_from_path(&work_dir)
+fn stream_work_dir(stream: &StreamRecord, config: &Config) -> Option<PathBuf> {
+    super::stream_worker::stream_repo_work_dir(
+        &stream.tool,
+        Path::new(&stream.stream_path),
+        stream.repo_work_dir.as_deref().map(Path::new),
+        config,
+    )
 }
 
 /// Backoff between attempts for a file whose last pass failed, indexed by
@@ -810,6 +794,16 @@ fn process_task_blocking(
     else {
         return Ok(());
     };
+    let config = Config::fresh();
+    let work_dir = if config.has_repository_filters() {
+        let work_dir = stream_work_dir(&stream, &config);
+        if !config.is_allowed_repository_at_path(work_dir.as_deref()) {
+            return Ok(());
+        }
+        work_dir
+    } else {
+        None
+    };
     let identity = SessionIdentity::from_stream(&stream);
     let result = process_file(
         token_db,
@@ -820,7 +814,16 @@ fn process_task_blocking(
         // result is persisted so later DB-only corrections carry the same
         // repo gate attribute.
         || {
-            let repo_url = resolve_repo_url_for_stream(streams_db, &stream);
+            let work_dir = work_dir.or_else(|| stream_work_dir(&stream, &config))?;
+            if stream.repo_work_dir.is_none() {
+                let _ = streams_db.update_repo_work_dir(
+                    &stream.session_id,
+                    &stream.stream_kind,
+                    &stream.stream_path,
+                    &work_dir.display().to_string(),
+                );
+            }
+            let repo_url = crate::repo_url::resolve_repo_url_from_path(&work_dir);
             if let Some(url) = &repo_url {
                 let _ = token_db.update_session_repo_url(&identity.session_id, url);
             }
@@ -914,6 +917,9 @@ fn reconcile_session(
     session: crate::token_usage::db::ReconcileSession,
     sink: &impl Fn(&[MetricEvent]) -> Result<(), GitAiError>,
 ) -> Result<(), GitAiError> {
+    if !Config::fresh().is_allowed_repository_url(session.repo_url.as_deref()) {
+        return token_db.clear_needs_reconcile(&session.session_id);
+    }
     let identity = SessionIdentity {
         session_id: session.session_id.clone(),
         external_session_id: session.external_session_id,

@@ -1215,6 +1215,10 @@ impl TestRepo {
             );
         }
 
+        if let Some(allow) = &patch.allow_repositories {
+            config.insert("allow_repositories".to_string(), serde_json::json!(allow));
+        }
+
         if let Some(exclude) = &patch.exclude_prompts_in_repositories {
             let values = exclude
                 .iter()

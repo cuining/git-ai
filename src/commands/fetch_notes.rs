@@ -132,6 +132,7 @@ pub fn handle_fetch_notes(args: &[String]) {
                 let status = match notes_existence {
                     NotesExistence::Found => "found".to_string(),
                     NotesExistence::NotFound => "not_found".to_string(),
+                    NotesExistence::Skipped => "skipped".to_string(),
                 };
                 let output = FetchNotesJsonOutput {
                     remote: remote_name,
@@ -149,6 +150,9 @@ pub fn handle_fetch_notes(args: &[String]) {
                     }
                     NotesExistence::NotFound => {
                         eprintln!(" no notes found on remote ({:.2}s).", elapsed.as_secs_f64());
+                    }
+                    NotesExistence::Skipped => {
+                        eprintln!(" skipped by repository filters.");
                     }
                 }
             }

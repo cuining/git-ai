@@ -533,7 +533,7 @@ fn handle_checkpoint(args: &[String]) {
 
     // Check repository allowlist before sending to daemon.
     // Skip entirely when no allow/exclude filters are configured (common case)
-    // to avoid spawning a `git remote -v` subprocess.
+    // to avoid reading repository config.
     let t_allowlist = std::time::Instant::now();
     {
         let config = config::Config::get();
@@ -542,11 +542,7 @@ fn handle_checkpoint(args: &[String]) {
             for request in &requests {
                 for file in &request.files {
                     if checked_repos.insert(file.repo_work_dir.clone())
-                        && let Ok(repo) =
-                            crate::git::repository::discover_repository_in_path_no_git_exec(
-                                &file.repo_work_dir,
-                            )
-                        && !config.is_allowed_repository(&Some(repo))
+                        && !config.is_allowed_repository_at_path(Some(&file.repo_work_dir))
                     {
                         eprintln!(
                             "Skipping checkpoint because repository is excluded or not in allow_repositories list"
@@ -799,6 +795,7 @@ fn notes_existence_label(existence: NotesExistence) -> &'static str {
     match existence {
         NotesExistence::Found => "found",
         NotesExistence::NotFound => "not_found",
+        NotesExistence::Skipped => "skipped",
     }
 }
 

@@ -82,13 +82,7 @@ pub(crate) enum MetricRepositoryIdentity {
 
 impl MetricRepositoryIdentity {
     pub(crate) fn from_repo(repo: &Repository) -> Self {
-        if let Ok(remotes) = repo.remotes_with_urls()
-            && let Some((_, url)) = remotes
-                .iter()
-                .find(|(name, _)| name == "origin")
-                .or_else(|| remotes.first())
-            && let Ok(url) = crate::repo_url::normalize_repo_url(url)
-        {
+        if let Some(url) = crate::repo_url::resolve_repo_url_from_repo(repo) {
             return Self::Remote(url);
         }
 

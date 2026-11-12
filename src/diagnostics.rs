@@ -331,6 +331,12 @@ pub fn check_trace2_global_config(target: &GitDiagnosticTarget) -> DiagnosticChe
 }
 
 pub fn run_attribution_self_check(target: &GitDiagnosticTarget) -> DiagnosticCheckResult {
+    if !Config::fresh().is_allowed_repository_url(Some(DEBUG_SELF_CHECK_REMOTE_URL)) {
+        return DiagnosticCheckResult::skipped(
+            "attribution self-check skipped by repository filters",
+            vec![],
+        );
+    }
     let mut commands = Vec::new();
     let repo_path = debug_self_check_root().join(format!(
         "{}-{}",

@@ -61,6 +61,12 @@ pub fn handle_notes_migrate(args: &[String]) {
             std::process::exit(1);
         }
     };
+    if !cfg.is_allowed_repository_ref(Some(&repo)) {
+        eprintln!(
+            "Skipping Notes migration because the repository is outside the allowlist or excluded."
+        );
+        return;
+    }
 
     // 3. Build the API client.
     let backend_url = match cfg.notes_backend_url() {

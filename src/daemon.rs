@@ -3080,6 +3080,10 @@ fn run_blocking_side_effect<T>(operation: impl FnOnce() -> T) -> T {
     }
 }
 
+fn repository_allows_attribution(worktree: Option<&Path>) -> bool {
+    run_blocking_side_effect(|| config::Config::fresh().is_allowed_repository_at_path(worktree))
+}
+
 #[derive(Debug, Clone)]
 struct PendingSquashMerge {
     source_head: String,
@@ -5072,7 +5076,6 @@ impl ActorDaemonCoordinator {
         {
             tokio::time::sleep(delay).await;
         }
-        let trace_id = request.trace_id.clone();
         let file_count = request.files.len();
         let Some(repo_work_dir) = request.files.first().map(|file| file.repo_work_dir.clone())
         else {
@@ -5089,7 +5092,6 @@ impl ActorDaemonCoordinator {
             )
         });
 
-        self.notify_checkpoint_stream(&request);
         self.wait_for_trace_ingest_seq_logging_delay(
             accepted.trace_ingest_target,
             accepted.receipt_seq,
@@ -5101,8 +5103,6 @@ impl ActorDaemonCoordinator {
             component = "daemon",
             phase = "checkpoint_admission",
             receipt_seq = accepted.receipt_seq,
-            %trace_id,
-            %family,
             file_count,
             retained_bytes = accepted.reservation.body_bytes(),
             receipt_to_admission_ms =
@@ -6375,6 +6375,9 @@ impl ActorDaemonCoordinator {
                         tracing::debug!(%family, "untraced fixup pass skipped: family is ignored");
                         continue;
                     }
+                    if !repository_allows_attribution(Some(&worktree)) {
+                        continue;
+                    }
                     let git_dir_key = git_dir.to_string_lossy().to_string();
                     let worktree_key = worktree.to_string_lossy().to_string();
                     let scan = self
@@ -6452,6 +6455,15 @@ impl ActorDaemonCoordinator {
                     receipt_seq,
                     reservation: _reservation,
                 } => {
+                    if !repository_allows_attribution(
+                        request
+                            .files
+                            .first()
+                            .map(|file| file.repo_work_dir.as_path()),
+                    ) {
+                        continue;
+                    }
+                    self.notify_checkpoint_stream(&request);
                     let repo_wd = request
                         .files
                         .first()
@@ -7386,6 +7398,9 @@ impl ActorDaemonCoordinator {
         }
 
         let cmd = &applied.command;
+        if !repository_allows_attribution(cmd.worktree.as_deref()) {
+            return Ok(());
+        }
         let events = &applied.analysis.events;
 
         let primary = cmd.primary_command.as_deref().unwrap_or("unknown");
@@ -8805,6 +8820,9 @@ impl ActorDaemonCoordinator {
                 started_at_ns,
                 command,
             } => {
+                if !repository_allows_attribution(Some(Path::new(&repo_work_dir))) {
+                    return ControlResponse::ok(None, None);
+                }
                 let worktree_key = Self::worktree_state_key(Path::new(&repo_work_dir));
                 let original_cwd = original_cwd.unwrap_or_else(|| repo_work_dir.clone());
                 if let Ok(db) = crate::daemon::bash_history_db::BashHistoryDatabase::global()
@@ -8859,6 +8877,9 @@ impl ActorDaemonCoordinator {
                     .as_ref()
                     .map(|s| s.repo_work_dir.clone())
                     .unwrap_or_else(|| Self::worktree_state_key(Path::new(&repo_work_dir)));
+                if !repository_allows_attribution(Some(Path::new(&worktree_key))) {
+                    return ControlResponse::ok(None, None);
+                }
                 let original_cwd = original_cwd
                     .map(|cwd| Self::worktree_state_key(Path::new(&cwd)))
                     .unwrap_or_else(|| worktree_key.clone());
@@ -8911,6 +8932,11 @@ impl ActorDaemonCoordinator {
                 started_at_ns,
                 command,
             } => {
+                if !repository_allows_attribution(Some(Path::new(
+                    discovered_repo_work_dir.as_deref().unwrap_or(&original_cwd),
+                ))) {
+                    return ControlResponse::ok(None, None);
+                }
                 let discovered_repo_work_dir = discovered_repo_work_dir
                     .as_deref()
                     .map(Path::new)
@@ -8947,6 +8973,11 @@ impl ActorDaemonCoordinator {
                 ended_at_ns,
                 command,
             } => {
+                if !repository_allows_attribution(Some(Path::new(
+                    discovered_repo_work_dir.as_deref().unwrap_or(&original_cwd),
+                ))) {
+                    return ControlResponse::ok(None, None);
+                }
                 let discovered_repo_work_dir = discovered_repo_work_dir
                     .as_deref()
                     .map(Path::new)

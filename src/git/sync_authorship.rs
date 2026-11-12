@@ -1,3 +1,4 @@
+use crate::config::Config;
 use crate::git::refs::{
     AI_AUTHORSHIP_PUSH_REFSPEC, copy_ref, fallback_merge_notes_ours, merge_notes_from_ref,
     ref_exists, tracking_ref_for_remote,
@@ -26,6 +27,107 @@ pub enum NotesExistence {
     Found,
     /// Confirmed that no notes exist on the remote
     NotFound,
+    /// The repository policy skipped the fetch
+    Skipped,
+}
+
+struct NotesTransport {
+    config: Config,
+    repository_allowed: bool,
+    effective_remotes: Option<String>,
+    direct_remote_alias: Option<String>,
+}
+
+impl NotesTransport {
+    fn new(repository: &Repository, remote: Option<&str>) -> Self {
+        let config = Config::fresh();
+        let mut transport = Self {
+            config,
+            repository_allowed: true,
+            effective_remotes: None,
+            direct_remote_alias: None,
+        };
+        if !transport.config.has_repository_filters() {
+            return transport;
+        }
+        let remotes = repository.fetch_remotes().ok();
+        transport.repository_allowed = transport
+            .config
+            .is_allowed_repository_with_remotes(remotes.as_deref());
+        if !transport.repository_allowed {
+            return transport;
+        }
+
+        // Ask Git once for the effective fetch and push URLs, including its URL rewrites.
+        let mut args = repository.global_args_for_exec();
+        if let Some(remote) = remote
+            && !remotes
+                .as_ref()
+                .is_some_and(|remotes| remotes.iter().any(|(name, _)| name == remote))
+        {
+            let alias = format!("git-ai-notes-{}", crate::uuid::generate_v4());
+            args.extend(["-c".to_string(), format!("remote.{alias}.url={remote}")]);
+            transport.direct_remote_alias = Some(alias);
+        }
+        // Validate the NUL-delimited Git config before parsing the line-based
+        // remote listing. URL values can contain LF or tabs in local paths.
+        let mut config_args = args.clone();
+        config_args.extend([
+            "config".to_string(),
+            "--null".to_string(),
+            "--list".to_string(),
+        ]);
+        if !exec_git(&config_args).is_ok_and(|output| {
+            output
+                .stdout
+                .split(|byte| *byte == 0)
+                .filter(|entry| entry.starts_with(b"remote.") || entry.starts_with(b"url."))
+                .all(|entry| {
+                    entry
+                        .splitn(2, |byte| *byte == b'\n')
+                        .all(|part| !part.iter().any(u8::is_ascii_control))
+                })
+        }) {
+            return transport;
+        }
+        args.extend(["remote".to_string(), "-v".to_string()]);
+        transport.effective_remotes = exec_git(&args)
+            .ok()
+            .and_then(|output| String::from_utf8(output.stdout).ok());
+        transport
+    }
+
+    fn allows(&self, remote: &str, push: bool) -> bool {
+        if !self.config.has_repository_filters() {
+            return true;
+        }
+        let Some(remotes) = &self.effective_remotes else {
+            return false;
+        };
+        let remote = self.direct_remote_alias.as_deref().unwrap_or(remote);
+        let mut urls = remotes
+            .lines()
+            .filter_map(|line| {
+                let (name, entry) = line.split_once('\t')?;
+                if name != remote {
+                    return None;
+                }
+                if push {
+                    entry.strip_suffix(" (push)")
+                } else {
+                    entry.strip_suffix(" (fetch)").or_else(|| {
+                        let (url, filter) = entry.rsplit_once(" (fetch) [")?;
+                        filter.ends_with(']').then_some(url)
+                    })
+                }
+            })
+            .peekable();
+        urls.peek().is_some() && urls.all(|url| self.config.is_allowed_repository_url(Some(url)))
+    }
+}
+
+pub(crate) fn notes_fetch_allowed(repository: &Repository, remote: &str) -> bool {
+    NotesTransport::new(repository, Some(remote)).allows(remote, false)
 }
 
 pub fn fetch_remote_from_args(
@@ -136,6 +238,11 @@ pub fn fetch_missing_notes_for_commits(
         return Ok(());
     }
 
+    let transport = NotesTransport::new(repository, None);
+    if !transport.repository_allowed {
+        return Ok(());
+    }
+
     // On the HTTP notes backend the server — not refs/notes/ai — is the
     // source of truth: pull the missing source notes straight from it into
     // the local cache first. The git refs fetch below requires working SSH
@@ -164,10 +271,13 @@ pub fn fetch_missing_notes_for_commits(
     );
 
     let mut first_fetch_error: Option<GitAiError> = None;
-    if let Ok(remotes) = repository.remotes_with_urls() {
-        for (remote_name, _) in remotes {
+    if let Ok(remotes) = repository.remotes() {
+        for remote_name in remotes {
+            if !transport.allows(&remote_name, false) {
+                continue;
+            }
             tracing::debug!("Attempting safe notes fetch from remote {}", remote_name);
-            match fetch_authorship_notes(repository, &remote_name) {
+            match fetch_authorship_notes_from_allowed_remote(repository, &remote_name) {
                 Ok(_) => tracing::debug!("Fetched and merged notes from remote {}", remote_name),
                 Err(e) => {
                     tracing::debug!("Notes fetch from remote {} failed: {}", remote_name, e);
@@ -218,6 +328,16 @@ pub fn fetch_missing_notes_for_commits_best_effort(
 // Ok(NotesExistence::NotFound) if confirmed no notes exist on remote,
 // Err(...) for actual errors (network, permissions, etc.)
 pub fn fetch_authorship_notes(
+    repository: &Repository,
+    remote_name: &str,
+) -> Result<NotesExistence, GitAiError> {
+    if !notes_fetch_allowed(repository, remote_name) {
+        return Ok(NotesExistence::Skipped);
+    }
+    fetch_authorship_notes_from_allowed_remote(repository, remote_name)
+}
+
+fn fetch_authorship_notes_from_allowed_remote(
     repository: &Repository,
     remote_name: &str,
 ) -> Result<NotesExistence, GitAiError> {
@@ -338,6 +458,12 @@ pub fn push_authorship_notes(repository: &Repository, remote_name: &str) -> Resu
         return Ok(());
     }
 
+    let transport = NotesTransport::new(repository, Some(remote_name));
+    if !transport.allows(remote_name, true) {
+        return Ok(());
+    }
+    let fetch_allowed = transport.allows(remote_name, false);
+
     let mut last_error = None;
 
     for attempt in 0..PUSH_NOTES_MAX_ATTEMPTS {
@@ -349,7 +475,9 @@ pub fn push_authorship_notes(repository: &Repository, remote_name: &str) -> Resu
             );
         }
 
-        fetch_and_merge_tracking_notes(repository, remote_name);
+        if fetch_allowed {
+            fetch_and_merge_tracking_notes(repository, remote_name);
+        }
 
         // Push notes without force (requires fast-forward)
         let push_args = build_authorship_push_args(repository.global_args_for_exec(), remote_name);

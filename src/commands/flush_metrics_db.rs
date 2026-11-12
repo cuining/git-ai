@@ -4,6 +4,7 @@
 
 use crate::api::{ApiClient, ApiContext, metrics_upload_allowed, upload_metrics_with_retry};
 use crate::config::Config;
+use crate::daemon::telemetry_worker::should_deliver_metric_event;
 use crate::metrics::db::MetricsDatabase;
 use crate::metrics::{MetricEvent, MetricsBatch};
 
@@ -22,7 +23,6 @@ pub fn handle_flush_metrics_db(_args: &[String]) {
     }
 
     let config = Config::fresh();
-    let flags = config.get_feature_flags();
     let db = match MetricsDatabase::global() {
         Ok(db) => db,
         Err(e) => {
@@ -67,9 +67,7 @@ pub fn handle_flush_metrics_db(_args: &[String]) {
 
         for record in &batch {
             match serde_json::from_str::<MetricEvent>(&record.event_json) {
-                Ok(event)
-                    if !event.is_local_only(flags.transcript_upload, flags.token_usage_metrics) =>
-                {
+                Ok(event) if should_deliver_metric_event(&config, &event) => {
                     events.push(event);
                     record_ids.push(record.id);
                 }
