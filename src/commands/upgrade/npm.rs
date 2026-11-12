@@ -1,5 +1,7 @@
+use base64::Engine;
 use flate2::read::GzDecoder;
 use serde::Deserialize;
+use sha2::{Digest, Sha512};
 use std::fs;
 use std::io::Read;
 use std::path::PathBuf;
@@ -105,6 +107,7 @@ struct DccMetadata {
 #[derive(Debug, Clone, Deserialize)]
 struct Dist {
     tarball: String,
+    integrity: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -265,6 +268,16 @@ fn verify_archive(
     release: &Release,
     data: &[u8],
 ) -> Result<(Vec<u8>, String), String> {
+    let integrity = base64::engine::general_purpose::STANDARD.encode(Sha512::digest(data));
+    if !release
+        .dist
+        .integrity
+        .split_whitespace()
+        .any(|token| token.strip_prefix("sha512-") == Some(integrity.as_str()))
+    {
+        return Err("npm update archive integrity mismatch".into());
+    }
+
     let (binary_name, installer_name) = platform.filenames();
     let binary_path = format!("package/{binary_name}");
     let installer_path = format!("package/{installer_name}");
@@ -339,7 +352,7 @@ mod tests {
     use super::*;
     use flate2::{Compression, write::GzEncoder};
     use serial_test::serial;
-    use sha2::{Digest, Sha256};
+    use sha2::Sha256;
 
     fn platform() -> Platform {
         Platform {
@@ -483,25 +496,35 @@ mod tests {
 
     #[test]
     fn stages_only_the_verified_binary_and_installer() {
-        let metadata = package_metadata();
+        let mut metadata = package_metadata();
         let manifest = serde_json::to_vec(&metadata).unwrap();
         let parent = tempfile::tempdir().unwrap();
-        let mut tar = tar::Builder::new(GzEncoder::new(Vec::new(), Compression::fast()));
-        for (path, bytes) in [
-            ("package/package.json", manifest.as_slice()),
-            ("package/bin/git-ai", b"native-binary".as_slice()),
-            ("package/install.sh", b"#!/bin/bash\nexit 0\n".as_slice()),
-            ("package/LICENSE", b"license".as_slice()),
-            ("package/THIRD-PARTY-NOTICES", b"notices".as_slice()),
-            ("package/extra.txt", b"ignored".as_slice()),
-        ] {
-            let mut header = tar::Header::new_ustar();
-            header.set_mode(0o644);
-            header.set_size(bytes.len() as u64);
-            tar.append_data(&mut header, path, bytes).unwrap();
-        }
-        let archive = tar.into_inner().unwrap().finish().unwrap();
+        let package_archive = |script: &[u8]| {
+            let mut tar = tar::Builder::new(GzEncoder::new(Vec::new(), Compression::fast()));
+            for (path, bytes) in [
+                ("package/package.json", manifest.as_slice()),
+                ("package/bin/git-ai", b"native-binary".as_slice()),
+                ("package/install.sh", script),
+                ("package/LICENSE", b"license".as_slice()),
+                ("package/THIRD-PARTY-NOTICES", b"notices".as_slice()),
+                ("package/extra.txt", b"ignored".as_slice()),
+            ] {
+                let mut header = tar::Header::new_ustar();
+                header.set_mode(0o644);
+                header.set_size(bytes.len() as u64);
+                tar.append_data(&mut header, path, bytes).unwrap();
+            }
+            tar.into_inner().unwrap().finish().unwrap()
+        };
+        let archive = package_archive(b"#!/bin/bash\nexit 0\n");
+        let integrity = base64::engine::general_purpose::STANDARD.encode(Sha512::digest(&archive));
+        metadata["dist"]["integrity"] = format!("sha512-{integrity}").into();
         let mut release: Release = serde_json::from_value(metadata).unwrap();
+
+        let tampered = package_archive(b"#!/bin/bash\nexit 1\n");
+        assert!(stage_archive(&platform(), &release, &tampered, parent.path()).is_err());
+        assert_eq!(fs::read_dir(parent.path()).unwrap().count(), 0);
+
         release.manifest.dcc.binary_sha256 = "0".repeat(64);
         assert!(stage_archive(&platform(), &release, &archive, parent.path()).is_err());
         assert_eq!(fs::read_dir(parent.path()).unwrap().count(), 0);
