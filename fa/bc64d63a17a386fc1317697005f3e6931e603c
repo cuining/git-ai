@@ -1,0 +1,19 @@
+README-nix.md
+  s_e23bf86cad936b::t_8c3fe5d6c62bf7 9,14,24,51,91,126,185
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.7-dcc.14",
+  "base_commit_sha": "fabc64d63a17a386fc1317697005f3e6931e603c",
+  "prompts": {},
+  "sessions": {
+    "s_e23bf86cad936b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d02d-f6cc-74d3-b83c-bfaa1075f497",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
