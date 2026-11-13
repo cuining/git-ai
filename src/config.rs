@@ -1042,9 +1042,8 @@ fn build_config() -> Config {
         .and_then(|c| c.telemetry_enterprise_dsn.clone())
         .filter(|s| !s.is_empty());
 
-    // Default to disabled (true) unless this is an OSS build
-    // OSS builds set OSS_BUILD env var at compile time to "1", which enables auto-updates by default
-    let auto_update_flags_default_disabled = option_env!("OSS_BUILD") != Some("1");
+    // Enable updates by default in packaged enterprise and OSS builds.
+    let auto_update_flags_default_disabled = !matches!(option_env!("OSS_BUILD"), Some("0" | "1"));
 
     let disable_version_checks = file_cfg
         .as_ref()

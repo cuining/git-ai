@@ -171,6 +171,28 @@ fn test_config_tracking_feature_defaults() {
 }
 
 #[test]
+fn test_config_update_defaults_and_overrides() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let default_disabled = !matches!(option_env!("OSS_BUILD"), Some("0" | "1"));
+    let override_disabled = !default_disabled;
+
+    for key in ["disable_version_checks", "disable_auto_updates"] {
+        assert_eq!(get_json(&repo, key), default_disabled, "default for {key}");
+
+        repo.git_ai(&["config", "set", key, &override_disabled.to_string()])
+            .unwrap();
+        assert_eq!(
+            get_json(&repo, key),
+            override_disabled,
+            "override for {key}"
+        );
+
+        repo.git_ai(&["config", "unset", key]).unwrap();
+        assert_eq!(get_json(&repo, key), default_disabled, "unset {key}");
+    }
+}
+
+#[test]
 fn test_config_oss_telemetry_default_and_overrides() {
     let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
     let key = "telemetry_oss_disabled";
