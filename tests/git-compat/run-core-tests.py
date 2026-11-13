@@ -23,7 +23,6 @@ from pathlib import Path
 from typing import Dict, List, Set, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-CLI_BINARY_NAME = "git-ai"
 DEFAULT_TESTS_FILE = REPO_ROOT / "tests" / "git-compat" / "core-tests.txt"
 DEFAULT_WHITELIST = REPO_ROOT / "tests" / "git-compat" / "whitelist.csv"
 DEFAULT_GIT_URL = os.environ.get("GIT_COMPAT_URL", "https://github.com/git/git.git")
@@ -86,8 +85,8 @@ def make_isolated_env(isolated_home: str) -> dict:
         if os.path.isfile(git_bin) or os.path.islink(git_bin):
             try:
                 real = os.path.realpath(git_bin)
-                if os.path.basename(real) == CLI_BINARY_NAME or "git-ai" in real:
-                    continue  # skip canonical shims and legacy wrapper directories
+                if "git-ai" in real:
+                    continue  # skip git-ai wrapper directories
             except OSError:
                 pass
         sanitized.append(entry)
@@ -425,14 +424,14 @@ def main() -> int:
     )
     parser.add_argument("--clone-dir", type=Path, default=DEFAULT_CLONE_DIR)
     parser.add_argument("--jobs", type=int, default=4)
-    parser.add_argument("--git-ai-bin", type=Path, default=REPO_ROOT / "target" / "release" / CLI_BINARY_NAME)
+    parser.add_argument("--git-ai-bin", type=Path, default=REPO_ROOT / "target" / "release" / "git-ai")
     args = parser.parse_args()
 
     tests = read_tests_list(args.tests_file)
 
     if not args.git_ai_bin.exists():
         raise FileNotFoundError(
-            f"{CLI_BINARY_NAME} binary not found at {args.git_ai_bin}. Build it with `cargo build --release`."
+            f"git-ai binary not found at {args.git_ai_bin}. Build it with `cargo build --release`."
         )
 
     whitelist = load_whitelist(args.whitelist)
@@ -478,7 +477,7 @@ def main() -> int:
                 f'exec -a git "{args.git_ai_bin}" "$@"\n'
             )
             git_wrapper.chmod(0o755)
-            (wrapper_dir / CLI_BINARY_NAME).symlink_to(args.git_ai_bin)
+            (wrapper_dir / "git-ai").symlink_to(args.git_ai_bin)
 
             cmd_preview = " ".join(shlex.quote(t) for t in tests)
             print(f"[+] Running core Git tests with: prove -j{args.jobs} {cmd_preview}")

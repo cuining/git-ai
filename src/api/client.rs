@@ -291,7 +291,7 @@ impl ApiContext {
     /// Uses Config::fresh() to support runtime config updates (daemon mode)
     pub fn new(base_url: Option<String>) -> Self {
         let cfg = config::Config::fresh();
-        let api_key = cfg.api_key().map(str::to_string);
+        let api_key = cfg.api_key().map(|s| s.to_string());
         let author_identity = if api_key.is_some() {
             resolve_git_identity()
         } else {

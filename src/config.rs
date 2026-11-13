@@ -7,7 +7,7 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use glob::Pattern;
-use serde::{Deserialize, Serialize, Serializer, de::DeserializeOwned};
+use serde::{Deserialize, Serialize, Serializer};
 
 use crate::feature_flags::FeatureFlags;
 use crate::git::repository::Repository;
@@ -1510,7 +1510,7 @@ fn load_file_config() -> Option<FileConfig> {
     parse_file_config_bytes(&data).ok()
 }
 
-fn parse_file_config_bytes<T: DeserializeOwned>(data: &[u8]) -> Result<T, serde_json::Error> {
+fn parse_file_config_bytes(data: &[u8]) -> Result<FileConfig, serde_json::Error> {
     // Windows PowerShell 5.1 writes UTF-8 with BOM by default for `Out-File -Encoding UTF8`.
     // Tolerate BOM-prefixed config files so upgrades/installers don't brick config parsing.
     let data = data.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(data);
@@ -1606,16 +1606,12 @@ pub fn update_check_path() -> Option<PathBuf> {
 
 /// Load the raw file config
 pub fn load_file_config_public() -> Result<FileConfig, String> {
-    load_config_document()
-}
-
-pub(crate) fn load_config_document<T: DeserializeOwned + Default>() -> Result<T, String> {
     let path =
         config_file_path().ok_or_else(|| "Could not determine config file path".to_string())?;
 
     if !path.exists() {
         // Return empty config if file doesn't exist
-        return Ok(T::default());
+        return Ok(FileConfig::default());
     }
 
     let data = fs::read(&path).map_err(|e| format!("Failed to read config file: {}", e))?;
@@ -1625,10 +1621,6 @@ pub(crate) fn load_config_document<T: DeserializeOwned + Default>() -> Result<T,
 
 /// Save the file config
 pub fn save_file_config(config: &FileConfig) -> Result<(), String> {
-    save_config_document(config)
-}
-
-pub(crate) fn save_config_document(config: &impl Serialize) -> Result<(), String> {
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
 

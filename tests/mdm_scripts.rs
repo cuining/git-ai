@@ -68,7 +68,7 @@ fn macos_launch_agent_abandons_process_group_and_never_keeps_alive() {
     );
     assert!(
         script.contains(r#"$(xml_string "$BIN")"#),
-        "per-user agents must run git-ai directly so macOS shows it as the login item"
+        "per-user agents must run the git-ai binary directly so macOS shows \"git-ai\", not \"sh\", as the login item"
     );
 }
 
