@@ -1,0 +1,21 @@
+src/ci/workflow_templates/github.yaml
+  s_e23bf86cad936b::t_116daefdfb43e9 15-19
+src/ci/workflow_templates/gitlab.yaml
+  s_e23bf86cad936b::t_116daefdfb43e9 24-25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-dcc.14",
+  "base_commit_sha": "3c409a8c33f6593a82cdf6d85c3d871bc510811a",
+  "prompts": {},
+  "sessions": {
+    "s_e23bf86cad936b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d02d-f6cc-74d3-b83c-bfaa1075f497",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
