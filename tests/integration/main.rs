@@ -54,6 +54,9 @@ mod cursor;
 mod daemon_commit_carryover;
 mod daemon_runtime_memory;
 mod debug_diagnostics;
+mod deepseek_harness;
+#[cfg(target_os = "macos")]
+mod deepseek_harness_install;
 mod diff;
 mod diff_comprehensive;
 mod diff_ignore_binary;

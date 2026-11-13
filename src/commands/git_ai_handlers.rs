@@ -410,6 +410,7 @@ fn handle_checkpoint(args: &[String]) {
     let t0 = std::time::Instant::now();
 
     let mut hook_input = None;
+    let mut print_receipt = false;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
@@ -444,6 +445,10 @@ fn handle_checkpoint(args: &[String]) {
                     eprintln!("Error: --hook-input requires a value or 'stdin' to read from stdin");
                     std::process::exit(0);
                 }
+            }
+            "--print-receipt" => {
+                print_receipt = true;
+                i += 1;
             }
             _ => {
                 i += 1;
@@ -604,7 +609,7 @@ fn handle_checkpoint(args: &[String]) {
         }
     }
 
-    if std::env::var_os("GIT_AI_TEST_DB_PATH").is_some() {
+    if print_receipt || std::env::var_os("GIT_AI_TEST_DB_PATH").is_some() {
         println!("checkpoint_requests={}", sent_count);
     }
 
