@@ -1,0 +1,25 @@
+.github/workflows/nightly-upgrade.yml
+  s_e23bf86cad936b::t_90035e9bfd6420 1,13,63-64,71-72,133-134,141-142,169,174,179-182,190,198,201-205,209
+.github/workflows/install-scripts-nightly.yml
+  s_e23bf86cad936b::t_90035e9bfd6420 37-38,74,83
+CONTRIBUTING.md
+  s_e23bf86cad936b::t_90035e9bfd6420 36
+AGENTS.md
+  s_e23bf86cad936b::t_90035e9bfd6420 58,90
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.7-dcc.14",
+  "base_commit_sha": "39db1db6c38c622cff53c619795160a3725261e1",
+  "prompts": {},
+  "sessions": {
+    "s_e23bf86cad936b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d02d-f6cc-74d3-b83c-bfaa1075f497",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
