@@ -42,21 +42,7 @@ struct Platform {
 
 impl Platform {
     fn current() -> Result<Self, String> {
-        Self::for_target(std::env::consts::OS, std::env::consts::ARCH)
-    }
-
-    #[cfg(any(windows, test))]
-    fn for_wsl(arch: &str) -> Result<Self, String> {
-        let arch = match arch.trim() {
-            "arm64" => "aarch64",
-            arch => arch,
-        };
-        Self::for_target("linux", arch)
-            .map_err(|_| format!("No DCC npm package for WSL architecture {arch}"))
-    }
-
-    fn for_target(os: &str, arch: &str) -> Result<Self, String> {
-        let (name, os, cpu) = match (os, arch) {
+        let (name, os, cpu) = match (std::env::consts::OS, std::env::consts::ARCH) {
             ("macos", "aarch64") => ("@dcc/git-ai-darwin-arm64", "darwin", "arm64"),
             ("macos", "x86_64") => ("@dcc/git-ai-darwin-x64", "darwin", "x64"),
             ("linux", "aarch64") => ("@dcc/git-ai-linux-arm64-musl", "linux", "arm64"),
@@ -192,28 +178,6 @@ pub(super) fn fetch() -> Result<Release, String> {
 fn fetch_from_registry(registry: &str, platform: &Platform) -> Result<Release, String> {
     let url = format!("{registry}/{}", platform.name);
     release_from_json(platform, &get(&url, 10, MAX_METADATA)?)
-}
-
-#[cfg(any(windows, test))]
-fn fetch_version_from_registry(
-    registry: &str,
-    platform: &Platform,
-    version: &str,
-) -> Result<Release, String> {
-    semver::Version::parse(version).map_err(|_| "Invalid npm package version")?;
-    let url = format!("{registry}/{}/{version}", platform.name);
-    let release: Release = serde_json::from_slice(&get(&url, 10, MAX_METADATA)?)
-        .map_err(|error| format!("Invalid npm release: {error}"))?;
-    platform.verify(&release.manifest, version)?;
-    Ok(release)
-}
-
-#[cfg(any(windows, test))]
-pub(crate) fn fetch_wsl_package(arch: &str, version: &str) -> Result<(Vec<u8>, String), String> {
-    let platform = Platform::for_wsl(arch)?;
-    let release = fetch_version_from_registry(REGISTRY, &platform, version)?;
-    let archive = download_archive(&release)?;
-    verify_archive(&platform, &release, &archive)
 }
 
 pub(super) struct Staged {
@@ -416,43 +380,6 @@ mod tests {
         assert_eq!(release.version(), "1.7.7-dcc.9");
         packument.assert();
         exact_version.assert();
-    }
-
-    #[test]
-    fn wsl_uses_the_matching_linux_architecture_and_exact_version() {
-        let mut registry = mockito::Server::new();
-        let platform = Platform::for_wsl("x86_64\r\n").unwrap();
-        let mut metadata = package_metadata();
-        metadata["name"] = "@dcc/git-ai-linux-x64-musl".into();
-        metadata["os"] = serde_json::json!(["linux"]);
-        metadata["cpu"] = serde_json::json!(["x64"]);
-        metadata["libc"] = serde_json::json!(["musl"]);
-        let exact_version = registry
-            .mock("GET", "/@dcc/git-ai-linux-x64-musl/1.7.7-dcc.10")
-            .with_body(metadata.to_string())
-            .create();
-        let wrong_version = registry
-            .mock("GET", "/@dcc/git-ai-linux-x64-musl/1.7.7-dcc.9")
-            .with_body(metadata.to_string())
-            .create();
-
-        assert_eq!(
-            fetch_version_from_registry(&registry.url(), &platform, "1.7.7-dcc.10")
-                .unwrap()
-                .version(),
-            "1.7.7-dcc.10"
-        );
-        assert!(fetch_version_from_registry(&registry.url(), &platform, "1.7.7-dcc.9").is_err());
-        exact_version.assert();
-        wrong_version.assert();
-        for arch in ["aarch64", "arm64"] {
-            assert_eq!(
-                Platform::for_wsl(arch).unwrap().name,
-                "@dcc/git-ai-linux-arm64-musl"
-            );
-        }
-        assert!(fetch_wsl_package("i686", "1.7.7-dcc.10").is_err());
-        assert!(fetch_wsl_package("x86_64", "latest").is_err());
     }
 
     #[test]

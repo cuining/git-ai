@@ -378,25 +378,22 @@ fn install_hooks_without_env_flag_leaves_shell_configs_untouched() {
 }
 
 #[test]
-fn install_hooks_wsl_dry_run_does_not_invoke_wsl() {
+fn install_commands_reject_removed_options() {
     let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
 
-    let output = repo
-        .git_ai_command_without_pre_sync_for_test(&["install-hooks", "--wsl", "--dry-run"], &[])
-        .output()
-        .expect("run git-ai install-hooks --wsl --dry-run");
-
-    assert!(
-        output.status.success(),
-        "install-hooks --wsl --dry-run failed:\nstdout: {}\nstderr: {}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(
-        String::from_utf8_lossy(&output.stdout).contains("Dry-run: skipping WSL installation."),
-        "missing WSL dry-run message:\n{}",
-        String::from_utf8_lossy(&output.stdout)
-    );
+    for subcommand in ["install", "install-hooks"] {
+        for option in ["--wsl", "--wsl=true", "--if-missing"] {
+            let output = repo
+                .git_ai_command_without_pre_sync_for_test(&[subcommand, option, "--dry-run"], &[])
+                .output()
+                .expect("run git-ai installation command");
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(
+                !output.status.success() && stderr.contains(option),
+                "git-ai {subcommand} should reject {option}: {output:?}"
+            );
+        }
+    }
 }
 
 #[test]

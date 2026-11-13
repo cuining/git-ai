@@ -387,12 +387,8 @@ fn print_help() {
     eprintln!("  bg                 Run and control git-ai background service");
     eprintln!("  install            Install Git AI and set up agent hooks");
     eprintln!("  install-hooks      Set up agent hooks for the current executable");
-    eprintln!("    --if-missing           Install only if there is no completed installation");
     eprintln!(
         "    --env                  Also add git-ai to shell PATH configs (used by the install scripts)"
-    );
-    eprintln!(
-        "    --wsl                  Install the matching DCC Linux npm package in eligible WSL distributions"
     );
     eprintln!("    --skills               Also install agent skill files");
     eprintln!("    --visual-studio-extension");

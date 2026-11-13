@@ -1,4 +1,4 @@
-pub(super) mod npm;
+mod npm;
 
 use crate::api::client::ApiContext;
 use crate::config::{self, UpdateChannel};

@@ -24,10 +24,8 @@ struct InstallOptions {
     install_skills: bool,
     include_visual_studio_extension: bool,
     configure_env: bool,
-    configure_wsl: bool,
     api_base: Option<String>,
     api_key: Option<String>,
-    if_missing: bool,
 }
 
 /// Installation status for a tool
@@ -360,7 +358,7 @@ pub(crate) fn run_command(
     self_install: bool,
 ) -> Result<HashMap<String, String>, GitAiError> {
     let options = parse_install_options(args)?;
-    let result = if self_install || options.if_missing {
+    let result = if self_install {
         install_executable(&options)
     } else {
         run_hooks_install(&options, None)
@@ -374,26 +372,6 @@ pub(crate) fn run_command(
         } else {
             crate::commands::install_env::configure_shell_env();
         }
-    }
-
-    if options.configure_wsl {
-        let api_base = options.api_base.clone().or_else(|| {
-            std::env::var("API_BASE")
-                .ok()
-                .filter(|value| !value.is_empty())
-        });
-        let api_key = options.api_key.clone().or_else(|| {
-            std::env::var("API_KEY")
-                .ok()
-                .filter(|value| !value.is_empty())
-        });
-        crate::commands::install_wsl::install(
-            crate::commands::install_wsl::InstallConfig {
-                api_base: api_base.as_deref(),
-                api_key: api_key.as_deref(),
-            },
-            options.dry_run,
-        );
     }
 
     result
@@ -439,12 +417,11 @@ fn install_executable(options: &InstallOptions) -> Result<HashMap<String, String
                 let runtime_config = config::Config::fresh();
                 let git_cmd = runtime_config.git_cmd();
                 check_git_version(git_cmd)?;
-                let explicit_setup = !options.if_missing
-                    && (options.configure_env
-                        || options.install_skills
-                        || options.include_visual_studio_extension
-                        || options.api_base.is_some()
-                        || options.api_key.is_some());
+                let explicit_setup = options.configure_env
+                    || options.install_skills
+                    || options.include_visual_studio_extension
+                    || options.api_base.is_some()
+                    || options.api_key.is_some();
                 setup_pending = !trace2_config_is_current(git_cmd)? || explicit_setup;
                 if !setup_pending {
                     ensure_daemon(options.dry_run, false, Some(&executable))?;
@@ -557,11 +534,9 @@ fn parse_install_options(args: &[String]) -> Result<InstallOptions, GitAiError> 
             "--dry-run" | "--dry-run=true" => options.dry_run = true,
             "--dry-run=false" => options.dry_run = false,
             "--verbose" | "-v" => options.verbose = true,
-            "--if-missing" => options.if_missing = true,
             "--skills" => options.install_skills = true,
             "--visual-studio-extension" => options.include_visual_studio_extension = true,
             "--env" | "--env=true" => options.configure_env = true,
-            "--wsl" | "--wsl=true" => options.configure_wsl = true,
             value if value.starts_with("--api-base=") => {
                 options.api_base = non_empty_value(&value[11..]);
             }
@@ -927,13 +902,10 @@ async fn async_run_install(
     if !any_checked {
         println!("No compatible IDEs or agent configurations detected. Nothing to install.");
     } else if has_changes && options.dry_run {
-        // Keep optional setup flags in the suggested re-run so the requested
-        // configuration is not silently dropped when the user applies changes.
         let env_flag = if options.configure_env { " --env" } else { "" };
-        let wsl_flag = if options.configure_wsl { " --wsl" } else { "" };
         println!("\n\x1b[33m⚠ Dry-run mode (default). No changes were made.\x1b[0m");
         println!("To apply these changes, run:");
-        println!("\x1b[1m  git-ai install-hooks --dry-run=false{env_flag}{wsl_flag}\x1b[0m");
+        println!("\x1b[1m  git-ai install-hooks --dry-run=false{env_flag}\x1b[0m");
     }
 
     // Check for running agents that had hooks updated and warn about restart
@@ -1427,27 +1399,6 @@ mod tests {
         let options = parse_install_options(&["--env=true".to_string()]).unwrap();
 
         assert!(options.configure_env);
-    }
-
-    #[test]
-    fn parse_install_options_defaults_wsl_to_disabled() {
-        let options = parse_install_options(&[]).unwrap();
-
-        assert!(!options.configure_wsl);
-    }
-
-    #[test]
-    fn parse_install_options_enables_wsl_flag() {
-        let options = parse_install_options(&["--wsl".to_string()]).unwrap();
-
-        assert!(options.configure_wsl);
-    }
-
-    #[test]
-    fn parse_install_options_accepts_wsl_value_form() {
-        let options = parse_install_options(&["--wsl=true".to_string()]).unwrap();
-
-        assert!(options.configure_wsl);
     }
 
     #[test]
