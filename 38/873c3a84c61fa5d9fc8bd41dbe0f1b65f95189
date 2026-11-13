@@ -1,0 +1,28 @@
+src/metrics/personal_usage.rs
+  s_e3a8bb1a6d50be::t_5e68daa611f15f 3,11,13,21,28,47-142,144-179,214-215,390,426,441-444,469-474,479-480,489,518-519,527-530
+  s_e3a8bb1a6d50be::t_a2d1a4ec9605b7 143,216,481,490-493,520-526
+tests/integration/usage_period.rs
+  s_e3a8bb1a6d50be::t_4f4f7cbfc33505 283-297,313-315,321-322,325-331,336,338,378-380,383-384,386-391
+  s_e3a8bb1a6d50be::t_846115262ddfa9 10,353-375,395-396,411-414
+  s_e3a8bb1a6d50be::t_358f542e604c2c 263-268,272,305,318
+  s_e3a8bb1a6d50be::t_116d7477149bad 3-6,13,257-262,269-271,273-282,323-324,332-335,344-350,376-377,381-382,385,392-394
+  s_e3a8bb1a6d50be::t_54195eb163cb2d 298-304,306-312,316-317,319-320,337,339-343,351-352
+  s_e3a8bb1a6d50be::t_a27a12e9425e7c 397-410
+  s_e3a8bb1a6d50be::t_e488a03da759c0 415-416
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-dcc.15",
+  "base_commit_sha": "38873c3a84c61fa5d9fc8bd41dbe0f1b65f95189",
+  "prompts": {},
+  "sessions": {
+    "s_e3a8bb1a6d50be": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d59e-24e1-7082-b68a-89c9787b28bc",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
