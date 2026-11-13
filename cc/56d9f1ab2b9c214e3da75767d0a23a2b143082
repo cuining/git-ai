@@ -1,0 +1,40 @@
+Cargo.lock
+  h_e26e3d7eeaef56 1101
+Cargo.toml
+  h_e26e3d7eeaef56 43-45
+agent-support/deepseek-harness/README.md
+  h_e26e3d7eeaef56 1-54
+agent-support/deepseek-harness/cordis.patch.yml
+  h_e26e3d7eeaef56 1-3
+agent-support/deepseek-harness/index.mjs
+  h_e26e3d7eeaef56 1-116
+agent-support/deepseek-harness/index.test.mjs
+  h_e26e3d7eeaef56 1-133
+agent-support/deepseek-harness/package.json
+  h_e26e3d7eeaef56 1-18
+src/commands/git_ai_handlers.rs
+  h_e26e3d7eeaef56 413,449-452,612
+src/mdm/agents/deepseek_harness.rs
+  h_e26e3d7eeaef56 1-441
+src/mdm/agents/mod.rs
+  h_e26e3d7eeaef56 6-7,25-26,59-61
+tests/integration/deepseek_harness.rs
+  h_e26e3d7eeaef56 1-218
+tests/integration/deepseek_harness_install.rs
+  h_e26e3d7eeaef56 1-349
+tests/integration/main.rs
+  h_e26e3d7eeaef56 57-59
+tests/integration/repos/test_file.rs
+  h_e26e3d7eeaef56 25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-dcc.15",
+  "base_commit_sha": "cc56d9f1ab2b9c214e3da75767d0a23a2b143082",
+  "prompts": {},
+  "humans": {
+    "h_e26e3d7eeaef56": {
+      "author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
