@@ -6,12 +6,12 @@ This project provides a Nix flake for easy installation on NixOS, nix-darwin, or
 
 Try without installing:
 ```bash
-nix run github:cuining/git-ai -- --version
+nix run github:acunniffe/git-ai -- --version
 ```
 
 Install to user profile:
 ```bash
-nix profile install github:cuining/git-ai
+nix profile install github:acunniffe/git-ai
 ```
 
 ## What's Included
@@ -21,7 +21,7 @@ The package provides three commands:
 | Command | Description |
 |---------|-------------|
 | `git` | Routes through git-ai (tracks AI authorship) |
-| `git-ai` | Direct tracking commands |
+| `git-ai` | Direct git-ai commands |
 | `git-og` | Bypasses git-ai, calls real git |
 
 ## Flake Outputs
@@ -48,7 +48,7 @@ Add the input to your flake:
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     home-manager.url = "github:nix-community/home-manager";
-    git-ai.url = "github:cuining/git-ai";
+    git-ai.url = "github:acunniffe/git-ai";
   };
 }
 ```
@@ -88,7 +88,7 @@ This approach:
   inputs = {
     darwin.url = "github:lnl7/nix-darwin";
     home-manager.url = "github:nix-community/home-manager";
-    git-ai.url = "github:cuining/git-ai";
+    git-ai.url = "github:acunniffe/git-ai";
   };
 
   outputs = { darwin, home-manager, git-ai, nixpkgs, ... }: {
@@ -123,7 +123,7 @@ This approach:
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    git-ai.url = "github:cuining/git-ai";
+    git-ai.url = "github:acunniffe/git-ai";
   };
 
   outputs = { nixpkgs, git-ai, ... }: {
@@ -182,7 +182,7 @@ home.packages = [
 
 Enter a development shell with Rust toolchain:
 ```bash
-nix develop github:cuining/git-ai
+nix develop github:acunniffe/git-ai
 ```
 
 Or clone and develop locally:
