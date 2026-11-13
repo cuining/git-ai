@@ -1,6 +1,6 @@
 use crate::error::GitAiError;
 use crate::mdm::hook_installer::{HookCheckResult, HookInstaller, HookInstallerParams};
-use crate::mdm::utils::{generate_diff, home_dir};
+use crate::mdm::utils::{clean_path, generate_diff, home_dir};
 use regex::Regex;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -10,11 +10,16 @@ use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
+mod desktop;
+
+use desktop::{ARCHIVE_DIR, Desktop, embedded_archive};
+
 const PACKAGE: &str = "dsh-git-ai-attribution";
 const PLUGIN_ID: &str = "git-ai-attribution";
 const PATCH: &str = "cordis.patch.yml";
 const BEGIN: &str = "# BEGIN dsh-git-ai-attribution";
 const END: &str = "# END dsh-git-ai-attribution";
+const BUNDLE_SELECTION: &str = "/dsh/profile/bundles";
 const BUNDLE: [(&str, &str); 3] = [
     (
         "package.json",
@@ -62,49 +67,90 @@ impl Profile {
             })
             .unwrap_or_else(|| home_dir().join(".dsh"));
         let dir = home.join("profiles").join("desktop");
-        Ok(dir
-            .join("package.json")
-            .try_exists()?
-            .then_some(Self { home, dir }))
+        if !dir.join("package.json").try_exists()? {
+            return Ok(None);
+        }
+        Ok(Some(Self {
+            home: clean_path(home.canonicalize()?),
+            dir: clean_path(dir.canonicalize()?),
+        }))
     }
 
     fn patch_path(&self) -> PathBuf {
         self.dir.join(PATCH)
     }
 
-    fn package_managed(&self) -> Result<bool, GitAiError> {
-        let manifest: Value =
-            serde_json::from_str(&fs::read_to_string(self.dir.join("package.json"))?)?;
-        let selected = manifest
-            .pointer("/dsh/profile/bundles")
-            .and_then(Value::as_array)
-            .is_some_and(|bundles| {
-                bundles
-                    .iter()
-                    .any(|bundle| bundle.as_str() == Some(PACKAGE))
-            });
+    fn bundle(&self, require_selection: bool) -> Result<ProfileBundle, GitAiError> {
+        let path = self.dir.join("package.json");
+        let manifest: Value = serde_json::from_str(&fs::read_to_string(&path)?)?;
+        let bundles = manifest.pointer(BUNDLE_SELECTION).and_then(Value::as_array);
+        if require_selection && bundles.is_none() {
+            return Err(invalid_bundle_selection(&path));
+        }
+        let selected =
+            bundles.is_some_and(|bundles| bundles.iter().any(|bundle| bundle == PACKAGE));
         let dependency = manifest
             .get("dependencies")
-            .and_then(|deps| deps.get(PACKAGE))
-            .is_some();
-        if selected
-            && BUNDLE.iter().all(|(name, _)| {
-                self.dir
-                    .join("node_modules")
-                    .join(PACKAGE)
-                    .join(name)
-                    .is_file()
-            })
-        {
-            return Ok(true);
+            .and_then(|deps| deps.get(PACKAGE));
+        let archive = dependency
+            .and_then(Value::as_str)
+            .and_then(|spec| spec.strip_prefix("file:"))
+            .map(|path| self.dir.join(path))
+            .filter(|path| self.owns_archive(path));
+        let installed = self.dir.join("node_modules").join(PACKAGE);
+        if let Some(archive) = archive {
+            let current = BUNDLE.iter().all(|(name, contents)| {
+                fs::read_to_string(installed.join(name)).is_ok_and(|actual| actual == *contents)
+            }) && archive.is_file();
+            return Ok(ProfileBundle::Managed { selected, current });
         }
-        if selected || dependency {
+        if (selected || dependency.is_some())
+            && BUNDLE
+                .iter()
+                .all(|(name, _)| installed.join(name).is_file())
+        {
+            return Ok(ProfileBundle::External);
+        }
+        if selected || dependency.is_some() {
             return Err(GitAiError::Generic(format!(
                 "An existing package manager registration for {PACKAGE} is incomplete in {}.",
                 self.dir.display()
             )));
         }
-        Ok(false)
+        Ok(ProfileBundle::Absent)
+    }
+
+    fn owns_archive(&self, path: &Path) -> bool {
+        path.file_stem()
+            .and_then(|name| name.to_str())
+            .is_some_and(|version| semver::Version::parse(version).is_ok())
+            && path.extension().is_some_and(|ext| ext == "tgz")
+            && path.parent().is_some_and(|parent| {
+                let dir = self.dir.join(ARCHIVE_DIR);
+                parent == dir
+                    || parent
+                        .canonicalize()
+                        .is_ok_and(|parent| clean_path(parent) == dir)
+            })
+    }
+
+    fn select_bundle(&self) -> Result<(), GitAiError> {
+        let path = self.dir.join("package.json");
+        let original = fs::read_to_string(&path)?;
+        let mut manifest: Value = serde_json::from_str(&original)?;
+        let bundles = manifest
+            .pointer_mut(BUNDLE_SELECTION)
+            .and_then(Value::as_array_mut)
+            .ok_or_else(|| invalid_bundle_selection(&path))?;
+        if bundles.iter().any(|name| name == PACKAGE) {
+            return Ok(());
+        }
+        bundles.push(Value::String(PACKAGE.to_owned()));
+        publish_text(
+            &path,
+            Some(&original),
+            &(serde_json::to_string_pretty(&manifest)? + "\n"),
+        )
     }
 
     fn with_lock<T>(
@@ -139,6 +185,38 @@ impl Profile {
         release?;
         Ok(value)
     }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ProfileBundle {
+    Absent,
+    External,
+    Managed { selected: bool, current: bool },
+}
+
+impl ProfileBundle {
+    fn selected(self) -> bool {
+        matches!(self, Self::Managed { selected: true, .. })
+    }
+
+    fn current(self) -> bool {
+        matches!(self, Self::Managed { current: true, .. })
+    }
+}
+
+fn invalid_bundle_selection(path: &Path) -> GitAiError {
+    GitAiError::Generic(format!(
+        "Desktop profile {} has no dsh.profile.bundles array.",
+        path.display()
+    ))
+}
+
+fn embedded_version() -> Result<String, GitAiError> {
+    let manifest: Value = serde_json::from_str(BUNDLE[0].1)?;
+    Ok(manifest["version"]
+        .as_str()
+        .expect("embedded bundle has a version")
+        .to_owned())
 }
 
 fn create_profile_lock_file(path: &Path) -> std::io::Result<fs::File> {
@@ -241,9 +319,14 @@ fn sequence_indent(line: &str) -> Option<&str> {
 
 struct Registration {
     block: Range<usize>,
-    module: Range<usize>,
+    header_end: usize,
+    module: Option<Range<usize>>,
+    fields: Range<usize>,
     item_indent: usize,
+    pending: Option<Range<usize>>,
 }
+
+const PENDING_SELECTION: &str = " # pending bundle selection";
 
 fn registration(text: &str, path: &Path) -> Result<Option<Registration>, GitAiError> {
     let bom = text.len() - text.strip_prefix('\u{feff}').unwrap_or(text).len();
@@ -269,29 +352,59 @@ fn registration(text: &str, path: &Path) -> Result<Option<Registration>, GitAiEr
     if finish.strip_suffix(END) != Some(indent) || root_indent != Some(indent) {
         return Err(invalid());
     }
-    let mut lines = numbered_lines(&text[bom + start..bom + end]).skip(1);
-    if lines.next().map(|(_, line)| line.strip_prefix(indent)) != Some(Some("- insert:"))
-        || lines.next().map(|(_, line)| line.strip_prefix(indent))
-            != Some(Some("    - id: git-ai-attribution"))
-    {
+    let block_start = bom + start;
+    let fields_end = bom + end;
+    let mut lines = numbered_lines(&text[block_start..fields_end]).skip(1);
+    let (offset, line) = lines.next().ok_or_else(invalid)?;
+    let (module, item_indent, pending) = match line.strip_prefix(indent) {
+        Some("- id: git-ai-attribution") => (None, indent.len() + 2, None),
+        Some(row) if row.strip_suffix(PENDING_SELECTION) == Some("- id: git-ai-attribution") => {
+            let end = block_start + offset + line.len();
+            (
+                None,
+                indent.len() + 2,
+                Some(end - PENDING_SELECTION.len()..end),
+            )
+        }
+        Some("- insert:") => {
+            if lines.next().and_then(|(_, line)| line.strip_prefix(indent))
+                != Some("    - id: git-ai-attribution")
+            {
+                return Err(invalid());
+            }
+            let (offset, line) = lines.next().ok_or_else(invalid)?;
+            let item_indent = indent.len() + 6;
+            let name = line
+                .strip_prefix(indent)
+                .and_then(|line| line.strip_prefix("      "))
+                .and_then(|name| MODULE_PATH.captures(name))
+                .and_then(|captures| captures.get(1))
+                .ok_or_else(invalid)?;
+            let module_start = block_start + offset + item_indent + name.start();
+            (
+                Some(module_start..module_start + name.len()),
+                item_indent,
+                None,
+            )
+        }
+        _ => return Err(invalid()),
+    };
+    let fields_start = block_start + lines.next().map_or(end - start, |(offset, _)| offset);
+    if numbered_lines(&text[fields_start..fields_end]).any(|(_, line)| {
+        is_data(line) && line.len() - line.trim_start_matches(' ').len() < item_indent
+    }) {
         return Err(invalid());
     }
-    let (offset, line) = lines.next().ok_or_else(invalid)?;
-    let item_indent = indent.len() + 6;
-    let name = line
-        .strip_prefix(indent)
-        .and_then(|line| line.strip_prefix("      "))
-        .and_then(|name| MODULE_PATH.captures(name))
-        .and_then(|captures| captures.get(1))
-        .ok_or_else(invalid)?;
-    let module_start = bom + start + offset + item_indent + name.start();
     let block_end = text[bom + end..]
         .find('\n')
         .map_or(text.len(), |newline| bom + end + newline + 1);
     Ok(Some(Registration {
-        block: (bom + start)..block_end,
-        module: module_start..module_start + name.len(),
+        block: block_start..block_end,
+        header_end: block_start + offset + line.len(),
+        module,
+        fields: fields_start..fields_end,
         item_indent,
+        pending,
     }))
 }
 
@@ -353,7 +466,6 @@ fn configured_binary_range(
         ))
     };
     let mut fields = numbered_lines(tail)
-        .skip(1)
         .filter(|(_, line)| is_data(line))
         .take_while(|(_, line)| line.starts_with(indent));
     let Some(config) = fields.find_map(|(_, line)| yaml_field(line, indent, "config")) else {
@@ -400,7 +512,7 @@ fn configured_binary_range(
 
 fn add_registration(
     original: &str,
-    module: &str,
+    module: Option<&str>,
     binary: &Path,
     path: &Path,
 ) -> Result<String, GitAiError> {
@@ -451,17 +563,26 @@ fn add_registration(
     if prefix.len() > bom && !prefix.ends_with('\n') {
         prefix.push_str(newline);
     }
-    for line in [
-        BEGIN,
-        "- insert:",
-        "    - id: git-ai-attribution",
-        &format!("      name: '{module}'"),
-    ] {
+    let header = match module {
+        Some(module) => vec![
+            BEGIN.to_owned(),
+            "- insert:".to_owned(),
+            "    - id: git-ai-attribution".to_owned(),
+            format!("      name: '{module}'"),
+        ],
+        None => vec![BEGIN.to_owned(), "- id: git-ai-attribution".to_owned()],
+    };
+    for line in header {
         prefix.push_str(indent);
-        prefix.push_str(line);
+        prefix.push_str(&line);
         prefix.push_str(newline);
     }
-    prefix.push_str(&binary_config(binary, &format!("{indent}      "), newline)?);
+    let config_indent = if module.is_some() { "      " } else { "  " };
+    prefix.push_str(&binary_config(
+        binary,
+        &format!("{indent}{config_indent}"),
+        newline,
+    )?);
     prefix.push_str(indent);
     prefix.push_str(END);
     prefix.push_str(newline);
@@ -480,12 +601,12 @@ fn with_staging<T>(
     result
 }
 
-fn publish_patch(path: &Path, original: Option<&str>, content: &str) -> Result<(), GitAiError> {
+fn publish_text(path: &Path, original: Option<&str>, content: &str) -> Result<(), GitAiError> {
     if original == Some(content) {
         return Ok(());
     }
     with_staging(path.parent().unwrap(), |staging| {
-        let staged = staging.join(PATCH);
+        let staged = staging.join(path.file_name().unwrap());
         {
             let mut file = fs::File::create(&staged)?;
             file.write_all(content.as_bytes())?;
@@ -546,17 +667,81 @@ fn publish_bundle(destination: &Path) -> Result<(), GitAiError> {
     })
 }
 
-fn install(
+fn update_registration(
+    text: &str,
+    entry: &Registration,
+    module: Option<&str>,
+    binary: &Path,
+    path: &Path,
+) -> Result<String, GitAiError> {
+    let indent = " ".repeat(entry.item_indent);
+    let mut fields = text[entry.fields.clone()].to_owned();
+    let newline = line_ending(text);
+    let config_field_offset = numbered_lines(&fields)
+        .find_map(|(offset, line)| yaml_field(line, &indent, "config").map(|_| offset));
+    if let Some(value) = configured_binary_range(&fields, &indent, path)? {
+        fields.replace_range(value, &binary_config_value(binary)?);
+    } else if let Some(offset) = config_field_offset {
+        let tail = &fields[offset..];
+        let value_indent = numbered_lines(tail)
+            .skip(1)
+            .find(|(_, line)| is_data(line))
+            .map(|(_, line)| &line[..line.len() - line.trim_start_matches(' ').len()])
+            .filter(|nested| nested.len() > indent.len());
+        let default_indent = format!("{indent}  ");
+        let value_indent = value_indent.unwrap_or(&default_indent);
+        let insert_at = offset + tail.find('\n').expect("config is inside a marked block") + 1;
+        let config = format!(
+            "{value_indent}gitAiPath: {}{newline}",
+            binary_config_value(binary)?
+        );
+        fields.insert_str(insert_at, &config);
+    } else {
+        fields.push_str(&binary_config(binary, &indent, newline)?);
+    }
+
+    let mut updated = text.to_owned();
+    if let (Some(old), Some(new)) = (&entry.module, module) {
+        updated.replace_range(entry.fields.clone(), &fields);
+        updated.replace_range(old.clone(), new);
+    } else if entry.module.is_none() {
+        updated.replace_range(entry.fields.clone(), &fields);
+        if let Some(pending) = &entry.pending {
+            updated.replace_range(pending.clone(), "");
+        }
+    } else {
+        let root = &indent[6..];
+        let field_indent = &indent[4..];
+        let start = text[entry.block.start..entry.fields.start]
+            .find('\n')
+            .map(|offset| entry.block.start + offset + 1)
+            .expect("registration header contains a newline");
+        let mut replacement = format!("{root}- id: {PLUGIN_ID}{newline}");
+        for line in fields.split_inclusive('\n') {
+            if let Some(field) = line.strip_prefix(&indent) {
+                replacement.push_str(field_indent);
+                replacement.push_str(field);
+            } else {
+                replacement.push_str(line);
+            }
+        }
+        updated.replace_range(start..entry.fields.end, &replacement);
+    }
+    Ok(updated)
+}
+
+fn prepare_install(
     profile: &Profile,
     params: &HookInstallerParams,
-    write: bool,
-) -> Result<Option<String>, GitAiError> {
+    desktop: Option<&Desktop>,
+) -> Result<Option<HookUpdate>, GitAiError> {
     let path = profile.patch_path();
     let original = read_patch(&path)?;
     let text = original.as_deref().unwrap_or_default();
-    let registration = registration(text, &path)?;
-    if profile.package_managed()? {
-        return if registration.is_none() {
+    let entry = registration(text, &path)?;
+    let bundle = profile.bundle(desktop.is_some())?;
+    if bundle == ProfileBundle::External {
+        return if entry.is_none() {
             Ok(None)
         } else {
             Err(GitAiError::Generic(format!(
@@ -564,87 +749,243 @@ fn install(
             )))
         };
     }
+    // Selection belongs to the panel after a managed bundle has been installed.
+    // A legacy insertion alongside a package record is an interrupted migration.
+    let legacy = entry.as_ref().is_some_and(|entry| entry.module.is_some());
+    let pending = entry.as_ref().is_some_and(|entry| entry.pending.is_some());
+    let select = bundle == ProfileBundle::Absent || legacy || entry.is_none() || pending;
 
     let home_patch = profile.home.join(PATCH);
     check_registration(
         read_patch(&home_patch)?.as_deref().unwrap_or_default(),
         &home_patch,
     )?;
-    let manifest: Value = serde_json::from_str(BUNDLE[0].1)?;
-    let version = manifest["version"]
-        .as_str()
-        .expect("embedded bundle has a version");
-    let directory = format!("local-plugins/{PACKAGE}/{version}");
-    let destination = profile.dir.join(&directory);
-    let module = format!("./{directory}/package/git-ai.mjs");
-    let updated = if let Some(entry) = registration {
+    if let Some(entry) = &entry {
         check_registration(&text[..entry.block.start], &path)?;
-        check_registration(&text[entry.module.end..], &path)?;
-        let mut updated = text.to_owned();
-        let tail_start = entry.module.end;
-        let tail = &text[tail_start..entry.block.end];
-        let indent = " ".repeat(entry.item_indent);
-        if let Some(value) = configured_binary_range(tail, &indent, &path)? {
-            updated.replace_range(
-                (tail_start + value.start)..(tail_start + value.end),
-                &binary_config_value(&params.binary_path)?,
-            );
-        } else if !tail.lines().skip(1).any(is_data) {
-            // Older script installations have a module path but no configuration.
-            let after_name = tail_start + tail.find('\n').unwrap() + 1;
-            updated.insert_str(
-                after_name,
-                &binary_config(&params.binary_path, &indent, line_ending(text))?,
-            );
-        }
-        updated.replace_range(entry.module, &module);
-        updated
+        check_registration(&text[entry.block.end..], &path)?;
     } else {
         check_registration(text, &path)?;
-        add_registration(text, &module, &params.binary_path, &path)?
+    }
+
+    // Older Desktop distributions do not provide a package manager. Their
+    // existing local registration still needs to load the compatible bundle.
+    let local = bundle == ProfileBundle::Absent && desktop.is_none() && (entry.is_none() || legacy);
+    let version = embedded_version()?;
+    let directory = format!("local-plugins/{PACKAGE}/{version}");
+    let destination = profile.dir.join(&directory);
+    let module = local.then(|| format!("./{directory}/package/git-ai.mjs"));
+    let updated = match entry.as_ref() {
+        Some(entry) => {
+            update_registration(text, entry, module.as_deref(), &params.binary_path, &path)?
+        }
+        None => add_registration(text, module.as_deref(), &params.binary_path, &path)?,
     };
-    let files_ready = installed_files_match(&destination)?;
-    if files_ready && text == updated {
+    let files_ready = if local {
+        installed_files_match(&destination)?
+    } else {
+        bundle.current()
+    };
+    if !local && !files_ready && desktop.is_none() {
+        return Err(Desktop::missing());
+    }
+    let needs_selection = !local && select && !bundle.selected();
+    if files_ready && !needs_selection && !pending && text == updated {
         return Ok(None);
     }
-    if write {
-        if !files_ready {
-            publish_bundle(&destination)?;
-        }
-        publish_patch(&path, original.as_deref(), &updated)?;
-    }
-    Ok(Some(generate_diff(&path, text, &updated)))
+    let diff = generate_diff(&path, text, &updated);
+    let diff = if !local && (!files_ready || needs_selection) {
+        format!("Install {PACKAGE} {version} as a Desktop plugin bundle.\n{diff}")
+    } else {
+        diff
+    };
+    Ok(Some(HookUpdate {
+        original,
+        patch: updated,
+        diff,
+        bundle: if !local && !files_ready {
+            BundleChange::Install
+        } else {
+            BundleChange::Patch
+        },
+        local_bundle: (local && !files_ready).then_some(destination),
+        select: needs_selection,
+    }))
 }
 
-fn uninstall(profile: &Profile, write: bool) -> Result<Option<String>, GitAiError> {
+enum BundleChange {
+    Patch,
+    Install,
+    Remove,
+}
+
+struct HookUpdate {
+    original: Option<String>,
+    patch: String,
+    diff: String,
+    bundle: BundleChange,
+    local_bundle: Option<PathBuf>,
+    select: bool,
+}
+
+enum PackageOperation {
+    Add {
+        archive: PathBuf,
+        staged: Option<String>,
+    },
+    Remove,
+}
+
+fn apply_update(
+    profile: &Profile,
+    desktop: Option<&Desktop>,
+    plan: impl Fn() -> Result<Option<HookUpdate>, GitAiError>,
+) -> Result<Option<String>, GitAiError> {
+    // dsh takes the profile lock. Serialize git-ai's full operation with a
+    // separate lock, and use the shared lock for the edits on either side.
+    let lock = profile.dir.join(".git-ai-hooks.lock");
+    let _lock = crate::utils::LockFile::try_acquire(&lock).ok_or_else(|| {
+        GitAiError::Generic(format!(
+            "Could not acquire the git-ai hook lock at {}.",
+            lock.display()
+        ))
+    })?;
     let path = profile.patch_path();
-    let Some(text) = read_patch(&path)? else {
+    let Some((update, operation)) = profile.with_lock(|| {
+        let Some(update) = plan()? else {
+            return Ok(None);
+        };
+        if let Some(destination) = &update.local_bundle {
+            publish_bundle(destination)?;
+        }
+        let operation = match update.bundle {
+            BundleChange::Install => {
+                let archive = embedded_archive(profile)?;
+                let staged = if update.select {
+                    // Stage the override before dsh selects the bundle, so a
+                    // running Desktop never sees two entries with the same ID.
+                    let entry = registration(&update.patch, &path)?.expect("bundle registration");
+                    let mut pending = update.patch.clone();
+                    pending.insert_str(entry.header_end, PENDING_SELECTION);
+                    publish_text(&path, update.original.as_deref(), &pending)?;
+                    Some(pending)
+                } else {
+                    None
+                };
+                Some(PackageOperation::Add { archive, staged })
+            }
+            BundleChange::Remove => Some(PackageOperation::Remove),
+            BundleChange::Patch => {
+                finish_update(profile, &update, update.original.as_deref())?;
+                None
+            }
+        };
+        Ok(Some((update, operation)))
+    })?
+    else {
         return Ok(None);
     };
-    let Some(entry) = registration(&text, &path)? else {
-        return Ok(None);
-    };
-    // Other rows added between the markers are not part of our registration.
-    if numbered_lines(&text[entry.module.end..entry.block.end])
-        .skip(1)
-        .any(|(_, line)| {
-            is_data(line) && line.len() - line.trim_start_matches(' ').len() < entry.item_indent
-        })
-    {
+    match operation {
+        Some(PackageOperation::Add { archive, staged }) => {
+            let desktop = desktop.ok_or_else(Desktop::missing)?;
+            if let Err(error) = desktop.install(profile, &archive) {
+                if let Some(staged) = &staged {
+                    profile
+                        .with_lock(|| restore_patch(&path, staged, update.original.as_deref()))?;
+                }
+                return Err(error);
+            }
+            profile.with_lock(|| {
+                let bundle = profile.bundle(true)?;
+                if !bundle.current() {
+                    if let Some(staged) = &staged
+                        && !bundle.selected()
+                    {
+                        restore_patch(&path, staged, update.original.as_deref())?;
+                    }
+                    return Err(GitAiError::Generic(format!(
+                        "DeepSeek Harness did not install {PACKAGE}."
+                    )));
+                }
+                finish_update(
+                    profile,
+                    &update,
+                    staged.as_deref().or(update.original.as_deref()),
+                )
+            })?;
+        }
+        Some(PackageOperation::Remove) => {
+            desktop.ok_or_else(Desktop::missing)?.remove(profile)?;
+            profile.with_lock(|| finish_update(profile, &update, update.original.as_deref()))?;
+        }
+        None => {}
+    }
+    Ok(Some(update.diff))
+}
+
+fn restore_patch(path: &Path, pending: &str, original: Option<&str>) -> Result<(), GitAiError> {
+    if let Some(original) = original {
+        return publish_text(path, Some(pending), original);
+    }
+    if read_patch(path)?.as_deref() != Some(pending) {
         return Err(GitAiError::Generic(format!(
-            "Installer registration contains additional rows in {}.",
+            "{} changed during installation. Try again.",
             path.display()
         )));
     }
-    let mut updated = text.clone();
-    updated.replace_range(entry.block, "");
-    if !updated.lines().any(|line| {
-        is_data(line) && !is_document_marker(line, "---") && !is_document_marker(line, "...")
-    }) {
+    fs::remove_file(path)?;
+    Ok(())
+}
+
+fn finish_update(
+    profile: &Profile,
+    update: &HookUpdate,
+    original: Option<&str>,
+) -> Result<(), GitAiError> {
+    let path = profile.patch_path();
+    if update.select {
+        if read_patch(&path)?.as_deref() != original {
+            return Err(GitAiError::Generic(format!(
+                "{} changed during installation. Try again.",
+                path.display()
+            )));
+        }
+        profile.select_bundle()?;
+    }
+    if original.is_some() || !update.patch.is_empty() {
+        publish_text(&path, original, &update.patch)?;
+    }
+    Ok(())
+}
+
+fn prepare_uninstall(
+    profile: &Profile,
+    desktop: Option<&Desktop>,
+) -> Result<Option<HookUpdate>, GitAiError> {
+    let path = profile.patch_path();
+    let original = read_patch(&path)?;
+    let text = original.as_deref().unwrap_or_default();
+    let entry = registration(text, &path)?;
+    let bundle = profile.bundle(false).ok();
+    let managed = matches!(bundle, Some(ProfileBundle::Managed { .. }));
+    if managed && desktop.is_none() {
+        return Err(Desktop::missing());
+    }
+    if entry.is_none() && !managed {
+        return Ok(None);
+    }
+    let mut updated = text.to_owned();
+    if let Some(entry) = entry {
+        updated.replace_range(entry.block, "");
+    }
+    if updated != text
+        && !updated.lines().any(|line| {
+            is_data(line) && !is_document_marker(line, "---") && !is_document_marker(line, "...")
+        })
+    {
         let end = numbered_lines(&updated)
             .find(|(_, line)| is_document_marker(line, "..."))
             .map_or(updated.len(), |(offset, _)| offset);
-        let newline = line_ending(&text);
+        let newline = line_ending(text);
         let prefix = &updated[..end];
         let separator =
             if prefix.trim_start_matches('\u{feff}').is_empty() || prefix.ends_with('\n') {
@@ -654,10 +995,19 @@ fn uninstall(profile: &Profile, write: bool) -> Result<Option<String>, GitAiErro
             };
         updated.insert_str(end, &format!("{separator}[]{newline}"));
     }
-    if write {
-        publish_patch(&path, Some(&text), &updated)?;
-    }
-    Ok(Some(generate_diff(&path, &text, &updated)))
+    let diff = generate_diff(&path, text, &updated);
+    Ok(Some(HookUpdate {
+        original,
+        patch: updated,
+        diff,
+        bundle: if managed {
+            BundleChange::Remove
+        } else {
+            BundleChange::Patch
+        },
+        local_bundle: None,
+        select: false,
+    }))
 }
 
 impl HookInstaller for DeepSeekHarnessInstaller {
@@ -675,14 +1025,20 @@ impl HookInstaller for DeepSeekHarnessInstaller {
 
     fn check_hooks(&self, params: &HookInstallerParams) -> Result<HookCheckResult, GitAiError> {
         let profile = Profile::find()?;
+        let desktop = Desktop::find();
         let (hooks_installed, hooks_up_to_date) = match &profile {
-            Some(profile) if matches!(install(profile, params, false), Ok(None)) => (true, true),
+            Some(profile)
+                if matches!(prepare_install(profile, params, desktop.as_ref()), Ok(None)) =>
+            {
+                (true, true)
+            }
             Some(profile) => {
                 // An install conflict can still leave an owned registration to uninstall.
                 let path = profile.patch_path();
                 let installed =
                     registration(read_patch(&path)?.as_deref().unwrap_or_default(), &path)?
-                        .is_some();
+                        .is_some()
+                        || matches!(profile.bundle(false), Ok(ProfileBundle::Managed { .. }));
                 (installed, false)
             }
             None => (false, false),
@@ -702,11 +1058,13 @@ impl HookInstaller for DeepSeekHarnessInstaller {
         let Some(profile) = Profile::find()? else {
             return Ok(None);
         };
-        let preview = install(&profile, params, false)?;
+        let desktop = Desktop::find();
+        let plan = || prepare_install(&profile, params, desktop.as_ref());
+        let preview = plan()?;
         if dry_run || preview.is_none() {
-            return Ok(preview);
+            return Ok(preview.map(|update| update.diff));
         }
-        profile.with_lock(|| install(&profile, params, true))
+        apply_update(&profile, desktop.as_ref(), plan)
     }
 
     fn uninstall_hooks(
@@ -717,10 +1075,12 @@ impl HookInstaller for DeepSeekHarnessInstaller {
         let Some(profile) = Profile::find()? else {
             return Ok(None);
         };
-        let preview = uninstall(&profile, false)?;
+        let desktop = Desktop::find();
+        let plan = || prepare_uninstall(&profile, desktop.as_ref());
+        let preview = plan()?;
         if dry_run || preview.is_none() {
-            return Ok(preview);
+            return Ok(preview.map(|update| update.diff));
         }
-        profile.with_lock(|| uninstall(&profile, true))
+        apply_update(&profile, desktop.as_ref(), plan)
     }
 }

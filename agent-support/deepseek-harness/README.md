@@ -4,16 +4,20 @@ This standalone Cordis plugin captures local `write` and `edit` checkpoints as `
 
 ## Install in Desktop
 
-On macOS and Windows, open Desktop once to initialize its profile, then fully quit it. Run `git-ai install-hooks` with a DCC tracking build that includes this plugin, then reopen Desktop.
+On macOS and Windows, open Desktop once to initialize its profile. Run `git-ai install-hooks` with a DCC tracking build that includes this plugin.
 
 ```text
 git-ai install-hooks --dry-run
 git-ai install-hooks
 ```
 
-The `git-ai` binary includes the plugin files and installs them under `~/.dsh/profiles/desktop/local-plugins/`. It registers the module in that profile's `cordis.patch.yml` and preserves existing entries and comments. A complete package-managed installation is reported as already installed. A conflicting manual registration or an incomplete package-managed installation produces an error and stays in place. The installer accepts the default empty patch and single-document YAML block sequences. It reports unsupported formats before writing. Use `--dry-run` to preview the changes. `git-ai uninstall-hooks` removes the installer-managed registration and preserves other entries.
+On Desktop versions that include the bundled `dsh` command, the plugin appears as `dsh-git-ai-attribution` under **Plugins → Installed plugins**. Refresh the panel if it is already open. If Harness requests a restart, reopen Desktop to load the plugin. The installer passes its embedded archive to Desktop's `dsh plugin --profile desktop add` command. It migrates older Git AI registrations, keeping their configuration and refreshing the executable path.
 
-Set `DSH_HOME` if Desktop uses a custom profile home. The installer runs without the `dsh` CLI, Node, npm, or a separate archive. Use a preset that exposes the `write` and `edit` tools, such as Standard.
+Older Desktop versions use a local module in `cordis.patch.yml`. Fully quit and reopen those versions after installation to load the module. The sidebar lists package-managed bundles. Use the runtime plugin inventory in Settings to inspect a local module.
+
+The installer accepts the default empty patch and single-document YAML block sequences. Use `--dry-run` to preview the changes. `git-ai uninstall-hooks` removes Git AI's managed registration and any bundle it installed. Installations added from the Harness plugin panel are managed there.
+
+Set `DSH_HOME` if Desktop uses a custom profile home. Use a preset that exposes the `write` and `edit` tools, such as Standard.
 
 The bundle enables file capture. The foreground Bash overlay below targets the headless profile.
 
