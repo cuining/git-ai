@@ -350,6 +350,10 @@ fn usage_machine_breaks_down_company_additions_by_file_category() {
         {"pattern": "**/*.json", "type": null},
     ])
     .to_string();
+    // The query uses local calendar days. Include the neighboring days for
+    // runner time zones where the UTC date of a real commit differs.
+    let start = first_date.pred_opt().unwrap().to_string();
+    let end = last_date.succ_opt().unwrap().to_string();
     let usage = || -> Value {
         let output = repo
             .git_ai_with_env(
@@ -357,15 +361,14 @@ fn usage_machine_breaks_down_company_additions_by_file_category() {
                     "usage",
                     "--json",
                     "--start-date",
-                    &first_date.to_string(),
+                    &start,
                     "--end-date",
-                    &last_date.to_string(),
+                    &end,
                     "--repo-host",
                     "git.xiaojukeji.com",
                 ],
                 &[
                     ("GIT_AI_TEST_METRICS_DB_PATH", &metrics_db_path),
-                    ("TZ", "UTC"),
                     ("GIT_AI_USAGE_CODE_TYPE_RULES", &rules),
                 ],
             )
