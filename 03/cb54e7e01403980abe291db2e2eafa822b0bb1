@@ -1,0 +1,31 @@
+src/commands/upgrade/npm_source.rs
+  s_e3a8bb1a6d50be::t_95b92d1d15e761 1-164
+src/config.rs
+  s_4e3459120d92b8::t_daf50c1d676330 1060-1062
+tests/integration/npm_upgrade.rs
+  s_e3a8bb1a6d50be::t_becd4542eed1ad 1-143
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-dcc.15",
+  "base_commit_sha": "03cb54e7e01403980abe291db2e2eafa822b0bb1",
+  "prompts": {},
+  "sessions": {
+    "s_4e3459120d92b8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d4d7-6b23-7960-9f99-c61f0d030566",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    },
+    "s_e3a8bb1a6d50be": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d59e-24e1-7082-b68a-89c9787b28bc",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
