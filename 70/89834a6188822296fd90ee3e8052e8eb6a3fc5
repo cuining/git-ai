@@ -1,0 +1,19 @@
+src/authorship/post_commit.rs
+  s_e23bf86cad936b::t_9e34527ffb3ebe 1118-1124
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-dcc.14",
+  "base_commit_sha": "7089834a6188822296fd90ee3e8052e8eb6a3fc5",
+  "prompts": {},
+  "sessions": {
+    "s_e23bf86cad936b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d02d-f6cc-74d3-b83c-bfaa1075f497",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
