@@ -84,33 +84,33 @@ def build(cargo, work_dir, output):
         subprocess.run(cargo_command(cargo, ["metadata"], "--locked", "--format-version", "1"),
                        cwd=ROOT, env=env, stdout=file, check=True)
 
-    packages = work_dir / "packages"
-    for platform, (target, _, _) in TARGETS.items():
-        target_env = env.copy()
-        subcommand = ["zigbuild"]
-        if platform.startswith("darwin-"):
-            target_env["MACOSX_DEPLOYMENT_TARGET"] = "11.0" if platform == "darwin-arm64" else "10.15"
-        else:
-            target_env.pop("SDKROOT", None)
-        if platform == "win32-x64":
-            subcommand = ["xwin", "build"]
-            target_env.pop("CARGO_ENCODED_RUSTFLAGS", None)
-            target_env["RUSTFLAGS"] = "-C target-feature=+crt-static"
-            target_env.setdefault("XWIN_SDK_VERSION", "10.0.26100")
-            target_env.setdefault("XWIN_CRT_VERSION", "14.44.17.14")
-        print(f"Building {platform} ({target})", flush=True)
-        subprocess.run(cargo_command(cargo, subcommand, "--locked", "--release", "--bin", "git-ai",
-                                     "--target", target, "--target-dir", target_dir, "--jobs", "2"),
-                       cwd=ROOT, env=target_env, check=True)
-        executable = "git-ai.exe" if platform == "win32-x64" else "git-ai"
-        binary = target_dir / target / "release" / executable
-        verify_binary(binary, platform, version, work_dir)
-        packer.pack(ROOT, binary, platform, packages, source, metadata)
+    with stager.publish_directory(output) as staged:
+        for platform in packer.PLATFORMS:
+            target, _, _ = TARGETS[platform]
+            target_env = env.copy()
+            subcommand = ["zigbuild"]
+            if platform.startswith("darwin-"):
+                target_env["MACOSX_DEPLOYMENT_TARGET"] = "11.0" if platform == "darwin-arm64" else "10.15"
+            else:
+                target_env.pop("SDKROOT", None)
+            if platform == "win32-x64":
+                subcommand = ["xwin", "build"]
+                target_env.pop("CARGO_ENCODED_RUSTFLAGS", None)
+                target_env["RUSTFLAGS"] = "-C target-feature=+crt-static"
+                target_env.setdefault("XWIN_SDK_VERSION", "10.0.26100")
+                target_env.setdefault("XWIN_CRT_VERSION", "14.44.17.14")
+            print(f"Building {platform} ({target})", flush=True)
+            subprocess.run(cargo_command(cargo, subcommand, "--locked", "--release", "--bin", "git-ai",
+                                         "--target", target, "--target-dir", target_dir, "--jobs", "2"),
+                           cwd=ROOT, env=target_env, check=True)
+            executable = "git-ai.exe" if platform == "win32-x64" else "git-ai"
+            binary = target_dir / target / "release" / executable
+            verify_binary(binary, platform, version, work_dir)
+            package = packer.package_files(ROOT, binary, platform, version, source, metadata)
+            stager.write_package(staged / platform, package)
 
-    if subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip() != source:
-        raise ValueError("checkout changed during the release build")
-    stager.stage_packages([archive.name for archive in packages.iterdir()],
-                          lambda name: (packages / name).read_bytes(), source, output)
+        if subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip() != source:
+            raise ValueError("checkout changed during the release build")
 
 
 def main():

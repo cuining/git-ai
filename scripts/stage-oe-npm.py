@@ -1,6 +1,7 @@
 """Verify a five-platform npm bundle and stage it for the OE npm node."""
 
 import argparse
+from contextlib import contextmanager
 import hashlib
 import importlib.util
 import io
@@ -54,28 +55,38 @@ def read_package(data, platform, version, source_commit):
     return payload
 
 
-def stage_packages(archive_names, read_archive, source_commit, output):
-    if not re.fullmatch(r"[0-9a-f]{40}", source_commit):
-        raise ValueError("source commit must be a full lowercase Git SHA")
+@contextmanager
+def publish_directory(output):
     if output.exists() or output.is_symlink():
         raise ValueError(f"output already exists: {output}")
-    version = PACKER.cargo_version(Path(__file__).resolve().parents[1])
-    archives = {f"dcc-git-ai-{platform}-{version}.tgz": platform for platform in PACKER.PLATFORMS}
-    if len(archive_names) != len(archives) or set(archive_names) != archives.keys():
-        raise ValueError("bundle must contain the five platform tarballs for this version")
-
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=output.parent) as temporary:
         staged = Path(temporary) / "packages"
+        yield staged
+        staged.rename(output)
+
+
+def write_package(directory, package):
+    for name, (data, mode) in package.items():
+        path = directory / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        path.chmod(mode)
+    (directory / ".npmrc").write_text(f"@dcc:registry={NPM_REGISTRY}\n")
+
+
+def stage_packages(archive_names, read_archive, source_commit, output):
+    if not re.fullmatch(r"[0-9a-f]{40}", source_commit):
+        raise ValueError("source commit must be a full lowercase Git SHA")
+
+    with publish_directory(output) as staged:
+        version = PACKER.cargo_version(Path(__file__).resolve().parents[1])
+        archives = {f"dcc-git-ai-{platform}-{version}.tgz": platform for platform in PACKER.PLATFORMS}
+        if len(archive_names) != len(archives) or set(archive_names) != archives.keys():
+            raise ValueError("bundle must contain the five platform tarballs for this version")
         for archive, platform in archives.items():
             package = read_package(read_archive(archive), platform, version, source_commit)
-            for name, (data, mode) in package.items():
-                path = staged / platform / name
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_bytes(data)
-                path.chmod(mode)
-            (staged / platform / ".npmrc").write_text(f"@dcc:registry={NPM_REGISTRY}\n")
-        staged.rename(output)
+            write_package(staged / platform, package)
 
 
 def stage(bundle, sha256, source_commit, output):

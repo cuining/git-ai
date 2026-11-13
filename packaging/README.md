@@ -58,8 +58,8 @@ The compile task runs the Rust library tests, packaging tests, and dated usage
 integration tests (`usage_period::usage_machine_`) before building the five
 binaries from the same checkout. It checks their format, architecture and
 embedded version, runs `--version` on Linux x64, and ad hoc signs the macOS
-binaries. It stages the five verified tarballs directly as publish directories
-under `output/`. A failed test or build prevents package staging.
+binaries. It writes the five platform publish directories directly under
+`output/` after verification. A failed test or build prevents package staging.
 
 Run the compile task from `master` and attach its output to a downstream
 **NPM包发布** task. Set

@@ -42,7 +42,7 @@ def notices(metadata, version):
     return ("\n".join(lines) + "\n").encode()
 
 
-def pack(root, binary, platform, output, source_commit, cargo_metadata):
+def package_files(root, binary, platform, version, source_commit, cargo_metadata):
     if not re.fullmatch(r"[0-9a-f]{40}", source_commit):
         raise ValueError("source commit must be a full lowercase Git SHA")
     if binary.is_symlink() or not binary.is_file():
@@ -50,7 +50,6 @@ def pack(root, binary, platform, output, source_commit, cargo_metadata):
     content = binary.read_bytes()
     if not content:
         raise ValueError("binary is empty")
-    version = cargo_version(root)
     os_name, cpu = PLATFORMS[platform]
     binary_path = "bin/git-ai.exe" if os_name == "win32" else "bin/git-ai"
     installer = "install.ps1" if os_name == "win32" else "install.sh"
@@ -73,20 +72,25 @@ def pack(root, binary, platform, output, source_commit, cargo_metadata):
     }
     if os_name == "linux":
         info["libc"] = ["musl"]
-    files = {
-        "package.json": (json.dumps(info, indent=2) + "\n").encode(),
-        binary_path: content,
-        installer: script,
-        "LICENSE": (root / "LICENSE").read_bytes(),
-        "THIRD-PARTY-NOTICES": notices(cargo_metadata, version),
+    return {
+        "package.json": ((json.dumps(info, indent=2) + "\n").encode(), 0o644),
+        binary_path: (content, 0o755),
+        installer: (script, 0o644),
+        "LICENSE": ((root / "LICENSE").read_bytes(), 0o644),
+        "THIRD-PARTY-NOTICES": (notices(cargo_metadata, version), 0o644),
     }
+
+
+def pack(root, binary, platform, output, source_commit, cargo_metadata):
+    version = cargo_version(root)
+    files = package_files(root, binary, platform, version, source_commit, cargo_metadata)
     output.mkdir(parents=True, exist_ok=True)
     archive = output / f"dcc-git-ai-{platform}-{version}.tgz"
     with tarfile.open(archive, "x:gz", format=tarfile.USTAR_FORMAT) as package:
-        for name, data in files.items():
+        for name, (data, mode) in files.items():
             entry = tarfile.TarInfo(f"package/{name}")
             entry.size = len(data)
-            entry.mode = 0o755 if name == binary_path else 0o644
+            entry.mode = mode
             package.addfile(entry, io.BytesIO(data))
     return archive
 

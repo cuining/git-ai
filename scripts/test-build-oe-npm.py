@@ -102,6 +102,7 @@ class OeNpmBuildTests(unittest.TestCase):
     def test_build_stages_verified_platforms_with_exact_source_and_final_signed_bytes(self):
         result = self.build()
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(list((self.root / "work").rglob("*.tgz")), [])
         self.assertFalse((self.root / "work" / "platform-packages.zip").exists())
         source = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
         platforms = {"darwin-arm64", "darwin-x64", "linux-arm64-musl", "linux-x64-musl", "win32-x64"}
