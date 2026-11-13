@@ -1,0 +1,27 @@
+tests/git-compat/run-core-tests.py
+  s_e23bf86cad936b::t_73c313915ced14 88-89,427,434,480
+flake.nix
+  s_e23bf86cad936b::t_73c313915ced14 99,691
+tests/mdm_scripts.rs
+  s_e23bf86cad936b::t_73c313915ced14 71
+src/api/client.rs
+  s_e23bf86cad936b::t_73c313915ced14 294
+src/config.rs
+  s_e23bf86cad936b::t_0dbf958908a493 10,1513,1614
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.7-dcc.14",
+  "base_commit_sha": "9aca3326c1991b2da55dcd5985d78f7b116b6ce6",
+  "prompts": {},
+  "sessions": {
+    "s_e23bf86cad936b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d02d-f6cc-74d3-b83c-bfaa1075f497",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
