@@ -726,7 +726,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(windows))]
     #[serial]
     fn test_cline_partial_managed_install_is_detected_and_uninstalled() {
         with_temp_home(|home| {
