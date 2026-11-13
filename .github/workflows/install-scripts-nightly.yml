@@ -18,19 +18,6 @@ jobs:
         os: [ubuntu-latest, macos-latest]
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
-        with:
-          toolchain: stable
-
-      - name: Build git-ai
-        run: cargo build --release --bin git-ai
-
       - name: Prepare test home and fake Claude Code
         run: |
           TEST_HOME="$RUNNER_TEMP/git-ai-home"
@@ -47,10 +34,8 @@ jobs:
           chmod +x "$BIN_DIR/claude"
           echo "$BIN_DIR" >> "$GITHUB_PATH"
 
-      - name: Install the local build
-        env:
-          GIT_AI_LOCAL_BINARY: ${{ github.workspace }}/target/release/git-ai
-        run: bash ./install.sh
+      - name: Run install.sh from usegitai.com
+        run: curl -fsSL https://usegitai.com/install.sh | bash
 
       - name: Verify shell configs and Claude hooks
         run: |
@@ -66,19 +51,6 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
-        with:
-          toolchain: stable
-
-      - name: Build git-ai
-        run: cargo build --release --bin git-ai
-
       - name: Prepare test home and fake Claude Code
         shell: pwsh
         run: |
@@ -99,17 +71,16 @@ jobs:
           "@echo 2.0.0 (Claude Code)" | Out-File -FilePath $claudeCmd -Encoding ASCII -Force
           Add-Content -Path $env:GITHUB_PATH -Value $binDir
 
-      - name: Install the local build
+      - name: Run install.ps1 from usegitai.com
         shell: pwsh
         env:
-          GIT_AI_LOCAL_BINARY: ${{ github.workspace }}\target\release\git-ai.exe
           HOME: ${{ env.TEST_HOME }}
           USERPROFILE: ${{ env.TEST_HOME }}
           HOMEDRIVE: ${{ env.TEST_HOME_DRIVE }}
           HOMEPATH: ${{ env.TEST_HOME_PATH }}
         run: |
           Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
-          & .\install.ps1
+          Invoke-WebRequest -UseBasicParsing https://usegitai.com/install.ps1 | Invoke-Expression
 
       - name: Verify Claude hooks
         shell: pwsh

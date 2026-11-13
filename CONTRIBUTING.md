@@ -33,7 +33,7 @@ On Windows, use a native PowerShell or Windows Terminal session for setup. If yo
 
 ### Using a development build locally
 
-It's often helpful to point your CLI to a development build. The dev script builds the binary and installs it to `~/.git-ai/bin/git-ai`, replacing the production binary so you can test changes with real git repositories.
+It's often helpful to point your `git-ai` to a development build. The dev script builds the binary and installs it to `~/.git-ai/bin/git-ai`, replacing the production binary so you can test changes with real git repositories.
 
 ```bash
 task dev
