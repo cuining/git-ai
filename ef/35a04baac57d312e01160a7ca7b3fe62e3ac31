@@ -1,0 +1,31 @@
+packaging/README.md
+  s_e3a8bb1a6d50be::t_93909bd73d5e34 32
+src/commands/config.rs
+  s_e3a8bb1a6d50be::t_0ac03fd00f4168 113-116,291-294,482
+tests/config_fresh_test.rs
+  s_4e3459120d92b8::t_e8e80020a96d2f 208,222
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-dcc.17",
+  "base_commit_sha": "ef35a04baac57d312e01160a7ca7b3fe62e3ac31",
+  "prompts": {},
+  "sessions": {
+    "s_4e3459120d92b8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d4d7-6b23-7960-9f99-c61f0d030566",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    },
+    "s_e3a8bb1a6d50be": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d59e-24e1-7082-b68a-89c9787b28bc",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
