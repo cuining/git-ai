@@ -1,0 +1,26 @@
+.github/workflows/mdm-login-start-nightly.yml
+  s_e23bf86cad936b::t_bb6fba4eb9afaa 1,3,59,95,143,146
+.github/workflows/install-scripts-local.yml
+  s_e23bf86cad936b::t_bb6fba4eb9afaa 52-53,110-112,199-200,271-273
+  s_e23bf86cad936b::t_75062d751f7dde 274
+.github/workflows/release.yml
+  s_e23bf86cad936b::t_bb6fba4eb9afaa 549,574-583
+.github/workflows/test.yml
+  s_e23bf86cad936b::t_bb6fba4eb9afaa 264-265
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-dcc.13",
+  "base_commit_sha": "7ee140f446bc102ba1ca951efc8d363330ee8680",
+  "prompts": {},
+  "sessions": {
+    "s_e23bf86cad936b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d02d-f6cc-74d3-b83c-bfaa1075f497",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
