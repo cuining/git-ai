@@ -1,0 +1,23 @@
+src/commands/checkpoint_agent/orchestrator.rs
+  s_4e3459120d92b8::t_5525ef9b67398c 2,42-43,54,257-278,333-339,374
+src/commands/checkpoint_agent/presets/agent_v1.rs
+  s_4e3459120d92b8::t_dbd162daba3565 5-6,32-33,142,146,159-172
+src/daemon/checkpoint.rs
+  s_4e3459120d92b8::t_098aec021933d6 430-446
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-dcc.15",
+  "base_commit_sha": "82320cfa9edf3fe8c3d7c911a0e75d3a15498850",
+  "prompts": {},
+  "sessions": {
+    "s_4e3459120d92b8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d4d7-6b23-7960-9f99-c61f0d030566",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
