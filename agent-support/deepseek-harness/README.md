@@ -4,7 +4,7 @@ This standalone Cordis plugin captures local `write` and `edit` checkpoints as `
 
 ## Install in Desktop
 
-On macOS and Windows, open Desktop once to initialize its profile, then fully quit it. Run `git-ai install-hooks` and reopen Desktop. Use DeepSeek Harness `0.2.1-rc.2` or `0.2.2-rc.1` and a DCC tracking build that includes this plugin.
+On macOS and Windows, open Desktop once to initialize its profile, then fully quit it. Run `git-ai install-hooks` with a DCC tracking build that includes this plugin, then reopen Desktop.
 
 ```text
 git-ai install-hooks --dry-run
@@ -17,11 +17,11 @@ Set `DSH_HOME` if Desktop uses a custom profile home. The installer runs without
 
 The bundle enables file capture. The foreground Bash overlay below targets the headless profile.
 
-For a Linux CLI installation, create the bundle archive with `npm pack --ignore-scripts` in this directory and run `dsh plugin --profile headless add /absolute/path/to/dsh-git-ai-attribution-0.1.1.tgz`.
+For a Linux CLI installation, create the bundle archive with `npm pack --ignore-scripts` in this directory and run `dsh plugin --profile headless add /absolute/path/to/dsh-git-ai-attribution-0.1.2.tgz`.
 
 ## Load in the headless profile
 
-Use the DeepSeek Harness `0.2.1-rc.2` headless profile and a working git-ai installation. Keep [git-ai.cordis.yml](git-ai.cordis.yml) beside `git-ai.mjs`, then run these commands from a Git worktree.
+Use the DeepSeek Harness headless profile and a working git-ai installation. Keep [git-ai.cordis.yml](git-ai.cordis.yml) beside `git-ai.mjs`, then run these commands from a Git worktree.
 
 ```sh
 dsh --profile headless --patch /absolute/path/to/git-ai.cordis.yml --dump-config

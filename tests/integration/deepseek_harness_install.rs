@@ -272,11 +272,15 @@ fn deepseek_harness_upgrades_the_previous_bundle_without_replacing_its_files() {
     let home = repo.test_home_path().join("DSH home");
     let profile = home.join("profiles/desktop");
     let patch = profile.join("cordis.patch.yml");
-    let previous_module = format!("./local-plugins/{PACKAGE}/0.1.0/package/git-ai.mjs");
+    let previous_module = format!("./local-plugins/{PACKAGE}/0.1.1/package/git-ai.mjs");
     let previous_file = profile.join(&previous_module);
     let previous_contents = "export const name = 'git-ai-attribution'\n";
     fs::create_dir_all(previous_file.parent().unwrap()).unwrap();
     fs::write(&previous_file, previous_contents).unwrap();
+    let previous_manifest = previous_file.with_file_name("package.json");
+    let previous_manifest_contents =
+        r#"{"version":"0.1.1","engines":{"dsh":"0.2.1-rc.2 || 0.2.2-rc.1"}}"#;
+    fs::write(&previous_manifest, previous_manifest_contents).unwrap();
     fs::write(profile.join("package.json"), "{}\n").unwrap();
     fs::write(
         &patch,
@@ -299,13 +303,21 @@ fn deepseek_harness_upgrades_the_previous_bundle_without_replacing_its_files() {
     let module = format!("./local-plugins/{PACKAGE}/{version}/package/git-ai.mjs");
     assert!(updated.starts_with(USER_PATCH));
     assert!(updated.contains(&format!("name: '{module}'")));
+    let installed_file = profile.join(module);
     assert_eq!(
-        fs::read_to_string(profile.join(module)).unwrap(),
+        fs::read_to_string(&installed_file).unwrap(),
         include_str!("../../agent-support/deepseek-harness/git-ai.mjs")
     );
+    let manifest = fs::read_to_string(installed_file.with_file_name("package.json")).unwrap();
+    let manifest: serde_json::Value = serde_json::from_str(&manifest).unwrap();
+    assert!(manifest.pointer("/engines/dsh").is_none());
     assert_eq!(
         fs::read_to_string(previous_file).unwrap(),
         previous_contents
+    );
+    assert_eq!(
+        fs::read_to_string(previous_manifest).unwrap(),
+        previous_manifest_contents
     );
 }
 
