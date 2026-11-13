@@ -61,7 +61,8 @@ fi
 python3 scripts/test-pack-npm.py
 python3 scripts/test-stage-oe-npm.py
 python3 scripts/test-build-oe-npm.py
-git --version
+test_git=$(command -v git)
+"$test_git" --version
 # Match the library-only Taskfile test invocation with a bounded runner pool.
 GIT_AI_TEST_SHARED_DAEMON_POOL_SIZE=4 "$@" test --locked --lib -- --test-threads 4
 # Compile integration tests without the bootstrap's library-only Cargo runner.
@@ -82,7 +83,10 @@ if len(tests) != 1:
 print(tests[0])
 PY
 )
-GIT_AI_TEST_BINARY_PATH="$PWD/target/debug/git-ai" GIT_AI_TEST_SHARED_DAEMON_POOL_SIZE=4 \
+# TestRepo and its daemon probe fixed Git paths unless a test config pins Git.
+test_git_config=$(python3 -c 'import json, sys; print(json.dumps({"git_path": sys.argv[1]}))' "$test_git")
+GIT_AI_TEST_CONFIG_PATCH="$test_git_config" \
+    GIT_AI_TEST_BINARY_PATH="$PWD/target/debug/git-ai" GIT_AI_TEST_SHARED_DAEMON_POOL_SIZE=4 \
     "$usage_test" usage_period::usage_machine_ --test-threads 4
 
 if [ "$build_npm" = 1 ]; then
