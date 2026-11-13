@@ -110,7 +110,10 @@ fn print_config_help() {
     println!("  disable_auto_updates         Disable auto updates (bool)");
     println!("  update_channel               Update channel (latest/next)");
     println!("  feature_flags                Feature flags (object)");
-    println!("  api_base_url                 API base URL (default: https://usegitai.com)");
+    println!(
+        "  api_base_url                 API base URL (default: {})",
+        crate::config::DEFAULT_API_BASE_URL
+    );
     println!("  api_key                      API key for X-API-Key header");
     println!("  author.name                  git-ai author display name override");
     println!("  author.email                 git-ai author email override");
@@ -285,14 +288,10 @@ fn show_all_config() -> Result<(), String> {
         );
     }
 
-    if let Some(ref repos) = file_config.allow_repositories {
-        effective_config.insert(
-            "allow_repositories".to_string(),
-            serde_json::to_value(repos).unwrap(),
-        );
-    } else {
-        effective_config.insert("allow_repositories".to_string(), Value::Array(vec![]));
-    }
+    effective_config.insert(
+        "allow_repositories".to_string(),
+        serde_json::json!(runtime_config.allow_repository_patterns()),
+    );
 
     if let Some(ref repos) = file_config.exclude_repositories {
         effective_config.insert(
@@ -480,11 +479,7 @@ fn get_config_value(key: &str) -> Result<(), String> {
                 }
             }
             "allow_repositories" => {
-                if let Some(ref repos) = file_config.allow_repositories {
-                    serde_json::to_value(repos).unwrap()
-                } else {
-                    Value::Array(vec![])
-                }
+                serde_json::json!(runtime_config.allow_repository_patterns())
             }
             "exclude_repositories" => {
                 if let Some(ref repos) = file_config.exclude_repositories {

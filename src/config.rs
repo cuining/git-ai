@@ -16,13 +16,19 @@ use crate::mdm::utils::home_dir;
 #[cfg(any(test, feature = "test-support"))]
 use std::sync::RwLock;
 
-/// Default API base URL for comparison
-pub const DEFAULT_API_BASE_URL: &str = "https://usegitai.com";
+pub const DEFAULT_API_BASE_URL: &str =
+    "https://dcc-service.intra.xiaojukeji.com/api/v1/ai-tracking";
+const COMPANY_REPOSITORY_PREFIX: &str = "https://git.xiaojukeji.com/";
+const COMPANY_REPOSITORY_PATTERN: &str = "git.xiaojukeji.com/*";
 pub const DEFAULT_MAX_CHECKPOINT_FILE_SIZE_BYTES: usize = 3 * 1024 * 1024;
 pub const DEFAULT_MAX_CHECKPOINT_TOTAL_SIZE_BYTES: usize = 32 * 1024 * 1024;
 pub const DEFAULT_MAX_CHECKPOINT_TOTAL_LINES: usize = 500_000;
 pub(crate) const MEBIBYTE_BYTES: u64 = 1024 * 1024;
 pub(crate) const MAX_DAEMON_MEMORY_LIMIT_MB: u64 = u64::MAX / MEBIBYTE_BYTES;
+
+fn company_repository_policy_enabled() -> bool {
+    !cfg!(test) && (!cfg!(feature = "test-support") || env::var_os("GIT_AI_TEST_DB_PATH").is_none())
+}
 
 /// Which backend to use for storing authorship notes.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -430,7 +436,16 @@ impl Config {
     }
 
     pub fn has_repository_filters(&self) -> bool {
-        !self.allow_repositories.is_empty() || !self.exclude_repositories.is_empty()
+        company_repository_policy_enabled()
+            || !self.allow_repositories.is_empty()
+            || !self.exclude_repositories.is_empty()
+    }
+
+    pub(crate) fn allow_repository_patterns(&self) -> Vec<&str> {
+        self.allow_repositories
+            .iter()
+            .map(Pattern::as_str)
+            .collect()
     }
 
     pub fn is_allowed_repository(&self, repository: &Option<Repository>) -> bool {
@@ -469,18 +484,18 @@ impl Config {
             }
         }
 
-        // If allowlist is empty, allow everything (unless excluded above)
-        if self.allow_repositories.is_empty() {
+        let company_only = company_repository_policy_enabled();
+        if !company_only && self.allow_repositories.is_empty() {
             return true;
         }
 
-        // If allowlist is defined, only allow repos whose remotes match the patterns
-        match remotes {
-            Some(remotes) => remotes
-                .iter()
-                .any(|remote| remote_matches_patterns(&self.allow_repositories, &remote.1)),
-            None => false, // Can't verify, deny by default when allowlist is active
-        }
+        remotes.is_some_and(|remotes| {
+            remotes.iter().any(|(_, url)| {
+                (!company_only || is_company_repository_remote(url))
+                    && (self.allow_repositories.is_empty()
+                        || remote_matches_patterns(&self.allow_repositories, url))
+            })
+        })
     }
 
     /// Returns true if prompts should be excluded (not shared) for the given repository.
@@ -779,6 +794,13 @@ where
     as_strings.serialize(serializer)
 }
 
+fn is_company_repository_remote(remote: &str) -> bool {
+    crate::repo_url::normalize_repo_url(remote).is_ok_and(|url| {
+        url.to_ascii_lowercase()
+            .starts_with(COMPANY_REPOSITORY_PREFIX)
+    })
+}
+
 fn remote_matches_patterns(patterns: &[Pattern], remote_url: &str) -> bool {
     let remote_candidates = repo_remote_match_candidates(remote_url);
     patterns.iter().any(|pattern| {
@@ -1011,7 +1033,13 @@ fn build_config() -> Config {
     let allow_repositories = file_cfg
         .as_ref()
         .and_then(|c| c.allow_repositories.clone())
-        .unwrap_or_default()
+        .unwrap_or_else(|| {
+            if company_repository_policy_enabled() {
+                vec![COMPANY_REPOSITORY_PATTERN.to_string()]
+            } else {
+                Vec::new()
+            }
+        })
         .into_iter()
         .filter_map(|pattern_str| {
             Pattern::new(&pattern_str)
@@ -1049,9 +1077,8 @@ fn build_config() -> Config {
     );
     let telemetry_oss_disabled = file_cfg
         .as_ref()
-        .and_then(|c| c.telemetry_oss.clone())
-        .filter(|s| s == "off")
-        .is_some();
+        .and_then(|c| c.telemetry_oss.as_deref())
+        .is_none_or(|s| s == "off");
     let telemetry_enterprise_dsn = file_cfg
         .as_ref()
         .and_then(|c| c.telemetry_enterprise_dsn.clone())
@@ -1408,7 +1435,9 @@ fn build_feature_flags(file_cfg: &Option<FileConfig>) -> FeatureFlags {
         serde_json::from_value(value).ok()
     });
 
-    FeatureFlags::from_env_and_file(file_flags)
+    let mut flags = FeatureFlags::from_env_and_file(file_flags);
+    flags.rewrite_metrics_events = true;
+    flags
 }
 
 fn resolve_git_path(file_cfg: &Option<FileConfig>) -> String {

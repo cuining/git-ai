@@ -1,3 +1,4 @@
+use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::TestRepo;
 use crate::test_utils::extract_json_object;
 use git_ai::authorship::stats::CommitStats;
@@ -81,6 +82,39 @@ fn configure_hostile_diff_settings(repo: &TestRepo) {
         repo.git_og(&["config", key, value])
             .unwrap_or_else(|err| panic!("setting {key}={value} should succeed: {err}"));
     }
+}
+
+#[test]
+fn test_company_generated_directories_are_excluded_from_stats() {
+    let repo = TestRepo::new();
+    let mut source = repo.filename("src/build.rs");
+    write_file(&repo, "src/build.rs", "original\n");
+    repo.git_ai(&["checkpoint", "mock_known_human", "src/build.rs"])
+        .unwrap();
+    repo.stage_all_and_commit("initial").unwrap();
+    source.assert_committed_lines(crate::lines!["original".human()]);
+
+    write_file(&repo, "src/build.rs", "original\nnew source line\n");
+    for dir in "dist build coverage __pycache__ .next .nuxt out target".split_whitespace() {
+        for prefix in ["", "app/"] {
+            write_file(
+                &repo,
+                &format!("{prefix}{dir}/generated.txt"),
+                "generated\n",
+            );
+        }
+    }
+    repo.git_ai(&["checkpoint", "mock_ai"]).unwrap();
+    repo.git(&["add", "."]).unwrap();
+    let status = status_from_args(&repo, &["status", "--json"]);
+    assert_eq!(status.stats.git_diff_added_lines, 1);
+    assert_eq!(status.stats.ai_accepted, 1);
+    repo.stage_all_and_commit("source and generated files")
+        .unwrap();
+    source.assert_committed_lines(crate::lines!["original".human(), "new source line".ai()]);
+    let stats = repo.stats().unwrap();
+    assert_eq!(stats.git_diff_added_lines, 1);
+    assert_eq!(stats.ai_accepted, 1);
 }
 
 #[test]

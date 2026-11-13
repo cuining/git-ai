@@ -1255,17 +1255,20 @@ where
 }
 
 fn should_deliver_metric_event(config: &Config, event: &MetricEvent) -> bool {
-    // Transcript-derived events keep flowing for sessions tracked before a
-    // repo was excluded, so they get the same upload-time repo gate.
-    let transcript_derived = event.event_id == MetricEventId::SessionEvent as u16
-        || event.event_id == MetricEventId::TokenUsage as u16;
-    if !transcript_derived {
+    let repo_url = sparse_get_string(&event.attrs, attr_pos::REPO_URL).flatten();
+    // Install and daemon health events can be sent without repository data.
+    if repo_url.is_none()
+        && [
+            MetricEventId::InstallHooks,
+            MetricEventId::DaemonIngestAnomaly,
+        ]
+        .iter()
+        .any(|kind| event.event_id == *kind as u16)
+    {
         return true;
     }
 
-    let remotes = sparse_get_string(&event.attrs, attr_pos::REPO_URL)
-        .flatten()
-        .map(|url| vec![(String::new(), url)]);
+    let remotes = repo_url.map(|url| vec![(String::new(), url)]);
     config.is_allowed_repository_with_remotes(remotes.as_ref())
 }
 

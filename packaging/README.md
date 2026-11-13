@@ -29,7 +29,7 @@ console user is logged in or per-user setup fails.
 For an enterprise endpoint, pass configuration to the MSI when installing:
 
 ```powershell
-msiexec /i git-ai-windows-x64.msi API_BASE=https://usegitai.com API_KEY=your-api-key
+msiexec /i git-ai-windows-x64.msi API_BASE=https://dcc-service.intra.xiaojukeji.com/api/v1/ai-tracking API_KEY=your-api-key
 ```
 
 To skip WSL installation, add `INSTALL_WSL=0` to that command.

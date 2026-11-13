@@ -6353,6 +6353,7 @@ fn daemon_memory_threshold_logs_uploads_and_aborts_without_draining() {
             ),
             ("GIT_AI_API_BASE_URL", mock_api.base_url()),
             ("GIT_AI_API_KEY", "test-api-key"),
+            ("GIT_AI_DAEMON_LOG_UPLOAD", "true"),
         ],
     );
     let head = repo.git(&["rev-parse", "HEAD"]).unwrap().trim().to_string();
@@ -8398,6 +8399,7 @@ fn await_waits_for_metrics_and_notes_flush() {
 fn daemon_debug_logging_does_not_reupload_ureq_logs() {
     let mut mock_api = MockApiServer::start();
     let repo = TestRepo::new_with_daemon_env(&[
+        ("GIT_AI_DAEMON_LOG_UPLOAD", "true"),
         ("RUST_LOG", "debug"),
         ("GIT_AI_API_BASE_URL", mock_api.base_url()),
         ("GIT_AI_API_KEY", "test-api-key"),
@@ -8449,7 +8451,7 @@ fn daemon_debug_logging_does_not_reupload_ureq_logs() {
 }
 
 #[test]
-fn daemon_marks_repository_filtered_session_events_delivered_without_uploading_them() {
+fn daemon_marks_repository_filtered_session_and_commit_metrics_delivered_without_upload() {
     let mut mock_api = MockApiServer::start();
     let metrics_db_path = std::env::temp_dir().join(format!(
         "git-ai-filtered-session-events-{}.db",
@@ -8469,20 +8471,27 @@ fn daemon_marks_repository_filtered_session_events_delivered_without_uploading_t
     )
     .unwrap();
 
-    let session_event = |trace_id: &str, repo_url: &str| {
-        MetricEvent::from_values(
-            SessionEventValues::new(json!({ "marker": trace_id })),
-            EventAttributes::with_version("test")
-                .session_id(trace_id)
-                .trace_id(trace_id)
-                .repo_url(repo_url)
-                .to_sparse(),
-        )
-    };
-    let events = [
-        session_event("allowed-session", "https://github.com/acme/public"),
-        session_event("excluded-session", "https://github.com/acme/private"),
-    ];
+    use git_ai::metrics::types::MetricEventId;
+    let mut events = Vec::new();
+    for (kind, name) in [
+        (MetricEventId::SessionEvent, "session"),
+        (MetricEventId::Committed, "commit"),
+        (MetricEventId::RewriteCommitted, "rewrite"),
+    ] {
+        for (scope, remote) in [
+            ("allowed", "https://github.com/acme/public"),
+            ("excluded", "https://github.com/acme/private"),
+        ] {
+            let mut event = MetricEvent::from_values(
+                SessionEventValues::new(json!({ "marker": format!("{scope}-{name}") })),
+                EventAttributes::with_version("test")
+                    .repo_url(remote)
+                    .to_sparse(),
+            );
+            event.event_id = kind as u16;
+            events.push(event);
+        }
+    }
     let serialized_events = events
         .iter()
         .map(serde_json::to_string)
@@ -8497,12 +8506,14 @@ fn daemon_marks_repository_filtered_session_events_delivered_without_uploading_t
         .expect("await should flush metrics");
 
     let uploaded_requests = serde_json::to_string(&mock_api.collect_requests()).unwrap();
-    assert!(uploaded_requests.contains("allowed-session"));
-    assert!(!uploaded_requests.contains("excluded-session"));
+    for name in ["session", "commit", "rewrite"] {
+        assert!(uploaded_requests.contains(&format!("allowed-{name}")));
+        assert!(!uploaded_requests.contains(&format!("excluded-{name}")));
+    }
 
     let metrics_db = MetricsDatabase::open_at_path(&metrics_db_path).unwrap();
     let status = metrics_db.status().unwrap();
-    assert_eq!(status.delivered, 2);
+    assert_eq!(status.delivered, events.len());
 }
 
 /// TokenUsage events are transcript-derived like SessionEvents and get the
@@ -8727,6 +8738,7 @@ fn excluded_repo_token_usage_never_uploads_via_the_real_pipeline() {
     let repo = TestRepo::new_with_daemon_env(&[
         ("GIT_AI_API_BASE_URL", mock_api.base_url()),
         ("GIT_AI_API_KEY", "test-api-key"),
+        ("GIT_AI_TOKEN_USAGE_METRICS", "true"),
         (
             "GIT_AI_TEST_METRICS_DB_PATH",
             metrics_db_path.to_str().unwrap(),
