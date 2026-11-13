@@ -1,6 +1,6 @@
 {
   "name": "git-ai-deepseek-harness",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Git AI attribution for DeepSeek Harness file edits",
   "private": true,
   "type": "module",

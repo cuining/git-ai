@@ -82,7 +82,6 @@ fn test_agent_v1_ai_agent_checkpoint_with_dirty_files() {
                     .unwrap(),
                 "console.log('hello');"
             );
-            // Inline transcripts removed - should now be None
             assert!(e.stream_source.is_none());
         }
         _ => panic!("Expected PostFileEdit for ai_agent checkpoint"),
@@ -336,4 +335,122 @@ fn test_agent_v1_shell_command_e2e_attribution() {
         "base line".unattributed_human(),
         "created by shell".ai(),
     ]);
+}
+
+#[test]
+fn test_agent_v1_transcript_is_readable_from_commit_and_private_to_local_store() {
+    use git_ai::authorship::authorship_log_serialization::AuthorshipLog;
+    use serde_json::Value;
+
+    let mut repo = TestRepo::new();
+    repo.patch_git_ai_config(|patch| {
+        patch.feature_flags = Some(json!({"checkpoint_debug_log": true}));
+    });
+    let file = repo.path().join("transcript.txt");
+    fs::write(&file, "manual line\n").unwrap();
+    repo.stage_all_and_commit("Seed tracked file").unwrap();
+    repo.filename("transcript.txt")
+        .assert_committed_lines(lines!["manual line".unattributed_human(),]);
+
+    let input = |payload: Value| {
+        repo.git_ai_with_stdin(
+            &[
+                "checkpoint",
+                "agent-v1",
+                "--hook-input",
+                "stdin",
+                "--print-receipt",
+            ],
+            payload.to_string().as_bytes(),
+        )
+        .unwrap()
+    };
+    input(json!({
+        "type": "human",
+        "repo_working_dir": repo.canonical_path(),
+        "will_edit_filepaths": ["transcript.txt"],
+    }));
+    fs::write(&file, "manual line\nAI line\n").unwrap();
+    let marker = "Local-only fixture prompt";
+    let token = "sk_test_4eC39HqLyjWDarjtT1zdp7dc";
+    input(json!({
+        "type": "ai_agent",
+        "repo_working_dir": repo.canonical_path(),
+        "edited_filepaths": ["transcript.txt"],
+        "agent_name": "deepseek-harness",
+        "model": "test-model",
+        "conversation_id": "agent-v1-transcript-test",
+        "transcript": {"messages": [
+            {"type": "user", "text": marker},
+            {"type": "assistant", "text": format!("Fixture key: {token}")},
+            {"type": "tool_use", "name": "write", "input": {"file_path": "transcript.txt"}},
+        ]},
+    }));
+    let commit = repo.stage_all_and_commit("Attach transcript").unwrap();
+    repo.filename("transcript.txt")
+        .assert_committed_lines(lines!["manual line".unattributed_human(), "AI line".ai(),]);
+
+    let note = repo.read_authorship_note(&commit.commit_sha).unwrap();
+    assert!(!note.contains(marker));
+    let note = AuthorshipLog::deserialize_from_string(&note).unwrap();
+    let attestation = &note.attestations[0]
+        .entries
+        .iter()
+        .find(|entry| entry.hash.starts_with("s_"))
+        .unwrap()
+        .hash;
+    let output = repo
+        .git_ai(&["show-prompt", attestation, "--commit", &commit.commit_sha])
+        .unwrap();
+    let output: Value = serde_json::from_str(&output).unwrap();
+    assert_eq!(output["transcript"]["messages"][0]["text"], marker);
+    let reply = output["transcript"]["messages"][1]["text"]
+        .as_str()
+        .unwrap();
+    assert!(reply.starts_with("Fixture key: "));
+    assert!(!reply.contains(token));
+    assert_eq!(output["transcript"]["messages"][2]["name"], "write");
+
+    let log_dir = repo
+        .test_home_path()
+        .join(".git-ai/internal/checkpoint-debug-logs");
+    let logs = fs::read_dir(log_dir)
+        .unwrap()
+        .map(|entry| fs::read_to_string(entry.unwrap().path()).unwrap())
+        .collect::<String>();
+    assert!(logs.contains("agent-v1-transcript-test"));
+    assert!(!logs.contains(marker));
+    assert!(!logs.contains(token));
+    for entry in logs
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+    {
+        let input: Value = serde_json::from_str(entry["hook_input"].as_str().unwrap()).unwrap();
+        assert!(input.get("transcript").is_none());
+        assert!(
+            entry["requests"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|request| request.get("transcript").is_none())
+        );
+    }
+}
+
+#[test]
+fn test_agent_v1_omits_oversized_transcript_without_losing_the_edit() {
+    let hook_input = json!({
+        "type": "ai_agent",
+        "repo_working_dir": "/project",
+        "edited_filepaths": ["test.txt"],
+        "agent_name": "deepseek-harness",
+        "model": "test-model",
+        "conversation_id": "agent-v1-long-transcript-test",
+        "transcript": {"messages": [{"type": "user", "text": "a".repeat(512 * 1024)}]},
+    })
+    .to_string();
+    let events = parse_agent_v1(&hook_input).unwrap();
+    assert!(
+        matches!(events.as_slice(), [ParsedHookEvent::PostFileEdit(edit)] if edit.file_paths.ends_with(&[PathBuf::from("/project/test.txt")]))
+    );
 }

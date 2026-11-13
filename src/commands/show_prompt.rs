@@ -32,13 +32,19 @@ pub fn handle_show_prompt(args: &[String]) {
         parsed.offset,
     ) {
         Ok((commit_sha, prompt_record)) => {
-            // Output the prompt as JSON, including the commit SHA for context
-            // Note: messages will be empty if they were uploaded to CAS (legacy behavior)
-            let output = serde_json::json!({
+            let mut output = serde_json::json!({
                 "commit": commit_sha,
                 "prompt_id": parsed.prompt_id,
                 "prompt": prompt_record,
             });
+            match crate::authorship::checkpoint_transcripts::load(&repo, &parsed.prompt_id) {
+                Ok(Some(transcript)) => output["transcript"] = serde_json::json!(transcript),
+                Ok(None) => {}
+                Err(error) => {
+                    eprintln!("Failed to read checkpoint transcript: {error}");
+                    std::process::exit(1);
+                }
+            }
             println!(
                 "{}",
                 serde_json::to_string_pretty(&output).unwrap_or_else(|_| "{}".to_string())

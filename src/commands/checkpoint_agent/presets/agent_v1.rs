@@ -2,6 +2,8 @@ use super::{
     AgentPreset, ParsedHookEvent, PostBashCall, PostFileEdit, PreBashCall, PreFileEdit,
     PresetContext,
 };
+use crate::authorship::checkpoint_transcripts::MAX_TRANSCRIPT_BYTES;
+use crate::authorship::transcript::AiTranscript;
 use crate::authorship::working_log::AgentId;
 use crate::error::GitAiError;
 use serde::Deserialize;
@@ -27,6 +29,8 @@ enum AgentV1Payload {
         agent_name: String,
         model: String,
         conversation_id: String,
+        #[serde(default)]
+        transcript: Option<serde_json::Value>,
     },
     PreShellCommand {
         repo_working_dir: String,
@@ -135,10 +139,11 @@ impl AgentPreset for AgentV1Preset {
                 agent_name,
                 model,
                 conversation_id,
+                transcript,
             } => {
                 let file_paths = resolve_paths(edited_filepaths, &repo_working_dir);
                 let dirty = resolve_dirty_files(dirty_files, &repo_working_dir);
-                ParsedHookEvent::PostFileEdit(PostFileEdit {
+                let edit = PostFileEdit {
                     context: agent_context(
                         &repo_working_dir,
                         agent_name,
@@ -151,7 +156,20 @@ impl AgentPreset for AgentV1Preset {
                     dirty_files: dirty,
                     stream_source: None,
                     tool_use_id: None,
-                })
+                };
+                let transcript = transcript.and_then(|value| {
+                    if serde_json::to_vec(&value).ok()?.len() > MAX_TRANSCRIPT_BYTES {
+                        return None;
+                    }
+                    let transcript: AiTranscript = serde_json::from_value(value).ok()?;
+                    (!transcript.messages.is_empty()).then_some(transcript)
+                });
+                match transcript {
+                    Some(transcript) => {
+                        ParsedHookEvent::PostFileEditWithTranscript(edit, transcript)
+                    }
+                    None => ParsedHookEvent::PostFileEdit(edit),
+                }
             }
             AgentV1Payload::PreShellCommand {
                 repo_working_dir,

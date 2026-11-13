@@ -1,4 +1,5 @@
 use crate::authorship::authorship_log_serialization::generate_trace_id;
+use crate::authorship::transcript::AiTranscript;
 use crate::authorship::working_log::{AgentId, CheckpointKind};
 use crate::checkpoint_content_budget::CheckpointContentBudget;
 use crate::commands::checkpoint_agent::presets::{
@@ -38,6 +39,8 @@ pub struct CheckpointRequest {
     pub files: Vec<CheckpointFile>,
     pub path_role: PreparedPathRole,
     pub stream_source: Option<StreamSource>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transcript: Option<AiTranscript>,
     pub metadata: HashMap<String, String>,
 }
 
@@ -48,7 +51,7 @@ struct CheckpointDebugLogEntry<'a> {
     hook_input: &'a str,
     trace_id: &'a str,
     event_count: usize,
-    requests: &'a [CheckpointRequest],
+    requests: serde_json::Value,
 }
 
 struct RepoContext {
@@ -251,6 +254,28 @@ fn write_checkpoint_debug_log(
 
     cleanup_old_debug_logs(&log_dir);
 
+    let sanitized_input;
+    let hook_input = if preset_name == "agent-v1" {
+        sanitized_input = serde_json::from_str::<serde_json::Value>(hook_input)
+            .ok()
+            .and_then(|mut value| {
+                value.as_object_mut()?.remove("transcript")?;
+                Some(value.to_string())
+            });
+        sanitized_input.as_deref().unwrap_or(hook_input)
+    } else {
+        hook_input
+    };
+    let Ok(mut requests) = serde_json::to_value(requests) else {
+        return;
+    };
+    if let Some(items) = requests.as_array_mut() {
+        for request in items {
+            if let Some(fields) = request.as_object_mut() {
+                fields.remove("transcript");
+            }
+        }
+    }
     let entry = CheckpointDebugLogEntry {
         timestamp: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
         preset_name,
@@ -305,6 +330,13 @@ fn execute_event(
     match event {
         ParsedHookEvent::PreFileEdit(e) => execute_pre_file_edit(e),
         ParsedHookEvent::PostFileEdit(e) => execute_post_file_edit(e, preset_name),
+        ParsedHookEvent::PostFileEditWithTranscript(edit, transcript) => {
+            let mut requests = execute_post_file_edit(edit, preset_name)?;
+            for request in &mut requests {
+                request.transcript = Some(transcript.clone());
+            }
+            Ok(requests)
+        }
         ParsedHookEvent::PreBashCall(e) => execute_pre_bash_call(e),
         ParsedHookEvent::PostBashCall(e) => execute_post_bash_call(e),
         ParsedHookEvent::KnownHumanEdit(e) => execute_known_human_edit(e),
@@ -339,6 +371,7 @@ fn split_files_into_requests(
             files,
             path_role,
             stream_source: stream_source.clone(),
+            transcript: None,
             metadata: metadata.clone(),
         })
         .collect()

@@ -211,12 +211,14 @@ fn read_json(path: &Path) -> Value {
 #[ignore = "requires the official macOS Desktop package"]
 fn deepseek_harness_install_official_cli_version_and_enablement() {
     for (before, enabled, expected_version, expected_enabled, add) in [
-        (None, false, "0.2.3", true, true),
-        (Some("0.2.2"), true, "0.2.3", true, true),
-        (Some("0.2.2"), false, "0.2.3", false, true),
-        (Some("0.2.3-rc.1"), true, "0.2.3", true, true),
-        (Some("0.2.3"), false, "0.2.3", false, false),
-        (Some("0.2.3"), true, "0.2.3", true, false),
+        (None, false, "0.2.4", true, true),
+        (Some("0.2.2"), true, "0.2.4", true, true),
+        (Some("0.2.2"), false, "0.2.4", false, true),
+        (Some("0.2.3"), true, "0.2.4", true, true),
+        (Some("0.2.3"), false, "0.2.4", false, true),
+        (Some("0.2.4-rc.1"), true, "0.2.4", true, true),
+        (Some("0.2.4"), false, "0.2.4", false, false),
+        (Some("0.2.4"), true, "0.2.4", true, false),
         (Some("0.3.0"), true, "0.3.0", true, false),
         (Some("0.3.0"), false, "0.3.0", false, false),
     ] {
@@ -284,7 +286,7 @@ fn deepseek_harness_install_official_cli_version_and_enablement() {
                     .contains("DeepSeek Harness: Pending removal")
             );
             assert_eq!(fixture.plugin_commands(), "add\n");
-            fixture.assert_state("0.2.3", true);
+            fixture.assert_state("0.2.4", true);
             assert!(
                 fixture
                     .install(&["uninstall"])

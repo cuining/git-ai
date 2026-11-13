@@ -20,6 +20,7 @@ mod opencode;
 mod pi;
 mod windsurf;
 
+use crate::authorship::transcript::AiTranscript;
 use crate::authorship::working_log::AgentId;
 use crate::error::GitAiError;
 use serde::{Deserialize, Serialize};
@@ -39,6 +40,7 @@ pub struct PresetContext {
 pub enum ParsedHookEvent {
     PreFileEdit(PreFileEdit),
     PostFileEdit(PostFileEdit),
+    PostFileEditWithTranscript(PostFileEdit, AiTranscript),
     PreBashCall(PreBashCall),
     PostBashCall(PostBashCall),
     KnownHumanEdit(KnownHumanEdit),

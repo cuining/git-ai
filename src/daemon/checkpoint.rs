@@ -427,6 +427,23 @@ fn execute_resolved_checkpoint(
 
         let append_start = Instant::now();
         working_log.append_checkpoint_to(&mut checkpoints, checkpoint)?;
+        if kind.is_ai()
+            && let (Some(agent), Some(transcript)) = (
+                checkpoint_request.agent_id.as_ref(),
+                checkpoint_request.transcript.as_ref(),
+            )
+        {
+            let session_id = generate_session_id(&agent.id, &agent.tool);
+            if let Err(error) = crate::authorship::checkpoint_transcripts::save(
+                repo,
+                &session_id,
+                &trace_id,
+                transcript,
+            ) {
+                tracing::warn!(%error, %trace_id, "could not save checkpoint transcript");
+            }
+        }
+
         tracing::debug!(
             "[BENCHMARK] Appending checkpoint to working log took {:?}",
             append_start.elapsed()

@@ -1,7 +1,7 @@
 import { isAbsolute, resolve } from 'node:path'
 
 export const name = 'git-ai-deepseek-harness'
-export const inject = ['fs', 'subprocess', 'tools', 'workingDirectory']
+export const inject = ['fs', 'sessionQuery', 'subprocess', 'tools', 'workingDirectory']
 
 const gitAi = 'git-ai'
 
@@ -34,6 +34,53 @@ async function canSnapshot(ctx, target, actor) {
     if (ctx.fs.contains(resolvedRoot, target)) return true
   }
   return false
+}
+
+async function captureTranscript(ctx, sessionId) {
+  const observation = await ctx.sessionQuery.observeSession(sessionId, {
+    projectionMode: 'none',
+    signal: AbortSignal.timeout(1000),
+  })
+  try {
+    const messages = []
+    for (const event of observation.events) {
+      const timestamp = new Date(event.time).toISOString()
+      if (event.type === 'tool/call') {
+        let input = event.data.arguments
+        try {
+          input = JSON.parse(input)
+        } catch {
+          // Keep the original argument text when the model emitted invalid JSON.
+        }
+        messages.push({ type: 'tool_use', name: event.data.name, input, timestamp })
+        continue
+      }
+      if (event.surfaceOp !== 'append') continue
+      let content
+      let type
+      if (event.type === 'user/message' && event.data.source.kind === 'user') {
+        content = event.data.content
+        type = 'user'
+      } else if (event.type === 'assistant/message') {
+        content = event.data.message.content
+        type = 'assistant'
+      } else {
+        continue
+      }
+      for (const block of content) {
+        if (block.type === 'text' && block.text.length > 0) {
+          messages.push({ type, text: block.text, timestamp })
+        }
+      }
+    }
+    const transcript = { messages }
+    // Keep the line checkpoint within the daemon request budget on long sessions.
+    if (messages.length > 0 && Buffer.byteLength(JSON.stringify(transcript)) <= 512 * 1024) {
+      return transcript
+    }
+  } finally {
+    observation[Symbol.dispose]()
+  }
 }
 
 export function apply(ctx) {
@@ -97,8 +144,15 @@ export function apply(ctx) {
         if (call.wrote) {
           const session = exec.agent.session
           const model = session.requestContext()?.model ?? exec.agent.options?.model
+          let transcript
+          try {
+            transcript = await captureTranscript(ctx, session.id)
+          } catch {
+            // A missing transcript should not prevent line attribution.
+          }
           await checkpoint(ctx, {
             type: 'ai_agent',
+            transcript,
             repo_working_dir: call.snapshot.cwd,
             edited_filepaths: [call.snapshot.path],
             agent_name: 'deepseek-harness',
