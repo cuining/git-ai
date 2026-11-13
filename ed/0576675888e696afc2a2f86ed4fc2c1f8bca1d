@@ -1,0 +1,22 @@
+tests/windows_msi_package.rs
+  s_e23bf86cad936b::t_d6563b3a367eb3 1-12,14-15,22-24,26-27,34,37-38
+  s_e23bf86cad936b::t_5de053e14b4df1 13,16-21,25,28-33,35-36
+src/commands/install_wsl.rs
+  s_e23bf86cad936b::t_d6563b3a367eb3 1-327
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-dcc.13",
+  "base_commit_sha": "ed0576675888e696afc2a2f86ed4fc2c1f8bca1d",
+  "prompts": {},
+  "sessions": {
+    "s_e23bf86cad936b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d02d-f6cc-74d3-b83c-bfaa1075f497",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
