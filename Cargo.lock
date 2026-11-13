@@ -1068,6 +1068,7 @@ dependencies = [
 name = "git-ai"
 version = "1.7.7"
 dependencies = [
+ "base64",
  "chrono",
  "clap",
  "criterion",
@@ -1104,6 +1105,7 @@ dependencies = [
  "serde_json_canonicalizer",
  "serial_test",
  "sha2",
+ "tar",
  "tempfile",
  "tokio",
  "toml",
@@ -3086,6 +3088,10 @@ name = "semver"
 version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d767eb0aabc880b29956c35734170f26ed551a859dbd361d140cdbeca61ab1e2"
+dependencies = [
+ "serde",
+ "serde_core",
+]
 
 [[package]]
 name = "serde"
@@ -3375,6 +3381,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "tar"
+version = "0.4.46"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f6221d9a6003c78398e3b239969f352578258df48c8eb051caadae0015bc840"
+dependencies = [
+ "filetime",
+ "libc",
 ]
 
 [[package]]
@@ -3823,6 +3839,7 @@ dependencies = [
  "idna",
  "percent-encoding",
  "serde",
+ "serde_derive",
 ]
 
 [[package]]

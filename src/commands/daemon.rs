@@ -240,6 +240,18 @@ fn handle_run(args: &[String]) -> Result<(), String> {
                 crate::daemon::DaemonSelfUpdateOutcome::Installed => {
                     #[cfg(not(windows))]
                     {
+                        if let Some(executable) =
+                            crate::commands::upgrade::npm_installed_executable()
+                            && !daemon_is_up(&daemon_config_from_env_or_default_paths()?)
+                        {
+                            let status = Command::new(executable)
+                                .args(["bg", "start"])
+                                .status()
+                                .map_err(|err| err.to_string())?;
+                            if !status.success() {
+                                return Err(format!("Updated daemon failed to start: {status}"));
+                            }
+                        }
                         ensure_daemon_running(Duration::from_secs(5)).map(|_| ())?;
                     }
                 }

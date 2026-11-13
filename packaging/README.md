@@ -40,3 +40,27 @@ process inspection and shell history. Use your endpoint-management secret
 mechanism when available. When WSL installation is enabled, the API values are
 also forwarded to each Linux installer through the `wsl.exe` child environment
 and `WSLENV`; they are not added to the WSL process command line.
+
+## Fork updates through an Artifactory npm repository
+
+Set `GIT_AI_NPM_UPDATE_PACKAGE_URL` in the environment **when building** the
+release binary. Use the npm registry URL followed by the package prefix,
+including the literal slash for a scoped name. For example:
+
+```sh
+GIT_AI_NPM_UPDATE_PACKAGE_URL='https://artifactory.intra.xiaojukeji.com/artifactory/api/npm/npm-dev-local/@your-scope/git-ai-fork' \
+  ./build.sh macos-arm64
+```
+
+The binary requests `@your-scope/git-ai-fork-darwin-arm64/latest` on macOS ARM64.
+Collect the binaries from `build.sh` with their adjacent `.version` files.
+Use the same package prefix with `scripts/stage-npm.sh` to prepare publish
+directories. It reads `output/` by default, rejects binaries whose version file
+is missing or differs from `Cargo.toml`, and writes packages to `output/npm/`
+or another new or empty output directory.
+
+Publish to a repository that the client can read over HTTPS. The
+existing `disable_version_checks` and `disable_auto_updates` settings can
+override the defaults. Install an npm-enabled build once to switch an existing
+installation to this source. Subsequent releases must use a higher Cargo
+version and be built with the same source configured.

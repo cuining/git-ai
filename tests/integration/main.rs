@@ -98,6 +98,7 @@ mod metrics_retry_idle;
 mod multi_repo_workspace;
 mod non_utf8_files;
 mod notes_merge_mixed_fanout;
+mod npm_upgrade;
 mod opencode;
 mod opencode_v2;
 mod pending_ai_edit_suppression;
