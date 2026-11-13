@@ -378,8 +378,6 @@ fn print_help() {
         "    --wsl                  Also install git-ai in eligible WSL distributions (Windows only)"
     );
     eprintln!("    --skills               Also install agent skill files");
-    eprintln!("    --visual-studio-extension");
-    eprintln!("                           Also install the Visual Studio extension on Windows");
     eprintln!("  uninstall, uninstall-hooks");
     eprintln!("                       Remove git-ai hooks from all detected tools");
     eprintln!("  ci                 Continuous integration utilities");

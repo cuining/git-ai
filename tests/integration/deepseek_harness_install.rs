@@ -329,6 +329,15 @@ fn deepseek_harness_install_leaves_profile_to_dsh_and_retries() {
     for _ in 0..2 {
         let output = fixture.install(&["install"]);
         assert!(
+            fixture
+                .repo
+                .test_home_path()
+                .join(".cursor/hooks.json")
+                .is_file()
+        );
+        assert!(!output.contains("Cursor: Extension"), "{output}");
+        assert!(!output.contains("VS Code:"), "{output}");
+        assert!(
             output.contains("DeepSeek Harness: Failed to update hooks"),
             "{output}"
         );

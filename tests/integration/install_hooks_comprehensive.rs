@@ -377,7 +377,7 @@ fn install_hooks_wsl_dry_run_does_not_invoke_wsl() {
 
 #[test]
 #[cfg(not(windows))]
-fn install_hooks_detects_cline_from_vscode_server_extension_manifest() {
+fn install_hooks_skips_detected_cline_by_default() {
     let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
     let home = repo.test_home_path();
     let manifest_path = home.join(".vscode-server/extensions/extensions.json");
@@ -409,8 +409,8 @@ fn install_hooks_detects_cline_from_vscode_server_extension_manifest() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("Cline: Pending updates"),
-        "Cline was not detected from the VS Code server extension manifest:\n{stdout}"
+        !stdout.contains("Cline:"),
+        "default install should skip Cline even when detected:\n{stdout}"
     );
     assert!(
         !home.join("Documents/Cline/Hooks").exists(),
