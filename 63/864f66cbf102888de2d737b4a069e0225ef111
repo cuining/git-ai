@@ -1,0 +1,19 @@
+build.sh
+  s_e3a8bb1a6d50be::t_2dab740aa06afd 64-65,86-89
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-dcc.17",
+  "base_commit_sha": "63864f66cbf102888de2d737b4a069e0225ef111",
+  "prompts": {},
+  "sessions": {
+    "s_e3a8bb1a6d50be": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d59e-24e1-7082-b68a-89c9787b28bc",
+        "model": "unknown"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
