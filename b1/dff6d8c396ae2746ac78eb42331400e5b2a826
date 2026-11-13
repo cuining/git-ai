@@ -1,0 +1,18 @@
+src/commands/install_hooks.rs
+  h_e26e3d7eeaef56 576,592,1120,1124-1135
+tests/integration/deepseek_harness_install.rs
+  h_e26e3d7eeaef56 331-339
+tests/integration/install_hooks_comprehensive.rs
+  h_e26e3d7eeaef56 380,412-413
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-dcc.17",
+  "base_commit_sha": "b1dff6d8c396ae2746ac78eb42331400e5b2a826",
+  "prompts": {},
+  "humans": {
+    "h_e26e3d7eeaef56": {
+      "author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
