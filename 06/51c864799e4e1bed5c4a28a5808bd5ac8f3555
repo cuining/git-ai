@@ -1,0 +1,21 @@
+src/metrics/db.rs
+  s_e96cbec65ca421::t_4604643befdd12 18,30-31,38,98-106,779,1778,1812,1875,1914,1957,2026,2085,2703-2728
+tests/integration/metrics_retry_idle.rs
+  s_e96cbec65ca421::t_4cebb1c12d9467 87,92
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-dcc.19",
+  "base_commit_sha": "0651c864799e4e1bed5c4a28a5808bd5ac8f3555",
+  "prompts": {},
+  "sessions": {
+    "s_e96cbec65ca421": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1db1a-ea52-7092-9d90-88a0d8cc2e30",
+        "model": "unknown"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
