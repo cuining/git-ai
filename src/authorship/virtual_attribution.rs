@@ -41,6 +41,7 @@ pub struct VirtualAttributions {
 pub(crate) struct AuthorshipLogDiffContext<'a> {
     pub precomputed_parent_diff: Option<&'a crate::authorship::rewrite::DiffTreeResult>,
     pub fallback_committed_diff_base: Option<&'a str>,
+    pub paired_edit_paths: Option<&'a HashSet<String>>,
 }
 
 impl VirtualAttributions {
@@ -1356,15 +1357,19 @@ fn collect_unstaged_hunks_from_snapshot(
     commit_sha: &str,
     pathspecs: Option<&HashSet<String>>,
     final_state_snapshot: &HashMap<String, String>,
+    paired_edit_paths: Option<&HashSet<String>>,
+    rename_map: &HashMap<String, String>,
 ) -> Result<
     (
         HashMap<String, Vec<LineRange>>,
         HashMap<String, Vec<LineRange>>,
+        HashMap<String, Vec<Option<u32>>>,
     ),
     GitAiError,
 > {
     let mut unstaged_hunks: HashMap<String, Vec<LineRange>> = HashMap::new();
     let mut pure_insertion_hunks: HashMap<String, Vec<LineRange>> = HashMap::new();
+    let mut committed_line_maps = HashMap::new();
 
     let file_paths: HashSet<String> = match pathspecs {
         Some(paths) => paths.iter().cloned().collect(),
@@ -1380,8 +1385,14 @@ fn collect_unstaged_hunks_from_snapshot(
     let committed_contents = batch_file_contents(repo, &requests)?;
 
     for file_path in file_paths {
+        let paired = paired_edit_paths.is_some_and(|paths| paths.contains(&file_path));
+        let committed_path = if paired {
+            rename_map.get(&file_path).unwrap_or(&file_path)
+        } else {
+            &file_path
+        };
         let committed_content = committed_contents
-            .get(&(commit_sha.to_string(), file_path.clone()))
+            .get(&(commit_sha.to_string(), committed_path.clone()))
             .cloned()
             .unwrap_or_default();
         let final_content = final_state_snapshot
@@ -1404,6 +1415,11 @@ fn collect_unstaged_hunks_from_snapshot(
 
         let mut all_added_lines = Vec::new();
         let mut pure_insertion_lines = Vec::new();
+        let mut committed_lines = if paired {
+            vec![None; final_lines.len()]
+        } else {
+            Vec::new()
+        };
 
         for op in diff_ops {
             match op {
@@ -1426,9 +1442,21 @@ fn collect_unstaged_hunks_from_snapshot(
                         all_added_lines.push(line);
                     }
                 }
+                crate::authorship::imara_diff_utils::DiffOp::Equal {
+                    old_index,
+                    new_index,
+                    len,
+                } if paired => {
+                    for offset in 0..len {
+                        committed_lines[new_index + offset] = Some((old_index + offset + 1) as u32);
+                    }
+                }
                 crate::authorship::imara_diff_utils::DiffOp::Equal { .. }
                 | crate::authorship::imara_diff_utils::DiffOp::Delete { .. } => {}
             }
+        }
+        if paired {
+            committed_line_maps.insert(file_path.clone(), committed_lines);
         }
 
         if !all_added_lines.is_empty() {
@@ -1443,7 +1471,7 @@ fn collect_unstaged_hunks_from_snapshot(
         }
     }
 
-    Ok((unstaged_hunks, pure_insertion_hunks))
+    Ok((unstaged_hunks, pure_insertion_hunks, committed_line_maps))
 }
 
 fn split_lines_preserving_terminators(s: &str) -> Vec<&str> {
@@ -2211,12 +2239,21 @@ impl VirtualAttributions {
         } else {
             None
         };
-        let (mut unstaged_hunks, pure_insertion_hunks) = if let Some(snapshot) = &carryover_snapshot
-        {
-            collect_unstaged_hunks_from_snapshot(repo, commit_sha, effective_pathspecs, snapshot)?
-        } else {
-            collect_unstaged_hunks(repo, commit_sha, effective_pathspecs)?
-        };
+        let (mut unstaged_hunks, pure_insertion_hunks, committed_line_maps) =
+            if let Some(snapshot) = &carryover_snapshot {
+                collect_unstaged_hunks_from_snapshot(
+                    repo,
+                    commit_sha,
+                    effective_pathspecs,
+                    snapshot,
+                    diff_context.paired_edit_paths,
+                    &rename_map,
+                )?
+            } else {
+                let (unstaged, insertions) =
+                    collect_unstaged_hunks(repo, commit_sha, effective_pathspecs)?;
+                (unstaged, insertions, HashMap::new())
+            };
 
         // IMPORTANT: If a line appears in both committed_hunks and unstaged_hunks, it means:
         // - The line was committed in this commit (in commit coordinates)
@@ -2276,6 +2313,10 @@ impl VirtualAttributions {
             // Diff output keys are NFC-normalised, but working-log paths may be
             // NFD.  Compute the NFC form once for all lookups in this iteration.
             let nfc_file_path: String = file_path.nfc().collect();
+            let paired = diff_context
+                .paired_edit_paths
+                .is_some_and(|paths| paths.contains(file_path));
+            let committed_line_map = committed_line_maps.get(file_path);
 
             let rebased_line_attrs;
             let line_attrs = if let Some(snapshot) = &carryover_snapshot {
@@ -2338,7 +2379,12 @@ impl VirtualAttributions {
                 // Check each line individually
                 for workdir_line_num in line_attr.start_line..=line_attr.end_line {
                     // Check if this line is unstaged (in working directory but not in commit)
-                    let is_unstaged = unstaged_lines.binary_search(&workdir_line_num).is_ok();
+                    let matched_line = committed_line_map
+                        .map(|lines| lines.get(workdir_line_num as usize - 1).copied().flatten());
+                    let is_unstaged = matched_line.map_or_else(
+                        || unstaged_lines.binary_search(&workdir_line_num).is_ok(),
+                        |line| line.is_none(),
+                    );
 
                     if is_unstaged {
                         // Line is unstaged, mark as uncommitted
@@ -2354,7 +2400,9 @@ impl VirtualAttributions {
                             .iter()
                             .filter(|&&l| l < workdir_line_num)
                             .count() as u32;
-                        let commit_line_num = workdir_line_num - adjustment;
+                        let commit_line_num = matched_line
+                            .flatten()
+                            .unwrap_or(workdir_line_num - adjustment);
 
                         // Check if this commit line number is in any committed hunk
                         let is_committed = if let Some(hunks) = file_committed_hunks {
@@ -2399,7 +2447,9 @@ impl VirtualAttributions {
             // Fix: for each gap line in a committed hunk, check the nearest
             // attributed line before and after it. If both neighbors have the
             // same AI author (not human/h_), fill the gap with that author.
-            if let Some(hunks) = file_committed_hunks {
+            if let Some(hunks) = file_committed_hunks
+                && !paired
+            {
                 // Build a sorted map of committed line → author_id for neighbor lookups
                 let mut line_to_author: Vec<(u32, &str)> = Vec::new();
                 for (author_id, lines) in &committed_lines_map {

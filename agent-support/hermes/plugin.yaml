@@ -1,0 +1,8 @@
+# Managed by git-ai
+name: git-ai-hooks
+version: "1.0.0"
+description: Capture Git AI checkpoints for local file edits
+kind: standalone
+provides_hooks:
+  - pre_tool_call
+  - post_tool_call

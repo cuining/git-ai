@@ -573,7 +573,19 @@ async fn async_run_install(
         let name = installer.name();
         let id = installer.id();
 
-        if !matches!(id, "claude-code" | "codex" | "cursor" | "deepseek-harness") {
+        if !matches!(
+            id,
+            "claude-code"
+                | "codex"
+                | "cursor"
+                | "deepseek-harness"
+                | "qoder"
+                | "hermes"
+                | "trae"
+                | "kimi-code"
+                | "opencode"
+                | "pi"
+        ) {
             continue;
         }
 
@@ -1131,6 +1143,12 @@ mod tests {
                 "cursor",
                 #[cfg(target_os = "macos")]
                 "deepseek-harness",
+                "hermes",
+                "kimi-code",
+                "opencode",
+                "pi",
+                "qoder",
+                "trae",
             ]
         );
     }

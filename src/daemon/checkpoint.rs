@@ -9,6 +9,7 @@ use crate::authorship::imara_diff_utils::{
 };
 use crate::authorship::working_log::CheckpointKind;
 use crate::authorship::working_log::{Checkpoint, WorkingLogEntry};
+use crate::checkpoint_content_budget::CheckpointContentBudget;
 use crate::commands::checkpoint_agent::orchestrator::CheckpointRequest;
 use crate::error::GitAiError;
 use crate::git::repo_storage::PersistedWorkingLog;
@@ -297,10 +298,6 @@ fn execute_resolved_checkpoint(
         .storage
         .working_log_for_base_commit(&resolved.base_commit)?;
 
-    if !resolved.dirty_files.is_empty() {
-        working_log.set_dirty_files(Some(std::mem::take(&mut resolved.dirty_files)));
-    }
-
     let read_checkpoints_start = Instant::now();
     let mut checkpoints = working_log.read_all_checkpoints()?;
     tracing::debug!(
@@ -308,6 +305,76 @@ fn execute_resolved_checkpoint(
         checkpoints.len(),
         read_checkpoints_start.elapsed()
     );
+
+    let file_edit_call = checkpoint_request.agent_id.as_ref().and_then(|agent| {
+        let id = checkpoint_request
+            .metadata
+            .get("tool_use_id")
+            .filter(|id| !id.is_empty())?;
+        (matches!(agent.tool.as_str(), "kimi-code" | "hermes")
+            && matches!(
+                (kind, checkpoint_request.path_role),
+                (CheckpointKind::Human, PreparedPathRole::WillEdit)
+                    | (CheckpointKind::AiAgent, PreparedPathRole::Edited)
+            ))
+        .then(|| format!("{}:{id}", generate_session_id(&agent.id, &agent.tool)))
+    });
+    if let Some(call) = file_edit_call.as_deref() {
+        let mut previous = HashMap::new();
+        let mut seen = HashSet::new();
+        for checkpoint in &checkpoints {
+            for entry in &checkpoint.entries {
+                previous.insert(entry.file.as_str(), (checkpoint, entry));
+                if checkpoint.file_edit_call.as_deref() == Some(call) {
+                    seen.insert(entry.file.as_str());
+                }
+            }
+        }
+        if kind.is_ai() {
+            // Consume only the most recent Pre on this path. A newer snapshot
+            // invalidates the baseline and an earlier Post consumes it.
+            resolved.files.retain(|path| {
+                previous.get(path.as_str()).is_some_and(|(pre, _)| {
+                    pre.kind == CheckpointKind::Human && pre.file_edit_call.as_deref() == Some(call)
+                })
+            });
+        } else {
+            resolved.files.retain(|path| !seen.contains(path.as_str()));
+        }
+        if kind.is_ai()
+            && checkpoint_request
+                .metadata
+                .get("kimi_write_mode")
+                .map(String::as_str)
+                == Some("append")
+        {
+            let mut budget = CheckpointContentBudget::from_config(crate::config::Config::get());
+            resolved.files.retain(|path| {
+                let (Some((_, pre)), Some(append)) =
+                    (previous.get(path.as_str()), resolved.dirty_files.get(path))
+                else {
+                    return false;
+                };
+                let Ok(mut content) = working_log.get_file_version(&pre.blob_sha) else {
+                    return false;
+                };
+                content.push_str(append);
+                if !budget.reserve(path, &content) {
+                    return false;
+                }
+                resolved
+                    .dirty_files
+                    .insert(path.clone(), Arc::from(content));
+                true
+            });
+        }
+        if resolved.files.is_empty() {
+            return Ok((0, 0, 0));
+        }
+    }
+    if !resolved.dirty_files.is_empty() {
+        working_log.set_dirty_files(Some(std::mem::take(&mut resolved.dirty_files)));
+    }
 
     // Reject KnownHuman checkpoints that arrive within KNOWN_HUMAN_MIN_SECS_AFTER_AI
     // seconds of an AI checkpoint on any of the same files. These are likely spurious
@@ -369,6 +436,7 @@ fn execute_resolved_checkpoint(
         &file_content_hashes,
         &checkpoints,
         &checkpoint_request,
+        file_edit_call.is_some(),
         resolved.ts,
         Some(resolved.base_commit.as_str()),
         trace_id.clone(),
@@ -387,6 +455,7 @@ fn execute_resolved_checkpoint(
         checkpoint.timestamp = (resolved.ts / 1000) as u64;
         checkpoint.line_stats = compute_line_stats(&file_stats)?;
         checkpoint.trace_id = Some(trace_id.clone());
+        checkpoint.file_edit_call = file_edit_call;
 
         if kind.is_ai() {
             checkpoint.agent_id = checkpoint_request.agent_id.clone();
@@ -693,6 +762,7 @@ fn get_checkpoint_entry_for_file(
     initial_attributions: Arc<HashMap<String, Vec<LineAttribution>>>,
     initial_snapshot_contents: Arc<HashMap<String, Arc<str>>>,
     parent_note_attributions: Arc<HashMap<String, Vec<LineAttribution>>>,
+    keep_unchanged: bool,
     ts: u128,
 ) -> Result<Option<(WorkingLogEntry, FileLineStats)>, GitAiError> {
     // Deterministic blocking work for the TestRepo throughput guard; release builds omit it.
@@ -733,7 +803,8 @@ fn get_checkpoint_entry_for_file(
             get_previous_content_from_head(&repo, &file_path, head_tree_id.as_ref())
         };
 
-        if content_eq_ignoring_line_endings(&current_content, &previous_content) {
+        if !keep_unchanged && content_eq_ignoring_line_endings(&current_content, &previous_content)
+        {
             return Ok(None);
         }
 
@@ -765,6 +836,7 @@ fn get_checkpoint_entry_for_file(
         // (in which case we need to create an entry to record those attributions)
         if content_eq_ignoring_line_endings(&current_content, &previous_content)
             && initial_attrs_for_file.is_empty()
+            && !keep_unchanged
         {
             return Ok(None);
         }
@@ -856,7 +928,7 @@ fn get_checkpoint_entry_for_file(
     // Skip if no changes (but we already checked this earlier, accounting for INITIAL attributions)
     // For files from previous checkpoints, check if content has changed
     if is_from_checkpoint && content_eq_ignoring_line_endings(&current_content, &previous_content) {
-        if current_content == previous_content {
+        if current_content == previous_content && !keep_unchanged {
             // Byte-identical — truly no change.
             return Ok(None);
         }
@@ -915,6 +987,7 @@ async fn get_checkpoint_entries(
     file_content_hashes: &HashMap<String, String>,
     previous_checkpoints: &[Checkpoint],
     checkpoint_request: &CheckpointRequest,
+    keep_unchanged: bool,
     ts: u128,
     head_commit_override: Option<&str>,
     trace_id: String,
@@ -1040,6 +1113,7 @@ async fn get_checkpoint_entries(
                     initial_attributions.clone(),
                     initial_snapshot_contents.clone(),
                     parent_note_attributions.clone(),
+                    keep_unchanged,
                     ts,
                 )
             })

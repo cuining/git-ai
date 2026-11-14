@@ -136,6 +136,8 @@ pub struct Checkpoint {
     pub known_human_metadata: Option<KnownHumanMetadata>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trace_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_edit_call: Option<String>,
 }
 
 impl Checkpoint {
@@ -163,6 +165,7 @@ impl Checkpoint {
             git_ai_version: Some(GIT_AI_VERSION.to_string()),
             known_human_metadata: None,
             trace_id: None,
+            file_edit_call: None,
         }
     }
 }

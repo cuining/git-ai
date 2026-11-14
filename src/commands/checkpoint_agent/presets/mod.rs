@@ -1,5 +1,6 @@
 pub mod parse;
 
+pub(crate) mod additional_hooks;
 mod agent_v1;
 mod ai_tab;
 mod amp;
@@ -153,7 +154,13 @@ pub trait AgentPreset {
 }
 
 pub fn resolve_preset(name: &str) -> Result<Box<dyn AgentPreset>, GitAiError> {
+    use additional_hooks::FileHookAgent;
+
     match name {
+        "qoder" => Ok(Box::new(FileHookAgent::Qoder)),
+        "hermes" => Ok(Box::new(FileHookAgent::Hermes)),
+        "trae" => Ok(Box::new(FileHookAgent::Trae)),
+        "kimi-code" => Ok(Box::new(FileHookAgent::KimiCode)),
         "claude" => Ok(Box::new(claude::ClaudePreset)),
         "cline" => Ok(Box::new(cline::ClinePreset)),
         "codex" => Ok(Box::new(codex::CodexPreset)),

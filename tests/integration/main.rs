@@ -5,6 +5,7 @@ mod repos;
 mod test_utils;
 
 // Test modules (one per original test file)
+mod additional_agent_hooks;
 mod agent_commits_blame;
 mod agent_presets_comprehensive;
 mod agent_usage_repo_url;

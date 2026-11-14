@@ -61,31 +61,10 @@ struct RepoContext {
 
 const MAX_CHECKPOINT_FILES: usize = 1000;
 
-fn apply_checkpoint_content_budget(files: &mut [CheckpointFile]) {
-    let mut budget = CheckpointContentBudget::from_config(config::Config::get());
-    for file in files {
-        let Some(content) = file.content.as_ref() else {
-            continue;
-        };
-        if !budget.reserve(file.path.display(), content) {
-            file.content = None;
-        }
-    }
-}
-
-fn apply_dirty_file_overrides(
-    files: &mut [CheckpointFile],
-    dirty_files: &HashMap<PathBuf, String>,
-) {
-    for file in &mut *files {
-        if let Some(override_content) = dirty_files.get(&file.path) {
-            file.content = Some(override_content.clone());
-        }
-    }
-    apply_checkpoint_content_budget(files);
-}
-
-fn build_checkpoint_files(file_paths: &[PathBuf]) -> Result<Vec<CheckpointFile>, GitAiError> {
+fn build_checkpoint_files(
+    file_paths: &[PathBuf],
+    dirty_files: Option<&HashMap<PathBuf, String>>,
+) -> Result<Vec<CheckpointFile>, GitAiError> {
     let perf = std::env::var("GIT_AI_DEBUG_PERFORMANCE").is_ok_and(|v| !v.is_empty() && v != "0");
 
     if file_paths.len() > MAX_CHECKPOINT_FILES {
@@ -151,7 +130,9 @@ fn build_checkpoint_files(file_paths: &[PathBuf]) -> Result<Vec<CheckpointFile>,
         };
 
         let t_read = std::time::Instant::now();
-        let content = if let Ok(meta) = fs::metadata(path) {
+        let content = if let Some(content) = dirty_files.and_then(|files| files.get(path)) {
+            Some(content.clone())
+        } else if let Ok(meta) = fs::metadata(path) {
             if meta.len() as usize > max_size {
                 tracing::warn!(
                     "skipping file larger than max_checkpoint_file_size_bytes: {} ({} bytes)",
@@ -255,7 +236,20 @@ fn write_checkpoint_debug_log(
     cleanup_old_debug_logs(&log_dir);
 
     let sanitized_input;
-    let hook_input = if preset_name == "agent-v1" {
+    let hook_input = if matches!(preset_name, "qoder" | "hermes" | "trae" | "kimi-code") {
+        // Native tool payloads can contain prompts, file contents and command output.
+        sanitized_input = serde_json::from_str::<serde_json::Value>(hook_input)
+            .ok()
+            .map(|value| {
+                serde_json::json!({
+                    "hook_event_name": value["hook_event_name"],
+                    "session_id": value["session_id"],
+                    "tool_name": value["tool_name"]
+                })
+                .to_string()
+            });
+        sanitized_input.as_deref().unwrap_or("{}")
+    } else if preset_name == "agent-v1" {
         sanitized_input = serde_json::from_str::<serde_json::Value>(hook_input)
             .ok()
             .and_then(|mut value| {
@@ -378,10 +372,7 @@ fn split_files_into_requests(
 }
 
 fn execute_pre_file_edit(e: PreFileEdit) -> Result<Vec<CheckpointRequest>, GitAiError> {
-    let mut files = build_checkpoint_files(&e.file_paths)?;
-    if let Some(ref dirty) = e.dirty_files {
-        apply_dirty_file_overrides(&mut files, dirty);
-    }
+    let files = build_checkpoint_files(&e.file_paths, e.dirty_files.as_ref())?;
     let mut metadata = e.context.metadata;
     if let Some(tuid) = e.tool_use_id {
         metadata.entry("tool_use_id".to_string()).or_insert(tuid);
@@ -401,10 +392,7 @@ fn execute_post_file_edit(
     e: PostFileEdit,
     preset_name: &str,
 ) -> Result<Vec<CheckpointRequest>, GitAiError> {
-    let mut files = build_checkpoint_files(&e.file_paths)?;
-    if let Some(ref dirty) = e.dirty_files {
-        apply_dirty_file_overrides(&mut files, dirty);
-    }
+    let files = build_checkpoint_files(&e.file_paths, e.dirty_files.as_ref())?;
     let checkpoint_kind = match preset_name {
         "ai_tab" => CheckpointKind::AiTab,
         _ => CheckpointKind::AiAgent,
@@ -428,10 +416,7 @@ fn execute_post_file_edit(
 }
 
 fn execute_known_human_edit(e: KnownHumanEdit) -> Result<Vec<CheckpointRequest>, GitAiError> {
-    let mut files = build_checkpoint_files(&e.file_paths)?;
-    if let Some(ref dirty) = e.dirty_files {
-        apply_dirty_file_overrides(&mut files, dirty);
-    }
+    let files = build_checkpoint_files(&e.file_paths, e.dirty_files.as_ref())?;
     Ok(split_files_into_requests(
         files,
         e.trace_id,
@@ -444,7 +429,7 @@ fn execute_known_human_edit(e: KnownHumanEdit) -> Result<Vec<CheckpointRequest>,
 }
 
 fn execute_untracked_edit(e: UntrackedEdit) -> Result<Vec<CheckpointRequest>, GitAiError> {
-    let files = build_checkpoint_files(&e.file_paths)?;
+    let files = build_checkpoint_files(&e.file_paths, None)?;
     Ok(split_files_into_requests(
         files,
         e.trace_id,
@@ -537,7 +522,7 @@ fn execute_pre_bash_call(e: PreBashCall) -> Result<Vec<CheckpointRequest>, GitAi
         return Ok(vec![]);
     }
 
-    let files = build_checkpoint_files(&dirty_paths)?;
+    let files = build_checkpoint_files(&dirty_paths, None)?;
     let mut metadata = e.context.metadata;
     metadata
         .entry("tool_use_id".to_string())
@@ -636,7 +621,7 @@ fn execute_post_bash_call(e: PostBashCall) -> Result<Vec<CheckpointRequest>, Git
         }
     };
 
-    let files = build_checkpoint_files(&file_paths)?;
+    let files = build_checkpoint_files(&file_paths, None)?;
     let mut metadata = e.context.metadata;
     metadata
         .entry("tool_use_id".to_string())

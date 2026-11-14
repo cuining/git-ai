@@ -1,3 +1,4 @@
+mod additional_hooks;
 mod amp;
 mod claude_code;
 mod cline;
@@ -37,6 +38,8 @@ pub use vscode::VSCodeInstaller;
 pub use windsurf::WindsurfInstaller;
 
 use super::hook_installer::HookInstaller;
+use crate::commands::checkpoint_agent::presets::additional_hooks::FileHookAgent;
+use additional_hooks::FileHookInstaller;
 
 /// Get all available hook installers
 pub fn get_all_installers() -> Vec<Box<dyn HookInstaller>> {
@@ -54,6 +57,10 @@ pub fn get_all_installers() -> Vec<Box<dyn HookInstaller>> {
         Box::new(DroidInstaller),
         Box::new(FirebenderInstaller),
         Box::new(JetBrainsInstaller),
+        Box::new(FileHookInstaller(FileHookAgent::Qoder)),
+        Box::new(FileHookInstaller(FileHookAgent::Hermes)),
+        Box::new(FileHookInstaller(FileHookAgent::Trae)),
+        Box::new(FileHookInstaller(FileHookAgent::KimiCode)),
     ];
 
     #[cfg(any(target_os = "macos", windows))]
