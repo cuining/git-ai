@@ -1,0 +1,180 @@
+Cargo.toml
+  h_e26e3d7eeaef56 5-9
+README.md
+  h_e26e3d7eeaef56 20,37-40,43,49-50,86,91,123-124,156,203,222
+agent-support/deepseek-harness/README.md
+  h_e26e3d7eeaef56 13,27,37,48,52
+agent-support/deepseek-harness/index.mjs
+  h_e26e3d7eeaef56 6
+agent-support/deepseek-harness/index.test.mjs
+  h_e26e3d7eeaef56 36
+agent-support/deepseek-harness/package.json
+  h_e26e3d7eeaef56 3
+agent-support/intellij/src/main/kotlin/org/jetbrains/plugins/template/services/GitAiService.kt
+  h_e26e3d7eeaef56 11-12,76-77,98,184,188
+agent-support/visualstudio/src/GitAiVS/Services/BinaryResolver.cs
+  h_e26e3d7eeaef56 11-13,20-21,84
+agent-support/vscode/src/ai-edit-manager.ts
+  h_e26e3d7eeaef56 4,497,502
+agent-support/vscode/src/consts.ts
+  h_e26e3d7eeaef56 7
+agent-support/vscode/src/utils/binary-path.ts
+  h_e26e3d7eeaef56 5,20,26,42,74
+agent-support/vscode/src/utils/config.ts
+  h_e26e3d7eeaef56 5
+flake.nix
+  h_e26e3d7eeaef56 15,186,211,700-702
+install.ps1
+  h_e26e3d7eeaef56 4-5,16,227,230,358,414,478,481
+install.sh
+  h_e26e3d7eeaef56 6-7,54,57,222-225,231,237,270,274-275,280,301,307
+mdm/README.md
+  h_e26e3d7eeaef56 5,14-15,20,38-39,62,79,84,92,95-96,102,112
+mdm/linux/install-login-start.sh
+  h_e26e3d7eeaef56 11
+mdm/macos/install-login-start.sh
+  h_e26e3d7eeaef56 15-16
+mdm/windows/install-login-start.ps1
+  h_e26e3d7eeaef56 18,21
+packaging/README.md
+  h_e26e3d7eeaef56 5,8,17,21-23,25-26,57-59,67-72
+packaging/macos/scripts/postinstall
+  h_e26e3d7eeaef56 30,34-36,41
+packaging/windows/build-msi.ps1
+  h_e26e3d7eeaef56 18,20
+packaging/windows/git-ai.wxs
+  h_e26e3d7eeaef56 27
+scripts/dev.ps1
+  h_e26e3d7eeaef56 10-11,98-110,122
+scripts/dev.sh
+  h_e26e3d7eeaef56 46,48-49,52,60-61
+scripts/repro_runaway_memory.py
+  h_e26e3d7eeaef56 367-368,419-420
+skills/ask/SKILL.md
+  h_e26e3d7eeaef56 5,54,58,69,87-89,107,112,115,123
+skills/git-ai-search/SKILL.md
+  h_e26e3d7eeaef56 5,10,23-31,41,44,47,56,59,62,71,74,77,80,94,100,109,112,115,124-125,128,137,140,143,147,156,161,184,189,211,216,305,315,320,330,333,342,345,361,364,367,374,377,384,387
+skills/prompt-analysis/SKILL.md
+  h_e26e3d7eeaef56 5,33,37,63,72-73,78,82,84,88,96,101,106,108,112,115,127-128,133,148,170-171,176,192,203-205,210,224,235-237,242,256,277-279,284,301,329-331,333-334,339,362,386-389,394,437,523,572,581
+src/authorship/internal_db.rs
+  h_e26e3d7eeaef56 174,621
+src/authorship/post_commit.rs
+  h_e26e3d7eeaef56 13,630
+src/ci/workflow_templates/gitlab.yaml
+  h_e26e3d7eeaef56 3
+src/commands/analyze/mod.rs
+  h_e26e3d7eeaef56 12,40,121,123-124,207,231,235,244,250,274,289-291,293,301,303-312
+src/commands/analyze/sessions.rs
+  h_e26e3d7eeaef56 15,193,423-425,591-593,611-613,818,1334,1373,1395,1398,1412,1415,1467,1489,1491,1504,1513-1515,1520,1522,1527,1529,1533
+src/commands/await.rs
+  h_e26e3d7eeaef56 7,140
+src/commands/ci_handlers.rs
+  h_e26e3d7eeaef56 4,386,388,398,416,418,437,439,449,451
+src/commands/config.rs
+  h_e26e3d7eeaef56 1,90,93-102,158-176,204-205,213,228,234,243,251
+src/commands/daemon.rs
+  h_e26e3d7eeaef56 1,541-549,864,867-872
+src/commands/debug.rs
+  h_e26e3d7eeaef56 3,55,58-59
+src/commands/diff.rs
+  h_e26e3d7eeaef56 8,208-209
+src/commands/exchange_nonce.rs
+  h_e26e3d7eeaef56 5
+src/commands/fetch_notes.rs
+  h_e26e3d7eeaef56 1,43,82,195-197,199,208-210
+src/commands/git_ai_handlers.rs
+  h_e26e3d7eeaef56 7,259,261,266,269-270,296,298,308-311,324,326,474-476,733-736,1138
+src/commands/git_handlers.rs
+  h_e26e3d7eeaef56 204,261,289
+src/commands/git_hook_handlers.rs
+  h_e26e3d7eeaef56 453-455
+src/commands/install_env.rs
+  h_e26e3d7eeaef56 624,1042,1064
+src/commands/install_hooks.rs
+  h_e26e3d7eeaef56 1,688-690,941,952,1018,1261-1267,1272-1278
+src/commands/install_wsl.rs
+  h_e26e3d7eeaef56 7
+src/commands/log.rs
+  h_e26e3d7eeaef56 6,201,312,356-358,679,836,841
+src/commands/login.rs
+  h_e26e3d7eeaef56 2,12
+src/commands/notes_migrate.rs
+  h_e26e3d7eeaef56 13,36,46,51,75,85-87,403-405,407,420
+src/commands/reingest.rs
+  h_e26e3d7eeaef56 3,85-87,200-202,299-301
+src/commands/status.rs
+  h_e26e3d7eeaef56 7,93
+src/commands/upgrade.rs
+  h_e26e3d7eeaef56 686
+src/commands/usage.rs
+  h_e26e3d7eeaef56 3,54,64,75,145,147
+src/commands/whoami.rs
+  h_e26e3d7eeaef56 5,68,272,275-276
+src/config.rs
+  h_e26e3d7eeaef56 19-20,29,40-45,1606,1619,1629,1635,1643,1680,1758-1765,1781-1789,2724,2752
+src/diagnostics.rs
+  h_e26e3d7eeaef56 3,1314
+src/mdm/agents/additional_hooks.rs
+  h_e26e3d7eeaef56 7-8,51,56
+src/mdm/agents/codex.rs
+  h_e26e3d7eeaef56 83,994
+src/mdm/agents/firebender.rs
+  h_e26e3d7eeaef56 3,21-24
+src/mdm/skills_installer.rs
+  h_e26e3d7eeaef56 324
+src/mdm/utils.rs
+  h_e26e3d7eeaef56 2-4,523-574,960-968
+src/metrics/db.rs
+  h_e26e3d7eeaef56 274,3279
+src/notes/db.rs
+  h_e26e3d7eeaef56 1,954-955
+src/utils.rs
+  h_e26e3d7eeaef56 570,572,587,611,613,626
+tests/async_mode.rs
+  h_e26e3d7eeaef56 83
+tests/config_fresh_test.rs
+  h_e26e3d7eeaef56 90,126,153,199,240,270,300
+tests/daemon_mode.rs
+  h_e26e3d7eeaef56 408-409,419,424,429,8471,8540,8696,8750
+tests/integration/agent_v1.rs
+  h_e26e3d7eeaef56 416
+tests/integration/bash_tool_benchmark.rs
+  h_e26e3d7eeaef56 53-54
+tests/integration/checkpoint_debug_log.rs
+  h_e26e3d7eeaef56 18,50,76
+tests/integration/commit_post_stats_benchmark.rs
+  h_e26e3d7eeaef56 201-206
+tests/integration/config_cli_coverage.rs
+  h_e26e3d7eeaef56 6,23,415-418
+tests/integration/debug_diagnostics.rs
+  h_e26e3d7eeaef56 53
+tests/integration/deepseek_harness_install.rs
+  h_e26e3d7eeaef56 214-223,307
+tests/integration/install_hooks_comprehensive.rs
+  h_e26e3d7eeaef56 229,233,235,263,271,295-298,340,349-411
+tests/integration/npm_upgrade.rs
+  h_e26e3d7eeaef56 85,87,118-123,138-142,146-148
+tests/integration/repos/test_repo.rs
+  h_e26e3d7eeaef56 196,526-529,539,542,1286,3619,3622,3640-3642,3677,3684-3700,3988-3994,4015,4017,4048-4053,4142
+tests/integration/streams_e2e.rs
+  h_e26e3d7eeaef56 840
+tests/integration/token_usage.rs
+  h_e26e3d7eeaef56 711
+tests/integration/untraced_commit_fixup.rs
+  h_e26e3d7eeaef56 686
+tests/notes_sync_regression.rs
+  h_e26e3d7eeaef56 478,533,1181,1275
+tests/windows_install_script.rs
+  h_e26e3d7eeaef56 29,31,36,57,67,278,394,396,419,455,480-500
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-dcc.19",
+  "base_commit_sha": "07466b6501039819a7985c5e356c612bf63b005f",
+  "prompts": {},
+  "humans": {
+    "h_e26e3d7eeaef56": {
+      "author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
