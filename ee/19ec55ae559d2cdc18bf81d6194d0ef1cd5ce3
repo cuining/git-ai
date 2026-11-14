@@ -1,0 +1,19 @@
+tests/integration/metrics_retry_idle.rs
+  s_07e2decaff4c53::t_84779b9e900ffd 3-4,6,147-231
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-dcc.19",
+  "base_commit_sha": "ee19ec55ae559d2cdc18bf81d6194d0ef1cd5ce3",
+  "prompts": {},
+  "sessions": {
+    "s_07e2decaff4c53": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1db5c-cd8e-7a90-bace-87bc038c333a",
+        "model": "unknown"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
