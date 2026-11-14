@@ -13,9 +13,11 @@ use crate::authorship::working_log::{Checkpoint, CheckpointKind, WorkingLogEntry
 use crate::config::Config;
 use crate::error::GitAiError;
 use crate::git::notes_api::write_note;
+use crate::git::repo_storage::InitialAttributions;
 use crate::git::repository::{Repository, batch_read_paths_at_treeishes, exec_git};
 use std::collections::{HashMap, HashSet};
 use std::io::IsTerminal;
+use unicode_normalization::UnicodeNormalization;
 
 /// Skip expensive post-commit stats when this threshold is exceeded.
 /// High hunk density is the strongest predictor of slow diff_ai_accepted_stats.
@@ -59,6 +61,55 @@ fn checkpoint_entry_requires_post_processing(
             .attributions
             .iter()
             .any(|attr| attr.author_id != CheckpointKind::Human.to_str())
+}
+
+fn paired_edit_paths(checkpoints: &[Checkpoint], initial: &InitialAttributions) -> HashSet<String> {
+    let mut paths: HashSet<_> = checkpoints
+        .iter()
+        .filter(|checkpoint| checkpoint.file_edit_call.is_some())
+        .flat_map(|checkpoint| checkpoint.entries.iter().map(|entry| entry.file.clone()))
+        .collect();
+    // INITIAL carries the AI lines across a partial commit.
+    for (path, lines) in &initial.files {
+        if lines.iter().any(|line| {
+            let session = line.author_id.split("::").next().unwrap_or_default();
+            initial.sessions.get(session).is_some_and(|record| {
+                matches!(record.agent_id.tool.as_str(), "kimi-code" | "hermes")
+            })
+        }) {
+            paths.insert(path.clone());
+        }
+    }
+    paths
+}
+
+fn paths_without_recovery(
+    paired_paths: &HashSet<String>,
+    log: &AuthorshipLog,
+    precomputed_diff: Option<&DiffTreeResult>,
+) -> HashSet<String> {
+    let mut paths: HashSet<_> = paired_paths
+        .iter()
+        .map(|path| path.nfc().collect())
+        .collect();
+    if let Some(diff) = precomputed_diff {
+        for (old, new) in &diff.renames {
+            if paths.contains(old) {
+                paths.insert(new.clone());
+            }
+        }
+    }
+    for file in &log.attestations {
+        if file.entries.iter().any(|entry| {
+            let session = entry.hash.split("::").next().unwrap_or_default();
+            log.metadata.sessions.get(session).is_some_and(|record| {
+                matches!(record.agent_id.tool.as_str(), "kimi-code" | "hermes")
+            })
+        }) {
+            paths.insert(file.file_path.clone());
+        }
+    }
+    paths
 }
 
 pub fn post_commit(
@@ -327,6 +378,7 @@ where
     // These files may not have checkpoints but still need their attribution preserved
     // when they are finally committed. See issue #356.
     let initial_attributions_for_pathspecs = working_log.read_initial_attributions();
+    let paired_paths = paired_edit_paths(&parent_working_log, &initial_attributions_for_pathspecs);
     for file_path in initial_attributions_for_pathspecs.files.keys() {
         pathspecs.insert(file_path.clone());
     }
@@ -342,10 +394,16 @@ where
             AuthorshipLogDiffContext {
                 precomputed_parent_diff: context.precomputed_parent_diff,
                 fallback_committed_diff_base: Some(&committed_diff_base),
+                paired_edit_paths: Some(&paired_paths),
             },
         )?;
 
     authorship_log.metadata.base_commit_sha = commit_sha.clone();
+    let protected_paths = paths_without_recovery(
+        &paired_paths,
+        &authorship_log,
+        context.precomputed_parent_diff,
+    );
 
     // No-hooks background agents (Devin, Codex Cloud, etc.) may not fire checkpoints
     // for all edits. Attribute any committed lines that have no existing attestation
@@ -389,7 +447,8 @@ where
                         .collect()
                 })
         };
-        if let Some(committed_hunks) = committed_hunks {
+        if let Some(mut committed_hunks) = committed_hunks {
+            committed_hunks.retain(|path, _| !protected_paths.contains(path));
             crate::authorship::background_agent::fill_unattributed_lines(
                 &mut authorship_log,
                 &committed_hunks,
@@ -406,12 +465,13 @@ where
     });
     // Synthetic self-check commits already provide explicit attribution for every line.
     if options.recover_attribution && !is_debug_self_check {
-        let recovery_hunks = recovery_committed_hunks(
+        let mut recovery_hunks = recovery_committed_hunks(
             repo,
             &parent_sha,
             &commit_sha,
             context.precomputed_parent_diff,
         )?;
+        recovery_hunks.retain(|path, _| !protected_paths.contains(path));
         crate::authorship::attribution_recovery::recover_attribution(
             repo,
             &parent_sha,
@@ -696,9 +756,14 @@ pub(crate) fn post_commit_amend_with_recovery_timestamps_detailed(
     // Compute pathspecs: changed files in the amended commit + working log touched files
     let changed_files = repo.list_commit_files(amended_commit, None)?;
     let mut pathspecs: HashSet<String> = changed_files.into_iter().collect();
-    let touched_files = working_log.all_touched_files()?;
-    pathspecs.extend(touched_files);
+    let checkpoints = working_log.read_all_checkpoints()?;
+    pathspecs.extend(
+        checkpoints
+            .iter()
+            .flat_map(|checkpoint| checkpoint.entries.iter().map(|entry| entry.file.clone())),
+    );
     let initial_attributions_for_pathspecs = working_log.read_initial_attributions();
+    let paired_paths = paired_edit_paths(&checkpoints, &initial_attributions_for_pathspecs);
     for file_path in initial_attributions_for_pathspecs.files.keys() {
         pathspecs.insert(file_path.clone());
     }
@@ -747,15 +812,20 @@ pub(crate) fn post_commit_amend_with_recovery_timestamps_detailed(
     };
 
     let (mut authorship_log, initial_attributions, initial_file_contents) = working_va
-        .to_authorship_log_and_initial_working_log(
+        .to_authorship_log_and_initial_working_log_with_precomputed_diff(
             repo,
             &parent_sha,
             amended_commit,
             Some(&pathspecs),
             Some(&final_state_snapshot),
+            AuthorshipLogDiffContext {
+                paired_edit_paths: Some(&paired_paths),
+                ..Default::default()
+            },
         )?;
 
     authorship_log.metadata.base_commit_sha = amended_commit.to_string();
+    let protected_paths = paths_without_recovery(&paired_paths, &authorship_log, None);
 
     // Fill unattributed lines for background agents
     if !matches!(
@@ -774,7 +844,7 @@ pub(crate) fn post_commit_amend_with_recovery_timestamps_detailed(
                 Vec<crate::authorship::authorship_log::LineRange>,
             > = added_lines
                 .into_iter()
-                .filter(|(_, lines)| !lines.is_empty())
+                .filter(|(path, lines)| !lines.is_empty() && !protected_paths.contains(path))
                 .map(|(path, lines)| {
                     (
                         path,
@@ -790,7 +860,8 @@ pub(crate) fn post_commit_amend_with_recovery_timestamps_detailed(
         }
     }
 
-    let recovery_hunks = recovery_committed_hunks(repo, &parent_sha, amended_commit, None)?;
+    let mut recovery_hunks = recovery_committed_hunks(repo, &parent_sha, amended_commit, None)?;
+    recovery_hunks.retain(|path, _| !protected_paths.contains(path));
     crate::authorship::attribution_recovery::recover_attribution(
         repo,
         &parent_sha,

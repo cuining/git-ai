@@ -484,7 +484,15 @@ pub fn get_gitlab_ci_context() -> Result<Option<CiContext>, GitAiError> {
 pub fn print_gitlab_ci_yaml() {
     println!("Add the following to your .gitlab-ci.yml:");
     println!();
-    println!("{}", GITLAB_CI_TEMPLATE_YAML);
+    let bin_dir = format!(
+        "{}/{}",
+        crate::config::GIT_AI_HOME_DIR,
+        crate::config::BIN_DIR
+    );
+    let yaml = GITLAB_CI_TEMPLATE_YAML
+        .replace("__GIT_AI_BIN_DIR__", &bin_dir)
+        .replace("__GIT_AI_BIN_NAME__", crate::config::GIT_AI_BIN_NAME);
+    println!("{yaml}");
 }
 
 #[cfg(test)]

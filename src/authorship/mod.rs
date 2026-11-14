@@ -4,6 +4,7 @@ pub mod attribution_tracker;
 pub mod authorship_log;
 pub mod authorship_log_serialization;
 pub mod background_agent;
+pub(crate) mod checkpoint_transcripts;
 pub mod conflict_resolution;
 pub mod diff_ai_accepted;
 pub(crate) mod diff_base;

@@ -1,6 +1,7 @@
-use crate::authorship::authorship_log::PromptRecord;
+use crate::authorship::authorship_log::{PromptRecord, SessionRecord};
+use crate::authorship::authorship_log_serialization::AuthorshipLog;
 use crate::error::GitAiError;
-use crate::git::notes_api::{read_authorship, search_notes};
+use crate::git::notes_api::{read_authorship, read_notes_batch, search_notes};
 use crate::git::repository::Repository;
 
 /// Find a prompt in the repository history
@@ -45,14 +46,7 @@ pub fn find_prompt_in_commit(
         return Ok((commit_sha, prompt.clone()));
     }
 
-    // Fall back to sessions map (session IDs start with "s_")
-    // Strip ::t_ trace suffix if present — attestation hashes use s_xxx::t_yyy but session keys are just s_xxx
-    let session_key = if prompt_id.starts_with("s_") {
-        prompt_id.split("::").next().unwrap_or(prompt_id)
-    } else {
-        prompt_id
-    };
-    if let Some(session) = authorship_log.metadata.sessions.get(session_key) {
+    if let Some(session) = find_attested_session(&authorship_log, prompt_id) {
         return Ok((commit_sha, session.to_prompt_record()));
     }
 
@@ -69,17 +63,14 @@ pub fn find_prompt_in_history(
     prompt_id: &str,
     offset: usize,
 ) -> Result<(String, PromptRecord), GitAiError> {
-    // Strip ::t_ trace suffix for session lookups — attestation hashes use s_xxx::t_yyy
-    // but session keys in metadata are just s_xxx
-    let session_key = if prompt_id.starts_with("s_") {
-        prompt_id.split("::").next().unwrap_or(prompt_id)
+    // Session IDs and legacy prompt IDs are JSON keys. Full checkpoint
+    // attestations appear in the line ranges above the JSON metadata.
+    let pattern = if prompt_id.starts_with("s_") && prompt_id.contains("::") {
+        prompt_id.to_owned()
     } else {
-        prompt_id
+        format!("\"{prompt_id}\"")
     };
-
-    // Use git grep to search for the prompt ID in authorship notes
-    // search_notes returns commits sorted by date (newest first)
-    let shas = search_notes(repo, &format!("\"{}\"", session_key)).unwrap_or_default();
+    let shas = search_notes(repo, &pattern).unwrap_or_default();
 
     if shas.is_empty() {
         return Err(GitAiError::Generic(format!(
@@ -88,23 +79,23 @@ pub fn find_prompt_in_history(
         )));
     }
 
-    // Iterate through commits, looking for the prompt and counting occurrences
+    let notes = read_notes_batch(repo, &shas)?;
     let mut found_count = 0;
     for sha in &shas {
-        if let Some(authorship_log) = read_authorship(repo, sha) {
-            // Check prompts map first
-            if let Some(prompt) = authorship_log.metadata.prompts.get(prompt_id) {
-                if found_count == offset {
-                    return Ok((sha.clone(), prompt.clone()));
-                }
-                found_count += 1;
-            // Then check sessions map
-            } else if let Some(session) = authorship_log.metadata.sessions.get(session_key) {
-                if found_count == offset {
-                    return Ok((sha.clone(), session.to_prompt_record()));
-                }
-                found_count += 1;
+        let Some(log) = notes
+            .get(sha)
+            .and_then(|content| AuthorshipLog::deserialize_from_string(content).ok())
+        else {
+            continue;
+        };
+        let prompt = log.metadata.prompts.get(prompt_id).cloned().or_else(|| {
+            find_attested_session(&log, prompt_id).map(SessionRecord::to_prompt_record)
+        });
+        if let Some(prompt) = prompt {
+            if found_count == offset {
+                return Ok((sha.clone(), prompt));
             }
+            found_count += 1;
         }
     }
 
@@ -123,4 +114,21 @@ pub fn find_prompt_in_history(
             found_count - 1
         )))
     }
+}
+
+fn find_attested_session<'a>(log: &'a AuthorshipLog, id: &str) -> Option<&'a SessionRecord> {
+    if id.starts_with("s_")
+        && let Some((session_id, _)) = id.split_once("::")
+    {
+        let attested = log
+            .attestations
+            .iter()
+            .flat_map(|file| &file.entries)
+            .any(|entry| entry.hash == id);
+        if !attested {
+            return None;
+        }
+        return log.metadata.sessions.get(session_id);
+    }
+    log.metadata.sessions.get(id)
 }

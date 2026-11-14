@@ -1,19 +1,17 @@
 import * as vscode from "vscode";
 import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
 import { PostHog } from "posthog-node";
 import { AIEditManager } from "./ai-edit-manager";
 import { detectIDEHost, IDEHostKindVSCode } from "./utils/host-kind";
 import { AITabEditManager } from "./ai-tab-edit-manager";
-import { Config } from "./utils/config";
+import { Config, localPaths } from "./utils/config";
 import { BlameLensManager, registerBlameLensCommands } from "./blame-lens-manager";
 import { initBinaryResolver } from "./utils/binary-path";
 import { KnownHumanCheckpointManager } from "./known-human-checkpoint-manager";
 
 function getDistinctId(): string {
   try {
-    const idPath = path.join(os.homedir(), ".git-ai", "internal", "distinct_id");
+    const idPath = localPaths.distinctId();
     return fs.readFileSync(idPath, "utf-8").trim() || "unknown";
   } catch {
     return "unknown";
@@ -22,7 +20,7 @@ function getDistinctId(): string {
 
 function isTelemetryOssDisabled(): boolean {
   try {
-    const configPath = path.join(os.homedir(), ".git-ai", "config.json");
+    const configPath = localPaths.config();
     const raw = fs.readFileSync(configPath, "utf-8");
     const config = JSON.parse(raw);
     return config.telemetry_oss === "off";

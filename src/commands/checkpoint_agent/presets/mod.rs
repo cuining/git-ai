@@ -1,5 +1,6 @@
 pub mod parse;
 
+pub(crate) mod additional_hooks;
 mod agent_v1;
 mod ai_tab;
 mod amp;
@@ -20,6 +21,7 @@ mod opencode;
 mod pi;
 mod windsurf;
 
+use crate::authorship::transcript::AiTranscript;
 use crate::authorship::working_log::AgentId;
 use crate::error::GitAiError;
 use serde::{Deserialize, Serialize};
@@ -39,6 +41,7 @@ pub struct PresetContext {
 pub enum ParsedHookEvent {
     PreFileEdit(PreFileEdit),
     PostFileEdit(PostFileEdit),
+    PostFileEditWithTranscript(PostFileEdit, AiTranscript),
     PreBashCall(PreBashCall),
     PostBashCall(PostBashCall),
     KnownHumanEdit(KnownHumanEdit),
@@ -151,7 +154,13 @@ pub trait AgentPreset {
 }
 
 pub fn resolve_preset(name: &str) -> Result<Box<dyn AgentPreset>, GitAiError> {
+    use additional_hooks::FileHookAgent;
+
     match name {
+        "qoder" => Ok(Box::new(FileHookAgent::Qoder)),
+        "hermes" => Ok(Box::new(FileHookAgent::Hermes)),
+        "trae" => Ok(Box::new(FileHookAgent::Trae)),
+        "kimi-code" => Ok(Box::new(FileHookAgent::KimiCode)),
         "claude" => Ok(Box::new(claude::ClaudePreset)),
         "cline" => Ok(Box::new(cline::ClinePreset)),
         "codex" => Ok(Box::new(codex::CodexPreset)),

@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
+import { localPaths } from "./config";
 
 export type IDEHostConfiguration = {
   kind: IDEHostKind;
@@ -26,7 +26,7 @@ export type IDEHostKind =
  */
 function loadVscodeIdeNames(): string[] {
   try {
-    const filePath = path.join(os.homedir(), ".git-ai", "VSCODE_IDE_NAMES");
+    const filePath = localPaths.vscodeIdeNames();
     const content = fs.readFileSync(filePath, "utf-8");
     return content
       .split("\n")

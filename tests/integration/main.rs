@@ -5,6 +5,7 @@ mod repos;
 mod test_utils;
 
 // Test modules (one per original test file)
+mod additional_agent_hooks;
 mod agent_commits_blame;
 mod agent_presets_comprehensive;
 mod agent_usage_repo_url;
@@ -54,6 +55,9 @@ mod cursor;
 mod daemon_commit_carryover;
 mod daemon_runtime_memory;
 mod debug_diagnostics;
+mod deepseek_harness;
+#[cfg(target_os = "macos")]
+mod deepseek_harness_install;
 mod diff;
 mod diff_comprehensive;
 mod diff_ignore_binary;
@@ -95,6 +99,7 @@ mod metrics_retry_idle;
 mod multi_repo_workspace;
 mod non_utf8_files;
 mod notes_merge_mixed_fanout;
+mod npm_upgrade;
 mod opencode;
 mod opencode_v2;
 mod pending_ai_edit_suppression;

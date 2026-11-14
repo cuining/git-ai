@@ -230,7 +230,7 @@ Typical loop: docs (discover members) → query (find the signal) → sessions p
 transcript) → exec a synthesis query over the columns you added. See
 `git-ai analyze sessions --help` for the full pull/next/iterate workflow.
 
-Data lives in a shared Cube.js semantic layer behind https://usegitai.com/api/cube.
+Data lives in a shared Cube.js semantic layer at /api/cube under the configured API base URL.
 Auth uses an org API key (organization:admin:read) sent as the x-api-key header;
 set it via the GIT_AI_API_KEY env var or "api_key" in ~/.git-ai/config.json. Your
 org is derived from the key — data is always scoped to your org.

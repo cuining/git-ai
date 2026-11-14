@@ -22,6 +22,11 @@ const AI_AUTHOR_NAMES: &[&str] = &[
     "codex-cloud",
     "git-ai-cloud-agent",
     "agent-v1",
+    "deepseek-harness",
+    "qoder",
+    "hermes",
+    "trae",
+    "kimi-code",
 ];
 
 #[derive(Debug, Clone, PartialEq)]

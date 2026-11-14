@@ -31,6 +31,9 @@ case "$ARCH" in
 esac
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=scripts/cargo-package-version.sh
+source "$ROOT/scripts/cargo-package-version.sh"
+EXECUTABLE_NAME="$(cargo_package_field "$ROOT/Cargo.toml" default-run)"
 WORK_DIR="$ROOT/target/package/pkg-$ARCH"
 PAYLOAD_ROOT="$WORK_DIR/payload"
 SCRIPTS="$WORK_DIR/scripts"
@@ -40,9 +43,11 @@ OUTPUT_ABS="$(python3 -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "$
 rm -rf "$WORK_DIR"
 mkdir -p "$PAYLOAD_ROOT" "$SCRIPTS" "$(dirname "$OUTPUT_ABS")"
 chmod 0755 "$PAYLOAD_ROOT"
-install -m 0755 "$BINARY" "$SCRIPTS/git-ai"
+install -m 0755 "$BINARY" "$SCRIPTS/$EXECUTABLE_NAME"
 install -m 0755 "$ROOT/packaging/macos/scripts/preinstall" "$SCRIPTS/preinstall"
-install -m 0755 "$ROOT/packaging/macos/scripts/postinstall" "$SCRIPTS/postinstall"
+sed "s/__GIT_AI_EXECUTABLE_NAME__/$EXECUTABLE_NAME/" \
+  "$ROOT/packaging/macos/scripts/postinstall" > "$SCRIPTS/postinstall"
+chmod 0755 "$SCRIPTS/postinstall"
 xattr -cr "$SCRIPTS" 2>/dev/null || true
 
 pkgbuild \

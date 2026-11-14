@@ -17,6 +17,8 @@ namespace GitAiVS.Services
     public sealed class BinaryResolver
     {
         private static readonly Version MinVersion = new(1, 0, 23);
+        private const string GitAiHomeDir = ".git-ai";
+        private const string GitAiBinName = "git-ai";
         private const int VersionCheckTimeoutMs = 5000;
         private const int PathLookupTimeoutMs = 5000;
 
@@ -75,17 +77,12 @@ namespace GitAiVS.Services
             var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             var isWindows = Environment.OSVersion.Platform == PlatformID.Win32NT;
 
-            _lastSearchedPaths = isWindows
-                ? new[]
-                {
-                    Path.Combine(home, ".git-ai", "bin", "git-ai.exe"),
-                    Path.Combine(home, ".git-ai-local-dev", "gitwrap", "bin", "git-ai.exe"),
-                }
-                : new[]
-                {
-                    Path.Combine(home, ".git-ai", "bin", "git-ai"),
-                    Path.Combine(home, ".git-ai-local-dev", "gitwrap", "bin", "git-ai"),
-                };
+            var executable = isWindows ? GitAiBinName + ".exe" : GitAiBinName;
+            _lastSearchedPaths = new[]
+            {
+                Path.Combine(home, GitAiHomeDir, "bin", executable),
+                Path.Combine(home, ".git-ai-local-dev", "gitwrap", "bin", executable),
+            };
 
             foreach (var candidate in _lastSearchedPaths)
             {
@@ -104,7 +101,7 @@ namespace GitAiVS.Services
                 var psi = new ProcessStartInfo
                 {
                     FileName = isWindows ? "cmd" : "/bin/sh",
-                    Arguments = isWindows ? "/c where git-ai" : "-l -c \"which git-ai\"",
+                    Arguments = isWindows ? $"/c where {GitAiBinName}" : $"-l -c \"which {GitAiBinName}\"",
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,

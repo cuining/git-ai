@@ -19,13 +19,13 @@
     <util:QueryWindowsDirectories />
     <SetProperty
       Id="INSTALLFOLDER"
-      Value="[WIX_DIR_PROFILE]\.git-ai\bin"
+      Value="[WIX_DIR_PROFILE]\$(var.GitAiHomeDir)\$(var.GitAiBinDir)"
       Before="CostFinalize" />
-    <Directory Id="INSTALLFOLDER" Name="bin" />
+    <Directory Id="INSTALLFOLDER" Name="$(var.GitAiBinDir)" />
 
     <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
       <Component Id="GitAiExeComponent" Guid="{95D3C11E-6881-43AB-9E5B-4462AA59E0E2}">
-        <File Id="GitAiExe" Source="$(var.GitAiExe)" Name="git-ai.exe" KeyPath="yes" />
+        <File Id="GitAiExe" Source="$(var.GitAiExe)" Name="$(var.GitAiExeName)" KeyPath="yes" />
         <Environment
           Id="GitAiPath"
           Name="PATH"

@@ -397,12 +397,40 @@ fn remove_hook_entry(hook_path: &Path) -> Result<(), GitAiError> {
 // Internal helpers - forward path validation
 // ---------------------------------------------------------------------------
 
-fn is_path_inside_component(path: &Path, component: &str) -> bool {
-    path.components().any(|part| {
-        part.as_os_str()
-            .to_string_lossy()
-            .eq_ignore_ascii_case(component)
-    })
+fn is_path_inside_directory(path: &Path, directory: &Path) -> bool {
+    let mut remaining = path.components();
+    while let Some(first) = remaining.next() {
+        let mut candidate = std::iter::once(first).chain(remaining.clone());
+        if directory.components().all(|part| {
+            candidate
+                .next()
+                .is_some_and(|actual| actual.as_os_str().eq_ignore_ascii_case(part.as_os_str()))
+        }) {
+            return true;
+        }
+    }
+    false
+}
+
+#[cfg(test)]
+#[test]
+fn managed_hooks_root_matches_complete_path_components() {
+    assert!(is_path_inside_directory(
+        Path::new("home/.GIT-AI/bin/hooks"),
+        Path::new(".git-ai")
+    ));
+    let nested_root = Path::new(".dcc/ai-tracking");
+    assert!(is_path_inside_directory(
+        Path::new("home/.DCC/AI-TRACKING/bin/hooks"),
+        nested_root
+    ));
+    for path in [
+        "home/.dcc",
+        "home/.dcc/other/ai-tracking",
+        "home/.dcc/ai-tracking-backup",
+    ] {
+        assert!(!is_path_inside_directory(Path::new(path), nested_root));
+    }
 }
 
 fn is_path_inside_any_git_ai_dir(path: &Path) -> bool {
@@ -422,7 +450,7 @@ fn is_disallowed_forward_hooks_path(
     repo: Option<&Repository>,
     managed_hooks_path: Option<&Path>,
 ) -> bool {
-    if is_path_inside_component(path, ".git-ai") {
+    if is_path_inside_directory(path, Path::new(crate::config::GIT_AI_HOME_DIR)) {
         return true;
     }
     if is_path_inside_any_git_ai_dir(path) {

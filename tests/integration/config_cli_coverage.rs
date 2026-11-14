@@ -5,7 +5,7 @@
 //! These run the real binary against an isolated test HOME, so `config set`
 //! writes land in the sandboxed `~/.git-ai/config.json` rather than the user's.
 
-use crate::repos::test_repo::TestRepo;
+use crate::repos::test_repo::{DaemonTestScope, TestRepo};
 use git_ai::config::{AuthorConfig, FileConfig, NotesBackendConfig};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -14,6 +14,70 @@ fn run_config(repo: &TestRepo, args: &[&str]) -> std::process::Output {
     repo.git_ai_command_without_pre_sync_for_test(args, &[])
         .output()
         .unwrap_or_else(|e| panic!("git-ai {args:?} failed to run: {e}"))
+}
+
+#[test]
+fn test_company_distribution_config() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    std::fs::write(
+        repo.test_home_path().join(".git-ai/config.json"),
+        r#"{"feature_flags":{"rewrite_metrics_events":false}}"#,
+    )
+    .unwrap();
+    let output = repo
+        .git_ai_command_without_pre_sync_for_test(
+            &["config"],
+            &[("GIT_AI_REWRITE_METRICS_EVENTS", "false")],
+        )
+        .env_remove("GIT_AI_TEST_DB_PATH")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let config: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        config["api_base_url"],
+        "https://dcc-service.intra.xiaojukeji.com/api/v1/ai-tracking"
+    );
+    assert_eq!(config["telemetry_oss_disabled"], true);
+    assert_eq!(config["feature_flags"]["token_usage_metrics"], false);
+    assert_eq!(config["feature_flags"]["daemon_log_upload"], false);
+    assert_eq!(config["feature_flags"]["rewrite_metrics_events"], true);
+    assert_eq!(
+        config["allow_repositories"],
+        serde_json::json!(["git.xiaojukeji.com/*"])
+    );
+}
+
+#[test]
+fn test_company_checkpoint_requires_an_exact_git_host() {
+    let repo = TestRepo::new();
+    repo.git_ai(&["config", "set", "allow_repositories", "*"])
+        .unwrap();
+    std::fs::write(repo.path().join("source.txt"), "new source\n").unwrap();
+    for (remote, allowed) in [
+        (
+            "https://git.xiaojukeji.com.example.org/team/repo.git",
+            false,
+        ),
+        (
+            r"https://example.org\@git.xiaojukeji.com/team/repo.git",
+            false,
+        ),
+        ("git@git.xiaojukeji.com:team/repo.git", true),
+    ] {
+        repo.git(&["config", "remote.origin.url", remote]).unwrap();
+        let output = repo
+            .git_ai_command_without_pre_sync_for_test(&["checkpoint", "mock_ai", "source.txt"], &[])
+            .env_remove("GIT_AI_TEST_DB_PATH")
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{remote:?}: {output:?}");
+        assert_eq!(
+            !String::from_utf8_lossy(&output.stderr).contains("Skipping checkpoint"),
+            allowed,
+            "{remote:?}: {output:?}"
+        );
+    }
 }
 
 #[test]
@@ -443,7 +507,7 @@ fn fully_populated_file_config() -> FileConfig {
         disable_auto_updates: Some(true),
         update_channel: Some("latest".to_string()),
         feature_flags: Some(serde_json::json!({"transcript_sweep": true})),
-        api_base_url: Some("https://usegitai.com".to_string()),
+        api_base_url: Some("https://example.com".to_string()),
         prompt_storage: Some("default".to_string()),
         default_prompt_storage: Some("local".to_string()),
         api_key: Some("secret-key".to_string()),

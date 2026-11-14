@@ -441,10 +441,8 @@ pub fn run_attribution_self_check(target: &GitDiagnosticTarget) -> DiagnosticChe
 pub fn run_trace2_file_self_check(target: &GitDiagnosticTarget) -> DiagnosticCheckResult {
     let mut commands = Vec::new();
     let deadline = Instant::now() + DEBUG_CHECK_TIMEOUT;
-    let trace_dir = crate::mdm::utils::home_dir()
-        .join(".git-ai")
-        .join("internal")
-        .join("daemon");
+    let trace_dir = crate::config::internal_dir_for_home(&crate::mdm::utils::home_dir())
+        .join(crate::daemon::DAEMON_DIR);
     let trace_path = trace_dir.join(format!(
         "trace2-debug-check-{}-{}.json",
         sanitize_label(&target.label),
@@ -946,7 +944,7 @@ fn daemon_binary_is_stale(config: &crate::daemon::DaemonConfig) -> Result<bool, 
 }
 
 fn read_daemon_started_at_ns(config: &crate::daemon::DaemonConfig) -> Result<Option<u128>, String> {
-    let pid_path = config.internal_dir.join("daemon").join("daemon.pid.json");
+    let pid_path = crate::daemon::pid_metadata_path(config);
     let contents = match fs::read_to_string(&pid_path) {
         Ok(contents) => contents,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -1373,6 +1371,20 @@ fn format_status(status: Option<i32>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_daemon_started_at_from_relocated_pid_metadata() {
+        let home = tempfile::tempdir().unwrap();
+        let mut config = crate::daemon::DaemonConfig::from_home(home.path());
+        config.lock_path = home.path().join("daemon.lock");
+        fs::write(
+            home.path().join("daemon.pid.json"),
+            r#"{"pid": 1, "started_at_ns": 123}"#,
+        )
+        .unwrap();
+
+        assert_eq!(read_daemon_started_at_ns(&config).unwrap(), Some(123));
+    }
 
     #[cfg(not(windows))]
     fn stdout_stderr_sleep_command() -> (&'static str, Vec<&'static str>) {

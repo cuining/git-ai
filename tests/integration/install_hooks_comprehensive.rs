@@ -330,6 +330,21 @@ fn install_hooks_env_flag_adds_path_to_detected_shell_configs() {
 
 #[test]
 #[cfg(not(windows))]
+fn install_hooks_env_preserves_the_existing_path_with_a_trailing_home_slash() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let home = format!("{}/", repo.test_home_path().display());
+    let zshrc = repo.test_home_path().join(".zshrc");
+    let existing = format!("export PATH=\"{home}/.git-ai/bin:$PATH\"\n");
+    fs::write(&zshrc, &existing).unwrap();
+
+    repo.git_ai_with_env_without_pre_sync_for_test(&["install-hooks", "--env"], &[("HOME", &home)])
+        .unwrap();
+
+    assert_eq!(fs::read_to_string(zshrc).unwrap(), existing);
+}
+
+#[test]
+#[cfg(not(windows))]
 fn install_hooks_without_env_flag_leaves_shell_configs_untouched() {
     let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
     let home = repo.test_home_path();
@@ -377,7 +392,7 @@ fn install_hooks_wsl_dry_run_does_not_invoke_wsl() {
 
 #[test]
 #[cfg(not(windows))]
-fn install_hooks_detects_cline_from_vscode_server_extension_manifest() {
+fn install_hooks_skips_detected_cline_by_default() {
     let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
     let home = repo.test_home_path();
     let manifest_path = home.join(".vscode-server/extensions/extensions.json");
@@ -409,8 +424,8 @@ fn install_hooks_detects_cline_from_vscode_server_extension_manifest() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("Cline: Pending updates"),
-        "Cline was not detected from the VS Code server extension manifest:\n{stdout}"
+        !stdout.contains("Cline:"),
+        "default install should skip Cline even when detected:\n{stdout}"
     );
     assert!(
         !home.join("Documents/Cline/Hooks").exists(),

@@ -224,6 +224,7 @@ fn test_checkpoint_base_override_controls_head_context_for_entry_generation() {
         }],
         path_role: PreparedPathRole::Edited,
         stream_source: None,
+        transcript: None,
         metadata: HashMap::new(),
     };
 
@@ -277,6 +278,7 @@ fn test_ai_checkpoint_without_agent_id_is_rejected() {
         }],
         path_role: PreparedPathRole::Edited,
         stream_source: None,
+        transcript: None,
         metadata: HashMap::new(),
     };
 
@@ -416,6 +418,7 @@ fn test_checkpoint_with_paths_outside_repo() {
         }],
         path_role: PreparedPathRole::Edited,
         stream_source: None,
+        transcript: None,
         metadata: HashMap::new(),
     };
 
@@ -1302,6 +1305,7 @@ fn test_checkpoint_fails_with_initial_missing_blobs() {
         }],
         path_role: PreparedPathRole::Edited,
         stream_source: None,
+        transcript: None,
         metadata: HashMap::new(),
     };
 

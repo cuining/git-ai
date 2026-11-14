@@ -1,0 +1,3 @@
+- insert:
+  - id: git-ai-deepseek-harness
+    name: git-ai-deepseek-harness/index.mjs

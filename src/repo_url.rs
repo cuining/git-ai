@@ -9,6 +9,7 @@ pub fn normalize_repo_url(url_str: &str) -> Result<String, String> {
     // Handle SSH scp-like format: user@host:path
     if !url_str.contains("://")
         && let Some((user_host, path)) = url_str.split_once(':')
+        && !user_host.contains(['/', '\\'])
         && let Some((_, host)) = user_host.rsplit_once('@')
     {
         return normalize_ssh_url(host, path);

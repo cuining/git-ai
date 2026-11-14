@@ -15,7 +15,10 @@ if (-not (Test-Path -LiteralPath $BinaryPath)) {
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot '..\..')
 $wxsPath = Join-Path $PSScriptRoot 'git-ai.wxs'
 $stageDir = Join-Path $repoRoot "target\package\msi-$Architecture"
-$stagedExe = Join-Path $stageDir 'git-ai.exe'
+$installRootName = '.git-ai'
+$installBinDir = 'bin'
+$exeName = 'git-ai.exe'
+$stagedExe = Join-Path $stageDir $exeName
 $outputFullPath = [System.IO.Path]::GetFullPath($OutputPath)
 $outputDir = [System.IO.Path]::GetDirectoryName($outputFullPath)
 $upgradeCode = '4B6D731B-CB6B-48F2-8A0A-A4344C91E1E0'
@@ -46,6 +49,9 @@ $platform = if ($Architecture -eq 'arm64') { 'arm64' } else { 'x64' }
     -ext $wixUtilExtension `
     -arch $platform `
     -d "ProductVersion=$Version" `
+    -d "GitAiHomeDir=$installRootName" `
+    -d "GitAiBinDir=$installBinDir" `
+    -d "GitAiExeName=$exeName" `
     -d "GitAiExe=$stagedExe" `
     -d "UpgradeCode={$upgradeCode}" `
     -o $outputFullPath

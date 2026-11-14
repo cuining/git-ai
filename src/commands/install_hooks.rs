@@ -14,14 +14,12 @@ use std::process::{Command, Stdio};
 const TRACE2_EVENT_TARGET_KEY: &str = "trace2.eventTarget";
 const TRACE2_EVENT_NESTING_KEY: &str = "trace2.eventNesting";
 const TRACE2_EVENT_NESTING_VALUE: &str = "0";
-const VISUAL_STUDIO_INSTALLER_ID: &str = "visual-studio";
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct InstallOptions {
     dry_run: bool,
     verbose: bool,
     install_skills: bool,
-    include_visual_studio_extension: bool,
     configure_env: bool,
     configure_wsl: bool,
     api_base: Option<String>,
@@ -118,12 +116,6 @@ pub fn to_hashmap(statuses: HashMap<String, InstallStatus>) -> HashMap<String, S
         .into_iter()
         .map(|(k, v)| (k, v.as_str().to_string()))
         .collect()
-}
-
-fn print_amp_plugins_note(installer_id: &str) {
-    if installer_id == "amp" {
-        println!("  Note: Amp plugins are experimental. Run amp with `PLUGINS=all amp`.");
-    }
 }
 
 /// Find PIDs of running processes that match any of the given process names.
@@ -402,7 +394,6 @@ fn parse_install_options(args: &[String]) -> Result<InstallOptions, GitAiError> 
             "--dry-run" | "--dry-run=true" => options.dry_run = true,
             "--verbose" | "-v" => options.verbose = true,
             "--skills" => options.install_skills = true,
-            "--visual-studio-extension" => options.include_visual_studio_extension = true,
             "--env" | "--env=true" => options.configure_env = true,
             "--wsl" | "--wsl=true" => options.configure_wsl = true,
             value if value.starts_with("--api-base=") => {
@@ -433,10 +424,6 @@ fn parse_install_options(args: &[String]) -> Result<InstallOptions, GitAiError> 
 fn non_empty_value(value: &str) -> Option<String> {
     let value = value.trim();
     (!value.is_empty()).then(|| value.to_string())
-}
-
-fn should_include_installer(id: &str, options: &InstallOptions) -> bool {
-    options.include_visual_studio_extension || id != VISUAL_STUDIO_INSTALLER_ID
 }
 
 #[derive(Default)]
@@ -586,7 +573,19 @@ async fn async_run_install(
         let name = installer.name();
         let id = installer.id();
 
-        if !should_include_installer(id, options) {
+        if !matches!(
+            id,
+            "claude-code"
+                | "codex"
+                | "cursor"
+                | "deepseek-harness"
+                | "qoder"
+                | "hermes"
+                | "trae"
+                | "kimi-code"
+                | "opencode"
+                | "pi"
+        ) {
             continue;
         }
 
@@ -602,7 +601,7 @@ async fn async_run_install(
                 installed_tools.insert(id.to_string());
                 any_checked = true;
 
-                // Install/update hooks (only for tools that use config file hooks)
+                // Install or update hooks and the DeepSeek Harness bundle.
                 if installer.uses_config_hooks() {
                     let spinner = Spinner::new(&format!("{}: checking hooks", name));
                     spinner.start();
@@ -613,7 +612,6 @@ async fn async_run_install(
                                 spinner.pending(&format!("{}: Pending updates", name));
                             } else {
                                 spinner.success(&format!("{}: Hooks updated", name));
-                                print_amp_plugins_note(id);
                             }
                             if options.verbose {
                                 println!();
@@ -637,7 +635,6 @@ async fn async_run_install(
                         }
                         Ok(None) => {
                             spinner.success(&format!("{}: Hooks already up to date", name));
-                            print_amp_plugins_note(id);
                             statuses.insert(id.to_string(), InstallStatus::AlreadyInstalled);
                             detailed_results
                                 .push((id.to_string(), InstallResult::already_installed()));
@@ -649,80 +646,6 @@ async fn async_run_install(
                             statuses.insert(id.to_string(), InstallStatus::Failed);
                             detailed_results
                                 .push((id.to_string(), InstallResult::failed(error_msg)));
-                        }
-                    }
-                }
-
-                // Install extras (extensions, git.path, etc.)
-                match installer.install_extras(params, options.dry_run) {
-                    Ok(results) => {
-                        let mut extras_changed = false;
-                        for result in results {
-                            if result.changed {
-                                has_changes = true;
-                                extras_changed = true;
-                            }
-                            if result.changed && !options.dry_run {
-                                let extra_spinner = Spinner::new(&result.message);
-                                extra_spinner.start();
-                                extra_spinner.success(&result.message);
-                            } else if result.changed && options.dry_run {
-                                let extra_spinner = Spinner::new(&result.message);
-                                extra_spinner.start();
-                                extra_spinner.pending(&result.message);
-                            } else if result.message.contains("already") {
-                                let extra_spinner = Spinner::new(&result.message);
-                                extra_spinner.start();
-                                extra_spinner.success(&result.message);
-                            } else if result.message.contains("Unable")
-                                || result.message.contains("manually")
-                            {
-                                let extra_spinner = Spinner::new(&result.message);
-                                extra_spinner.start();
-                                extra_spinner.pending(&result.message);
-                            }
-                            if options.verbose
-                                && let Some(diff) = result.diff
-                            {
-                                println!();
-                                print_diff(&diff);
-                            }
-
-                            // Capture warning-like messages for metrics
-                            if (result.message.contains("Unable")
-                                || result.message.contains("manually")
-                                || result.message.contains("Failed"))
-                                && let Some((_, detail)) = detailed_results
-                                    .iter_mut()
-                                    .find(|(tool_id, _)| tool_id == id)
-                            {
-                                detail.warnings.push(result.message.clone());
-                            }
-                        }
-
-                        // Track restart detection for extras-only agents (e.g. JetBrains, VS Code)
-                        if extras_changed
-                            && !options.dry_run
-                            && !updated_agents.iter().any(|(n, _)| n == name)
-                        {
-                            let pnames: Vec<String> = installer
-                                .process_names()
-                                .iter()
-                                .map(|s| s.to_string())
-                                .collect();
-                            if !pnames.is_empty() {
-                                updated_agents.push((name.to_string(), pnames));
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("  Error installing extras for {}: {}", name, e);
-                        // Capture extras error as a warning on the tool's result
-                        if let Some((_, detail)) = detailed_results
-                            .iter_mut()
-                            .find(|(tool_id, _)| tool_id == id)
-                        {
-                            detail.warnings.push(format!("Extras install error: {}", e));
                         }
                     }
                 }
@@ -1029,7 +952,7 @@ fn cleanup_legacy_envelope_logs() {
     let Some(home) = dirs::home_dir() else {
         return;
     };
-    let internal = home.join(".git-ai").join("internal");
+    let internal = crate::config::internal_dir_for_home(&home);
 
     // Remove the entire logs directory
     let logs_dir = internal.join("logs");
@@ -1115,38 +1038,6 @@ mod tests {
         {
             std::os::unix::fs::symlink(git_path, install_dir.join("git-og")).unwrap();
         }
-    }
-
-    #[test]
-    fn parse_install_options_defaults_visual_studio_extension_to_disabled() {
-        let options = parse_install_options(&[]).unwrap();
-
-        assert!(!options.include_visual_studio_extension);
-        assert!(!should_include_installer(
-            VISUAL_STUDIO_INSTALLER_ID,
-            &options
-        ));
-        assert!(should_include_installer("vscode", &options));
-    }
-
-    #[test]
-    fn parse_install_options_enables_visual_studio_extension_flag() {
-        let args = vec![
-            "--dry-run".to_string(),
-            "--visual-studio-extension".to_string(),
-            "--skills".to_string(),
-            "-v".to_string(),
-        ];
-        let options = parse_install_options(&args).unwrap();
-
-        assert!(options.dry_run);
-        assert!(options.verbose);
-        assert!(options.install_skills);
-        assert!(options.include_visual_studio_extension);
-        assert!(should_include_installer(
-            VISUAL_STUDIO_INSTALLER_ID,
-            &options
-        ));
     }
 
     #[test]
@@ -1238,19 +1129,28 @@ mod tests {
     #[test]
     #[cfg(not(windows))]
     #[serial]
-    fn install_reports_cline_hook_check_errors_as_failed() {
+    fn install_omits_disabled_agent_installers() {
         let temp = tempdir().unwrap();
-        let storage = temp.path().join("cline-storage");
-        fs::create_dir_all(&storage).unwrap();
-        fs::write(temp.path().join("Documents"), "not a directory").unwrap();
-
         let _home = EnvVarGuard::set("HOME", temp.path().to_str().unwrap());
-        let _cline_storage =
-            EnvVarGuard::set("GIT_AI_CLINE_STORAGE_PATH", storage.to_str().unwrap());
-
         let statuses = run(&["--dry-run".to_string()]).unwrap();
-
-        assert_eq!(statuses.get("cline").map(String::as_str), Some("failed"));
+        let mut ids: Vec<_> = statuses.keys().map(String::as_str).collect();
+        ids.sort_unstable();
+        assert_eq!(
+            ids,
+            [
+                "claude-code",
+                "codex",
+                "cursor",
+                #[cfg(target_os = "macos")]
+                "deepseek-harness",
+                "hermes",
+                "kimi-code",
+                "opencode",
+                "pi",
+                "qoder",
+                "trae",
+            ]
+        );
     }
 
     #[test]

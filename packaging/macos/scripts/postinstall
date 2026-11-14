@@ -6,8 +6,9 @@ fail() {
   exit 1
 }
 
-SCRIPT_DIR="$(CDPATH= cd -- "$(dirname "$0")" && pwd)"
-SOURCE_BINARY="$SCRIPT_DIR/git-ai"
+SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname "$0")" && pwd)"
+EXECUTABLE_NAME="__GIT_AI_EXECUTABLE_NAME__"
+SOURCE_BINARY="$SCRIPT_DIR/$EXECUTABLE_NAME"
 CONSOLE_USER="$(/usr/bin/stat -f%Su /dev/console)"
 
 case "$CONSOLE_USER" in
@@ -28,7 +29,7 @@ esac
 USER_GROUP="$(/usr/bin/id -gn "$CONSOLE_USER")"
 GIT_AI_HOME="$USER_HOME/.git-ai"
 GIT_AI_BIN_DIR="$GIT_AI_HOME/bin"
-GIT_AI_BIN="$GIT_AI_BIN_DIR/git-ai"
+GIT_AI_BIN="$GIT_AI_BIN_DIR/$EXECUTABLE_NAME"
 
 /usr/bin/install -d -o "$CONSOLE_USER" -g "$USER_GROUP" -m 0755 "$GIT_AI_HOME"
 /usr/bin/install -d -o "$CONSOLE_USER" -g "$USER_GROUP" -m 0755 "$GIT_AI_BIN_DIR"

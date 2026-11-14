@@ -8,12 +8,13 @@
 set -eu
 
 UNIT="git-ai-bg.service"
+INSTALL_BINARY_PATH=".git-ai/bin/git-ai"
 # systemd refuses executable paths with quotes or parentheses in ExecStart, so
 # a one-line sh wrapper resolves the binary from GIT_AI_LOGIN_START_BIN (set by
 # --bin) or the default install location. `bg start` keeps retrying for
 # RETRY_SECS if a previous daemon is still releasing its lock at login.
 RETRY_SECS=10
-LAUNCH_BIN='"${GIT_AI_LOGIN_START_BIN:-$HOME/.git-ai/bin/git-ai}"'
+LAUNCH_BIN='"${GIT_AI_LOGIN_START_BIN:-$HOME/'"$INSTALL_BINARY_PATH"'}"'
 LAUNCH_START="exec $LAUNCH_BIN bg start --retry-secs $RETRY_SECS"
 LAUNCH_STOP="exec $LAUNCH_BIN bg shutdown"
 
@@ -118,8 +119,8 @@ if [ -n "$BIN" ]; then
 "*|*"$(printf '\r')"*) fail "--bin path must not contain a newline or carriage return" ;;
   esac
   add_env "GIT_AI_LOGIN_START_BIN=$BIN"
-elif [ "$SYSTEM" -eq 0 ] && [ ! -x "$HOME/.git-ai/bin/git-ai" ]; then
-  fail "$HOME/.git-ai/bin/git-ai not found; install git-ai first or pass --bin"
+elif [ "$SYSTEM" -eq 0 ] && [ ! -x "$HOME/$INSTALL_BINARY_PATH" ]; then
+  fail "$HOME/$INSTALL_BINARY_PATH not found; install git-ai first or pass --bin"
 fi
 
 mkdir -p "$UNIT_DIR"

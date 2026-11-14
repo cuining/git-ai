@@ -1,9 +1,10 @@
 use clap::Parser;
 use git_ai::commands;
+use git_ai::config::{GIT_AI_BIN_NAME, is_git_ai_executable_name};
 use git_ai::utils::{SuperuserCheckResult, check_superuser_guard, print_superuser_warning};
 
 #[derive(Parser)]
-#[command(name = "git-ai")]
+#[command(name = GIT_AI_BIN_NAME)]
 #[command(about = "git proxy with AI authorship tracking", long_about = None)]
 #[command(disable_help_flag = true, disable_version_flag = true)]
 struct Cli {
@@ -46,14 +47,14 @@ fn main() {
                 .and_then(|name| name.to_str())
                 .map(|s| s.to_string())
         })
-        .unwrap_or("git-ai".to_string());
+        .unwrap_or_else(|| GIT_AI_BIN_NAME.to_string());
 
     if commands::git_hook_handlers::is_git_hook_binary_name(&binary_name) {
         eprintln!(
             "git-ai: the git core hooks feature has been sunset.\n\
              To remove the deprecated git-ai hook symlinks from this repository, run:\n\
              \n\
-             \x20 git-ai git-hooks remove\n"
+             \x20 {GIT_AI_BIN_NAME} git-hooks remove\n"
         );
         std::process::exit(0);
     }
@@ -68,7 +69,7 @@ fn main() {
         }
     }
 
-    if binary_name == "git-ai" || binary_name == "git-ai.exe" {
+    if is_git_ai_executable_name(&binary_name) {
         // Block elevated privileges to prevent creating root-owned files
         // that break normal-user daemon startup. Only applies to direct
         // `git-ai` commands (not the git proxy, which must stay transparent).

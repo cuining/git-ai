@@ -91,7 +91,11 @@ pub use control_api::{
     FamilyStatus, TelemetryEnvelope,
 };
 
+pub(crate) const DAEMON_DIR: &str = "daemon";
 const PID_META_FILE: &str = "daemon.pid.json";
+const LOCK_FILE: &str = "daemon.lock";
+#[cfg(unix)]
+const CONTROL_SOCKET_FILE: &str = "control.sock";
 const TRACE_INGEST_SEQ_FIELD: &str = "git_ai_ingest_seq";
 pub(crate) const TRACE_ROOT_REFLOG_START_OFFSETS_FIELD: &str = "git_ai_root_reflog_start_offsets";
 const TRACE_CONNECTION_CLOSED_EVENT: &str = "git_ai_connection_closed";
@@ -352,12 +356,12 @@ pub struct DaemonConfig {
 
 impl DaemonConfig {
     fn from_internal_dir(internal_dir: PathBuf) -> Self {
-        let daemon_dir = internal_dir.join("daemon");
+        let daemon_dir = internal_dir.join(DAEMON_DIR);
         #[cfg(unix)]
         let (lock_path, trace_socket_path, control_socket_path) = {
-            let mut lock_path = daemon_dir.join("daemon.lock");
+            let mut lock_path = daemon_dir.join(LOCK_FILE);
             let mut trace_socket_path = daemon_dir.join("trace2.sock");
-            let mut control_socket_path = daemon_dir.join("control.sock");
+            let mut control_socket_path = daemon_dir.join(CONTROL_SOCKET_FILE);
             let too_long = |path: &Path| path.to_string_lossy().len() >= 100;
 
             if too_long(&trace_socket_path) || too_long(&control_socket_path) {
@@ -366,9 +370,9 @@ impl DaemonConfig {
                 let digest = format!("{:x}", hasher.finalize());
                 let short = &digest[..16];
                 let short_dir = std::env::temp_dir().join(format!("git-ai-d-{}", short));
-                lock_path = short_dir.join("daemon.lock");
+                lock_path = short_dir.join(LOCK_FILE);
                 trace_socket_path = short_dir.join("trace.sock");
-                control_socket_path = short_dir.join("control.sock");
+                control_socket_path = short_dir.join(CONTROL_SOCKET_FILE);
             }
 
             (lock_path, trace_socket_path, control_socket_path)
@@ -381,7 +385,7 @@ impl DaemonConfig {
             let digest = format!("{:x}", hasher.finalize());
             let short = &digest[..16];
             (
-                daemon_dir.join("daemon.lock"),
+                daemon_dir.join(LOCK_FILE),
                 PathBuf::from(format!(r"\\.\pipe\git-ai-{}-trace2", short)),
                 PathBuf::from(format!(r"\\.\pipe\git-ai-{}-control", short)),
             )
@@ -396,13 +400,16 @@ impl DaemonConfig {
     }
 
     pub fn from_home(home: &Path) -> Self {
-        let internal_dir = home.join(".git-ai").join("internal");
-        Self::from_internal_dir(internal_dir)
+        Self::from_internal_dir(config::internal_dir_for_home(home))
     }
 
     pub fn from_default_paths() -> Result<Self, GitAiError> {
         let internal_dir = config::internal_dir_path().ok_or_else(|| {
-            GitAiError::Generic("Unable to determine ~/.git-ai/internal path".to_string())
+            GitAiError::Generic(format!(
+                "Unable to determine ~/{}/{} path",
+                config::GIT_AI_HOME_DIR,
+                config::INTERNAL_DIR
+            ))
         })?;
         Ok(Self::from_internal_dir(internal_dir))
     }
@@ -446,7 +453,7 @@ impl DaemonConfig {
     }
 
     pub fn test_completion_log_dir(&self) -> PathBuf {
-        self.internal_dir.join("daemon").join("test-completions")
+        self.internal_dir.join(DAEMON_DIR).join("test-completions")
     }
 
     pub fn test_completion_log_path_for_family(&self, family_key: &str) -> PathBuf {
@@ -2349,7 +2356,7 @@ fn set_socket_owner_only(path: &Path) -> Result<(), GitAiError> {
     Ok(())
 }
 
-fn pid_metadata_path(config: &DaemonConfig) -> PathBuf {
+pub(crate) fn pid_metadata_path(config: &DaemonConfig) -> PathBuf {
     config
         .lock_path
         .parent()
@@ -2369,7 +2376,7 @@ pub fn daemon_log_file_path(config: &DaemonConfig) -> Result<PathBuf, GitAiError
         ))
     })?;
     let meta: DaemonPidMeta = serde_json::from_str(&contents)?;
-    let log_dir = config.internal_dir.join("daemon").join("logs");
+    let log_dir = daemon_log_dir(config);
     Ok(log_dir.join(format!("{}.log", meta.pid)))
 }
 
@@ -2441,7 +2448,7 @@ fn daemon_is_test_mode() -> bool {
 }
 
 fn daemon_log_dir(config: &DaemonConfig) -> PathBuf {
-    config.internal_dir.join("daemon").join("logs")
+    config.internal_dir.join(DAEMON_DIR).join("logs")
 }
 
 /// Redirect stdout and stderr to a per-PID log file inside the daemon logs

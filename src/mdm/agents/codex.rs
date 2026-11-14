@@ -81,11 +81,10 @@ impl CodexInstaller {
         let has_git_ai_bin = args
             .first()
             .map(|bin| {
-                bin == "git-ai"
-                    || bin.ends_with("/git-ai")
-                    || bin.ends_with("\\git-ai")
-                    || bin.ends_with("/git-ai.exe")
-                    || bin.ends_with("\\git-ai.exe")
+                bin == crate::config::GIT_AI_BIN_NAME
+                    || bin
+                        .rsplit_once(['/', '\\'])
+                        .is_some_and(|(_, name)| crate::config::is_git_ai_executable_name(name))
             })
             .unwrap_or(false);
 

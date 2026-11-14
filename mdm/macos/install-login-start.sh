@@ -12,6 +12,8 @@
 set -eu
 
 LABEL="com.usegitai.bg"
+INSTALL_ROOT_NAME=".git-ai"
+INSTALL_BINARY_PATH="$INSTALL_ROOT_NAME/bin/git-ai"
 DEFAULT_PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 # `bg start` keeps retrying for this long if a previous daemon is still
 # releasing its lock at login (fast logout/login, self-update in progress).
@@ -116,7 +118,7 @@ if [ -n "$BIN" ]; then
 "*|*"$(printf '\r')"*) fail "--bin path must not contain a newline or carriage return" ;;
   esac
 elif [ "$SYSTEM" -eq 0 ]; then
-  BIN="$HOME/.git-ai/bin/git-ai"
+  BIN="$HOME/$INSTALL_BINARY_PATH"
   [ -x "$BIN" ] || fail "$BIN not found; install git-ai first or pass --bin"
 fi
 
@@ -131,13 +133,13 @@ $(xml_string "$RETRY_SECS")"
 else
   PROGRAM_XML="$(xml_string /bin/sh)
 $(xml_string -c)
-$(xml_string "exec \"\$HOME/.git-ai/bin/git-ai\" bg start --retry-secs $RETRY_SECS")"
+$(xml_string "exec \"\$HOME/$INSTALL_BINARY_PATH\" bg start --retry-secs $RETRY_SECS")"
 fi
 
 # Per-user agents log `bg start` output; all-users agents have no fixed path.
 LOG_XML=""
 if [ "$SYSTEM" -eq 0 ]; then
-  LOG_DIR="$HOME/.git-ai/internal/daemon/logs"
+  LOG_DIR="$HOME/$INSTALL_ROOT_NAME/internal/daemon/logs"
   mkdir -p "$LOG_DIR"
   LOG_FILE_XML="$(xml_string "$LOG_DIR/login-start.log" | sed 's/^    //')"
   LOG_XML="    <key>StandardOutPath</key>

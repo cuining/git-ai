@@ -15,11 +15,7 @@ fn resolve_git_ai_exe_from_invocation_path(path: PathBuf) -> PathBuf {
 
     // Get platform-specific executable names
     let git_name = if cfg!(windows) { "git.exe" } else { "git" };
-    let git_ai_name = if cfg!(windows) {
-        "git-ai.exe"
-    } else {
-        "git-ai"
-    };
+    let git_ai_name = crate::config::GIT_AI_EXE_NAME;
 
     let Some(file_name) = path.file_name().and_then(|n| n.to_str()) else {
         return canonical_path;
@@ -268,6 +264,8 @@ pub fn check_superuser_guard() -> SuperuserCheckResult {
 }
 
 pub fn print_superuser_warning() {
+    use crate::config::{CONFIG_FILE_NAME, GIT_AI_BIN_NAME, GIT_AI_HOME_DIR};
+
     eprintln!(
         "[git-ai] warning: running as superuser (root/Administrator) is not recommended.\n\
          \n\
@@ -276,8 +274,8 @@ pub fn print_superuser_warning() {
          failures. A future version may refuse to run in this configuration.\n\
          \n\
          To suppress this warning, either:\n\
-         - Run git-ai as your normal user (recommended), or\n\
-         - Set GIT_AI_ALLOW_SUPERUSER=1 or add \"allow_superuser\": true to ~/.git-ai/config.json\n\
+         - Run {GIT_AI_BIN_NAME} as your normal user (recommended), or\n\
+         - Set GIT_AI_ALLOW_SUPERUSER=1 or add \"allow_superuser\": true to ~/{GIT_AI_HOME_DIR}/{CONFIG_FILE_NAME}\n\
          \n\
          This warning is automatically suppressed in CI environments."
     );

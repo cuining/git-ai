@@ -507,6 +507,16 @@ impl DaemonProcess {
 
 fn configure_test_home_env(command: &mut Command, test_home: &Path) {
     command.env("HOME", test_home);
+    for var in [
+        "QODER_CONFIG_DIR",
+        "HERMES_HOME",
+        "HERMES_DATA_DIR_SUFFIX",
+        "TERMINAL_ENV",
+        "TERMINAL_CWD",
+        "KIMI_CODE_HOME",
+    ] {
+        command.env_remove(var);
+    }
     if !command
         .get_envs()
         .any(|(key, _)| key == std::ffi::OsStr::new("GIT_AI_TEST_NOTES_DB_PATH"))
@@ -1045,6 +1055,10 @@ fn is_known_checkpoint_preset(arg: &str) -> bool {
             | "mock_known_human"
             | "known_human"
             | "droid"
+            | "qoder"
+            | "hermes"
+            | "trae"
+            | "kimi-code"
             | "agent-v1"
     )
 }
@@ -2524,7 +2538,6 @@ impl TestRepo {
     fn configure_command_env(&self, command: &mut Command) {
         // Isolate all git + git-ai config reads from developer machine settings.
         configure_test_home_env(command, &self.test_home);
-
         if self.has_active_daemon() {
             command.env(
                 "GIT_TRACE2_EVENT",

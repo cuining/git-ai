@@ -10,6 +10,9 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_json_canonicalizer = "0.3"
 sha2 = "0.10"
+base64 = "0.22"
+tar = { version = "0.4", default-features = false }
+semver = { version = "1.0", features = ["serde"] }
 imara-diff = "0.2"
 chrono = { version = "0.4.44", default-features = false, features = ["serde", "clock", "std"] }
 indicatif = "0.18"
@@ -23,7 +26,7 @@ libc = "0.2"
 jsonc-parser = { version = "0.32", features = ["cst"] }
 dirs = "5.0"
 ureq = { version = "3.3", default-features = false, features = ["native-tls"] }
-url = "2.5"
+url = { version = "2.5", features = ["serde"] }
 glob = "0.3"
 ignore = "0.4"
 ratatui = "0.30"
@@ -37,8 +40,10 @@ gix-index = { version = "0.51.0", features = ["sha1"] }
 rand = "0.10"
 regex = "1.12"
 toml = "0.9"
+toml_edit = "0.23"
+yaml-edit = { version = "0.3.6", default-features = false }
 unicode-normalization = "0.1"
-tempfile = { version = "3.27", optional = true }
+tempfile = "3.27"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 openssl = { version = "0.10", features = ["vendored"] }
@@ -49,7 +54,7 @@ winreg = "0.55"
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Environment", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
 
 [features]
-test-support = ["dep:tempfile"]
+test-support = []
 keyring = ["dep:keyring"]
 
 [dev-dependencies]

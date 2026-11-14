@@ -73,6 +73,21 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://usegitai.com
 </tr>
 </table>
 
+The DCC fork installs file-edit hooks for [Qoder CLI](https://docs.qoder.com/cli/hooks)
+and [Qoder IDE](https://docs.qoder.com/extensions/hooks),
+[Hermes Agent](https://hermes-agent.nousresearch.com/docs/user-guide/features/hooks#plugin-hooks),
+TRAE IDE ([China](https://docs.trae.cn/ide_hook-configuration-reference),
+[international](https://docs.trae.ai/ide/hook-configuration-reference?_lang=en)), and
+[Kimi Code](https://github.com/MoonshotAI/kimi-code/blob/main/docs/en/customization/hooks.md) when it detects them.
+Run `git-ai install` after setting up the agent. Restart Hermes to load its hook plugin.
+In TRAE, enable the global configuration under Settings → Hooks. The China edition
+uses `~/.trae-cn/hooks.json` and the international edition uses `~/.trae/hooks.json`.
+
+The hooks track local writes through the agents' file-edit tools. Use
+`git-ai show-prompt <id> --commit <sha>` to inspect the local conversation captured
+at an edit. TRAE exposes the submitted prompt and final reply through separate
+events, so the final reply becomes available to subsequent edit snapshots.
+
 
 ## Our Choices
 

@@ -81,11 +81,8 @@ impl CredentialStore {
 
     #[cfg(not(test))]
     fn default_production_path() -> PathBuf {
-        dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join(".git-ai")
-            .join("internal")
-            .join("credentials")
+        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+        crate::config::internal_dir_for_home(&home).join("credentials")
     }
 
     #[cfg(test)]
