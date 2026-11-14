@@ -39,6 +39,7 @@ fn append_installer_line(path: &Path, timestamp: &str, line: &str) -> std::io::R
 #[cfg(unix)]
 mod unix {
     use super::{append_installer_line, file_contains};
+    use crate::config::{BIN_DIR, GIT_AI_HOME_DIR};
     use crate::mdm::utils::{binary_exists, home_dir};
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -86,7 +87,8 @@ mod unix {
     }
 
     fn install_dir_string(home: &Path) -> String {
-        format!("{}/.git-ai/bin", home.display())
+        // Reuse the spelling already written to shell profiles, including HOME's trailing slash.
+        format!("{}/{GIT_AI_HOME_DIR}/{BIN_DIR}", home.display())
     }
 
     /// Detect all shells with existing config files, mirroring
@@ -701,6 +703,7 @@ mod unix {
 #[cfg(windows)]
 mod windows {
     use super::{append_installer_line, file_contains};
+    use crate::config::{BIN_DIR, GIT_AI_HOME_DIR, bin_dir_for_home};
     use crate::mdm::utils::home_dir;
     use std::path::{Path, PathBuf};
 
@@ -708,9 +711,6 @@ mod windows {
     const YELLOW: &str = "\x1b[0;33m";
     const RED: &str = "\x1b[0;31m";
     const NC: &str = "\x1b[0m";
-
-    /// Marker used by install.ps1 to detect an existing Git Bash PATH entry.
-    const GIT_BASH_MARKER: &str = ".git-ai/bin";
 
     pub(super) fn configure_shell_env() {
         let home = home_dir();
@@ -720,7 +720,7 @@ mod windows {
         if std::env::var("GIT_AI_SKIP_PATH_UPDATE").as_deref() == Ok("1") {
             eprintln!("{YELLOW}Skipping PATH updates because GIT_AI_SKIP_PATH_UPDATE=1{NC}");
         } else {
-            let install_dir = home.join(".git-ai").join("bin");
+            let install_dir = bin_dir_for_home(&home);
             match ensure_user_path_contains(&install_dir) {
                 UserPathStatus::Updated => {
                     println!("{GREEN}Successfully added git-ai to the user PATH.{NC}")
@@ -933,13 +933,18 @@ mod windows {
     }
 
     fn append_git_bash_path(target: &Path, timestamp: &str) -> std::io::Result<bool> {
-        if file_contains(target, GIT_BASH_MARKER.as_bytes()) {
+        let bin_path = format!("{GIT_AI_HOME_DIR}/{BIN_DIR}");
+        if file_contains(target, bin_path.as_bytes()) {
             return Ok(false);
         }
 
         // UTF-8 without BOM and LF line endings, matching install.ps1's
         // AppendAllText with UTF8Encoding($false) and `n.
-        append_installer_line(target, timestamp, "export PATH=\"$HOME/.git-ai/bin:$PATH\"")?;
+        append_installer_line(
+            target,
+            timestamp,
+            &format!("export PATH=\"$HOME/{bin_path}:$PATH\""),
+        )?;
         Ok(true)
     }
 

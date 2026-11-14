@@ -3,6 +3,9 @@
 set -euo pipefail
 IFS=$'\n\t'
 
+INSTALL_ROOT_NAME=".git-ai"
+EXECUTABLE_NAME="git-ai"
+
 # ============================================================
 # Ensure HOME is set when running via MDMs (e.g. JAMF) or other environments where HOME may be unbound.
 # ============================================================
@@ -191,7 +194,7 @@ case $OS in
 esac
 
 # Determine binary name
-BINARY_NAME="git-ai-${OS}-${ARCH}"
+BINARY_NAME="${EXECUTABLE_NAME}-${OS}-${ARCH}"
 
 # Determine release tag
 # Priority: 1. Local binary override, 2. Pinned version (for release builds), 3. Environment variable, 4. "latest"
@@ -212,14 +215,16 @@ else
     DOWNLOAD_URL="https://github.com/${REPO}/releases/latest/download/${BINARY_NAME}"
 fi
 
-# Install into the user's bin directory ~/.git-ai/bin
-INSTALL_DIR="$HOME/.git-ai/bin"
+INSTALL_ROOT="$HOME/$INSTALL_ROOT_NAME"
+INSTALL_DIR="$INSTALL_ROOT/bin"
+INSTALLED_BINARY="$INSTALL_DIR/$EXECUTABLE_NAME"
+LOCAL_LINK="$HOME/.local/bin/$EXECUTABLE_NAME"
 
 # Create directory if it doesn't exist
 mkdir -p "$INSTALL_DIR"
 
 # Download and install
-TMP_FILE="${INSTALL_DIR}/git-ai.tmp.$$"
+TMP_FILE="$INSTALLED_BINARY.tmp.$$"
 if [ -n "${GIT_AI_LOCAL_BINARY:-}" ]; then
     echo "Using local git-ai binary (release: ${RELEASE_TAG})..."
     if [ ! -f "$GIT_AI_LOCAL_BINARY" ]; then
@@ -243,35 +248,34 @@ fi
 # Verify checksum if embedded (release builds only)
 verify_checksum "$TMP_FILE" "$BINARY_NAME"
 
-mv -f "$TMP_FILE" "${INSTALL_DIR}/git-ai"
+mv -f "$TMP_FILE" "$INSTALLED_BINARY"
 
 # Make executable
-chmod +x "${INSTALL_DIR}/git-ai"
+chmod +x "$INSTALLED_BINARY"
 
 # Remove quarantine attribute on macOS
 if [ "$OS" = "macos" ]; then
-    xattr -d com.apple.quarantine "${INSTALL_DIR}/git-ai" 2>/dev/null || true
+    xattr -d com.apple.quarantine "$INSTALLED_BINARY" 2>/dev/null || true
 fi
 
-# Create ~/.local/bin/git-ai symlink for systems where ~/.local/bin is already on PATH
-LOCAL_BIN_DIR="$HOME/.local/bin"
-if mkdir -p "$LOCAL_BIN_DIR" 2>/dev/null && ln -sf "${INSTALL_DIR}/git-ai" "${LOCAL_BIN_DIR}/git-ai" 2>/dev/null; then
-    success "Created symlink at ${LOCAL_BIN_DIR}/git-ai"
+# Create a symlink for systems where ~/.local/bin is already on PATH
+if mkdir -p "${LOCAL_LINK%/*}" 2>/dev/null && ln -sf "$INSTALLED_BINARY" "$LOCAL_LINK" 2>/dev/null; then
+    success "Created symlink at $LOCAL_LINK"
 else
-    warn "Failed to create ~/.local/bin/git-ai symlink. This is non-fatal."
+    warn "Failed to create ~/.local/bin/$EXECUTABLE_NAME symlink. This is non-fatal."
 fi
 
 success "Successfully installed git-ai into ${INSTALL_DIR}"
-success "You can now run 'git-ai' from your terminal"
+success "You can now run '$EXECUTABLE_NAME' from your terminal"
 
 # Print installed version
-INSTALLED_VERSION=$(${INSTALL_DIR}/git-ai --version 2>&1 || echo "unknown")
+INSTALLED_VERSION=$($INSTALLED_BINARY --version 2>&1 || echo "unknown")
 echo "Installed git-ai ${INSTALLED_VERSION}"
 
 # Login user with install token if provided
 NEED_LOGIN=false
 if [ -n "${INSTALL_NONCE:-}" ] && [ -n "${API_BASE:-}" ]; then
-    if ! ${INSTALL_DIR}/git-ai exchange-nonce; then
+    if ! $INSTALLED_BINARY exchange-nonce; then
         NEED_LOGIN=true
     fi
 fi
@@ -280,15 +284,15 @@ echo "Setting up IDE/agent hooks..."
 # --env also adds git-ai to the PATH in all detected shell configurations;
 # GIT_AI_INSTALL_USER lets it hand ownership of any files it creates back to
 # the target user in root/MDM installs.
-if ! GIT_AI_INSTALL_USER="$INSTALL_USER" "${INSTALL_DIR}/git-ai" install-hooks --env; then
-    warn "Warning: Failed to set up IDE/agent hooks. Please try running 'git-ai install-hooks' manually."
+if ! GIT_AI_INSTALL_USER="$INSTALL_USER" "$INSTALLED_BINARY" install-hooks --env; then
+    warn "Warning: Failed to set up IDE/agent hooks. Please try running '$EXECUTABLE_NAME install-hooks' manually."
 else
     success "Successfully set up IDE/agent hooks"
 fi
 
 # Fix file ownership when running as root for a different user (MDM deployments)
 if [ "$(id -u)" = "0" ] && [ -n "$INSTALL_USER" ]; then
-    chown -R "$INSTALL_USER" "$HOME/.git-ai" 2>/dev/null || true
+    chown -R "$INSTALL_USER" "$INSTALL_ROOT" 2>/dev/null || true
 fi
 
 echo ""
@@ -298,5 +302,5 @@ echo -e "${YELLOW}Close and reopen your terminal and IDE sessions to use git-ai.
 if [ "$NEED_LOGIN" = true ]; then
     echo ""
     echo "Launching login..."
-    ${INSTALL_DIR}/git-ai login
+    $INSTALLED_BINARY login
 fi

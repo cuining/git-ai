@@ -260,9 +260,16 @@ fn stage_bundle(profile: &Path, version: &Version, binary: &Path) -> Result<Stri
     let binary = binary
         .to_str()
         .ok_or_else(|| GitAiError::Generic("git-ai executable path is not UTF-8".into()))?;
+    let definition_prefix = "const gitAi = ";
+    let definition = MODULE
+        .lines()
+        .find(|line| line.starts_with(definition_prefix))
+        .ok_or_else(|| {
+            GitAiError::Generic("missing executable definition in Harness plugin".into())
+        })?;
     let module = MODULE.replacen(
-        "const gitAi = 'git-ai'",
-        &format!("const gitAi = {}", serde_json::to_string(binary)?),
+        definition,
+        &format!("{definition_prefix}{}", serde_json::to_string(binary)?),
         1,
     );
     let mut digest = Sha256::new();

@@ -16,6 +16,31 @@ use crate::mdm::utils::home_dir;
 #[cfg(any(test, feature = "test-support"))]
 use std::sync::RwLock;
 
+pub(crate) const GIT_AI_HOME_DIR: &str = ".git-ai";
+pub(crate) const BIN_DIR: &str = "bin";
+pub(crate) const TMP_DIR: &str = "tmp";
+pub(crate) const INTERNAL_DIR: &str = "internal";
+pub(crate) const CONFIG_FILE_NAME: &str = "config.json";
+pub(crate) const UPDATE_CHECK_FILE_NAME: &str = "update_check";
+
+macro_rules! git_ai_bin_name {
+    () => {
+        "git-ai"
+    };
+}
+
+pub const GIT_AI_BIN_NAME: &str = git_ai_bin_name!();
+pub(crate) const GIT_AI_WINDOWS_BIN_NAME: &str = concat!(git_ai_bin_name!(), ".exe");
+pub(crate) const GIT_AI_EXE_NAME: &str = if cfg!(windows) {
+    GIT_AI_WINDOWS_BIN_NAME
+} else {
+    GIT_AI_BIN_NAME
+};
+
+pub fn is_git_ai_executable_name(name: &str) -> bool {
+    matches!(name, GIT_AI_BIN_NAME | GIT_AI_WINDOWS_BIN_NAME)
+}
+
 pub const DEFAULT_API_BASE_URL: &str =
     "https://dcc-service.intra.xiaojukeji.com/api/v1/ai-tracking";
 const COMPANY_REPOSITORY_PREFIX: &str = "https://git.xiaojukeji.com/";
@@ -1543,7 +1568,7 @@ fn resolve_git_path(file_cfg: &Option<FileConfig>) -> String {
          Please install Git or update your config JSON.",
         cfg_path = config_file_path()
             .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_else(|| "~/.git-ai/config.json".to_string()),
+            .unwrap_or_else(|| format!("~/{GIT_AI_HOME_DIR}/{CONFIG_FILE_NAME}")),
     );
     std::process::exit(1);
 }
@@ -1562,7 +1587,7 @@ fn parse_file_config_bytes(data: &[u8]) -> Result<FileConfig, serde_json::Error>
 }
 
 fn config_file_path() -> Option<PathBuf> {
-    Some(home_dir().join(".git-ai").join("config.json"))
+    git_ai_dir_path().map(|dir| dir.join(CONFIG_FILE_NAME))
 }
 
 /// Public accessor for config file path
@@ -1573,13 +1598,25 @@ pub fn config_file_path_public() -> Option<PathBuf> {
 
 /// Returns the path to the git-ai base directory (~/.git-ai)
 pub fn git_ai_dir_path() -> Option<PathBuf> {
-    Some(home_dir().join(".git-ai"))
+    Some(git_ai_dir_for_home(&home_dir()))
+}
+
+pub(crate) fn git_ai_dir_for_home(home: &Path) -> PathBuf {
+    home.join(GIT_AI_HOME_DIR)
+}
+
+pub(crate) fn bin_dir_for_home(home: &Path) -> PathBuf {
+    git_ai_dir_for_home(home).join(BIN_DIR)
 }
 
 /// Returns the path to the internal state directory (~/.git-ai/internal)
 /// This is where git-ai stores internal files like distinct_id, update_check, etc.
 pub fn internal_dir_path() -> Option<PathBuf> {
-    git_ai_dir_path().map(|dir| dir.join("internal"))
+    Some(internal_dir_for_home(&home_dir()))
+}
+
+pub(crate) fn internal_dir_for_home(home: &Path) -> PathBuf {
+    git_ai_dir_for_home(home).join(INTERNAL_DIR)
 }
 
 /// Returns the path to the skills directory (~/.git-ai/skills)
@@ -1635,7 +1672,7 @@ pub fn get_or_create_distinct_id() -> String {
 
 /// Returns the path to the update check cache file (~/.git-ai/internal/update_check)
 pub fn update_check_path() -> Option<PathBuf> {
-    internal_dir_path().map(|dir| dir.join("update_check"))
+    internal_dir_path().map(|dir| dir.join(UPDATE_CHECK_FILE_NAME))
 }
 
 /// Load the raw file config
@@ -1711,7 +1748,12 @@ fn path_is_git_ai_binary(path: &Path) -> bool {
         && let Some(name) = canonical.file_name().and_then(|n| n.to_str())
     {
         let stem = name.strip_suffix(".exe").unwrap_or(name);
-        if stem == "git-ai" || stem.starts_with("git-ai-") || stem.starts_with("git_ai") {
+        if stem == GIT_AI_BIN_NAME
+            || stem
+                .strip_prefix(GIT_AI_BIN_NAME)
+                .is_some_and(|suffix| suffix.starts_with('-'))
+            || stem.starts_with("git_ai")
+        {
             return true;
         }
     }
@@ -1725,10 +1767,7 @@ fn path_is_git_ai_binary(path: &Path) -> bool {
     // a real git binary legitimately coexists with a git-ai symlink (e.g.
     // Docker images that compile git from source into /usr/local/bin).
     if let Some(parent) = path.parent() {
-        #[cfg(windows)]
-        let sibling = parent.join("git-ai.exe");
-        #[cfg(not(windows))]
-        let sibling = parent.join("git-ai");
+        let sibling = parent.join(GIT_AI_EXE_NAME);
 
         #[cfg(windows)]
         if sibling.exists() {

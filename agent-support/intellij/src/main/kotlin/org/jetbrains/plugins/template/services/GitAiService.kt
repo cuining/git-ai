@@ -8,6 +8,9 @@ import org.jetbrains.plugins.template.model.KnownHumanInput
 import java.io.File
 import java.util.concurrent.TimeUnit
 
+internal const val GIT_AI_HOME_DIR = ".git-ai"
+private const val GIT_AI_BIN_NAME = "git-ai"
+
 /**
  * Application-level service that interacts with the git-ai CLI
  * to create checkpoints when AI agents make edits.
@@ -90,17 +93,11 @@ class GitAiService {
 
         // Known installation locations from install.sh/install.ps1/scripts/dev.sh
         // Nix dev path checked first so nix develop users can test local builds
-        val knownPaths = if (isWindows) {
-            listOf(
-                "$homeDir\\.git-ai-local-dev\\gitwrap\\bin\\git-ai.exe",  // Nix dev (nix develop shellHook)
-                "$homeDir\\.git-ai\\bin\\git-ai.exe"                      // Production + non-Nix dev (install.ps1 / dev.sh)
-            )
-        } else {
-            listOf(
-                "$homeDir/.git-ai-local-dev/gitwrap/bin/git-ai", // Nix dev (nix develop shellHook)
-                "$homeDir/.git-ai/bin/git-ai"                    // Production + non-Nix dev (install.sh / dev.sh)
-            )
-        }
+        val executable = if (isWindows) "$GIT_AI_BIN_NAME.exe" else GIT_AI_BIN_NAME
+        val knownPaths = listOf(
+            File(homeDir, ".git-ai-local-dev/gitwrap/bin/$executable").path,
+            File(homeDir, "$GIT_AI_HOME_DIR/bin/$executable").path
+        )
 
         lastSearchedPaths = knownPaths
 
@@ -127,9 +124,9 @@ class GitAiService {
         return try {
             val isWindows = System.getProperty("os.name").lowercase().contains("win")
             val command = if (isWindows) {
-                listOf("cmd", "/c", "where git-ai")
+                listOf("cmd", "/c", "where $GIT_AI_BIN_NAME")
             } else {
-                listOf("/bin/sh", "-l", "-c", "which git-ai")
+                listOf("/bin/sh", "-l", "-c", "which $GIT_AI_BIN_NAME")
             }
 
             val process = ProcessBuilder(command)

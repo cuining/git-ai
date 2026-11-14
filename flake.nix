@@ -11,6 +11,11 @@
   };
 
   outputs = { self, nixpkgs, rust-overlay, flake-utils }:
+    let
+      gitAiHomeDir = ".git-ai";
+      gitAiConfigName = "config.json";
+      gitAiBinName = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).package.default-run;
+    in
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs {
@@ -75,21 +80,22 @@
             homepage = "https://github.com/acunniffe/git-ai";
             license = licenses.gpl3Plus;
             maintainers = [ ];
-            mainProgram = "git-ai";
+            mainProgram = gitAiBinName;
             platforms = platforms.unix;
           };
         };
 
         # Wrapped version that sets up the git-ai environment properly
-        git-ai-wrapped = pkgs.writeShellScriptBin "git-ai" ''
-          # Ensure config directory exists
-          mkdir -p "$HOME/.git-ai"
+        git-ai-wrapped = pkgs.writeShellScriptBin gitAiBinName ''
+          config_dir="$HOME/${gitAiHomeDir}"
+          config_file="$config_dir/${gitAiConfigName}"
+          mkdir -p "$config_dir"
 
           # Create config.json if it doesn't exist
-          if [ ! -f "$HOME/.git-ai/config.json" ]; then
+          if [ ! -f "$config_file" ]; then
             # Find the system git (not our wrapper)
             GIT_PATH="${pkgs.git}/bin/git"
-            cat > "$HOME/.git-ai/config.json" <<EOF
+            cat > "$config_file" <<EOF
           {
             "git_path": "$GIT_PATH"
           }
@@ -97,21 +103,22 @@
           fi
 
           # Execute git-ai with all arguments
-          exec ${git-ai-unwrapped}/bin/git-ai "$@"
+          exec ${git-ai-unwrapped}/bin/${gitAiBinName} "$@"
         '';
 
         # Wrapper for git command that preserves argv[0] as "git"
         # This is critical: when symlinked as "git", the wrapper must set argv[0]
         # to "git" so the Rust binary routes to handle_git() instead of handle_git_ai()
         git-wrapper = pkgs.writeShellScriptBin "git" ''
-          # Ensure config directory exists
-          mkdir -p "$HOME/.git-ai"
+          config_dir="$HOME/${gitAiHomeDir}"
+          config_file="$config_dir/${gitAiConfigName}"
+          mkdir -p "$config_dir"
 
           # Create config.json if it doesn't exist
-          if [ ! -f "$HOME/.git-ai/config.json" ]; then
+          if [ ! -f "$config_file" ]; then
             # Find the system git (not our wrapper)
             GIT_PATH="${pkgs.git}/bin/git"
-            cat > "$HOME/.git-ai/config.json" <<EOF
+            cat > "$config_file" <<EOF
           {
             "git_path": "$GIT_PATH"
           }
@@ -120,7 +127,7 @@
 
           # Execute git-ai with argv[0] set to "git" to trigger passthrough mode
           # The -a flag ensures argv[0] is "git" regardless of the actual binary path
-          exec -a git ${git-ai-unwrapped}/bin/git-ai "$@"
+          exec -a git ${git-ai-unwrapped}/bin/${gitAiBinName} "$@"
         '';
 
         # Create git-og wrapper that bypasses git-ai and calls real git directly
@@ -203,7 +210,7 @@
             BUILD_TYPE="''${GIT_AI_BUILD_TYPE:-debug}"
             GITWRAP_DIR="$HOME/.git-ai-local-dev/gitwrap/bin"
             TARGET_DIR="''${CARGO_TARGET_DIR:-$(pwd)/target}"
-            BINARY="$TARGET_DIR/$BUILD_TYPE/git-ai"
+            BINARY="$TARGET_DIR/$BUILD_TYPE/${gitAiBinName}"
 
             mkdir -p "$GITWRAP_DIR"
 
@@ -220,7 +227,7 @@ GITEOF
             chmod +x "$GITWRAP_DIR/git"
 
             # Create git-ai wrapper
-            cat > "$GITWRAP_DIR/git-ai" <<GITAIEOF
+            cat > "$GITWRAP_DIR/${gitAiBinName}" <<GITAIEOF
 #!/bin/bash
 if [ ! -x "$BINARY" ]; then
   echo "git-ai: dev binary not found at $BINARY" >&2
@@ -229,7 +236,7 @@ if [ ! -x "$BINARY" ]; then
 fi
 exec "$BINARY" "\$@"
 GITAIEOF
-            chmod +x "$GITWRAP_DIR/git-ai"
+            chmod +x "$GITWRAP_DIR/${gitAiBinName}"
 
             # Create git-og wrapper (bypasses git-ai, calls real git directly)
             cat > "$GITWRAP_DIR/git-og" <<GITOGEOF
@@ -242,7 +249,7 @@ GITOGEOF
 
             # Install hooks if binary is already built
             if [ -x "$BINARY" ]; then
-              "$GITWRAP_DIR/git-ai" install-hooks 2>/dev/null || true
+              "$GITWRAP_DIR/${gitAiBinName}" install-hooks 2>/dev/null || true
             fi
 
             # Install lefthook git hooks (use real git, not the git-ai wrapper,
@@ -291,7 +298,7 @@ GITOGEOF
         # Make app available for `nix run`
         apps.default = flake-utils.lib.mkApp {
           drv = git-ai-package;
-          exePath = "/bin/git-ai";
+          exePath = "/bin/${gitAiBinName}";
         };
 
         # Nix flake checks: run with `nix flake check`
@@ -688,24 +695,24 @@ GITOGEOF
                   if [ -d "$user_home" ]; then
                     user=$(basename "$user_home")
 
-                    # Create config directory
-                    # Create config directory
-                    mkdir -p "$user_home/.git-ai"
-                    chown "$user" "$user_home/.git-ai" 2>/dev/null || true
+                    config_dir="$user_home/${gitAiHomeDir}"
+                    config_file="$config_dir/${gitAiConfigName}"
+                    mkdir -p "$config_dir"
+                    chown "$user" "$config_dir" 2>/dev/null || true
 
                     # Copy config.json from store (allows user to override later if needed)
                     # Only copy if the file doesn't exist or is a symlink (from previous Nix activation)
-                    if [ ! -f "$user_home/.git-ai/config.json" ] || [ -L "$user_home/.git-ai/config.json" ]; then
-                      cp -f ${configJsonFile} "$user_home/.git-ai/config.json"
-                      chmod 644 "$user_home/.git-ai/config.json"
-                      chown "$user" "$user_home/.git-ai/config.json" 2>/dev/null || true
+                    if [ ! -f "$config_file" ] || [ -L "$config_file" ]; then
+                      cp -f ${configJsonFile} "$config_file"
+                      chmod 644 "$config_file"
+                      chown "$user" "$config_file" 2>/dev/null || true
                     fi
 
                     # Install hooks (run as user if possible)
                     if command -v sudo >/dev/null 2>&1 && [ "$user" != "root" ]; then
-                      sudo -u "$user" ${cfg.package}/bin/git-ai install-hooks 2>/dev/null || true
+                      sudo -u "$user" ${cfg.package}/bin/${gitAiBinName} install-hooks 2>/dev/null || true
                     else
-                      ${cfg.package}/bin/git-ai install-hooks 2>/dev/null || true
+                      ${cfg.package}/bin/${gitAiBinName} install-hooks 2>/dev/null || true
                     fi
                   fi
                 done
@@ -1010,7 +1017,7 @@ GITOGEOF
             home.packages = [ cfg.package ];
 
             # Config file contains no secrets; served directly from the Nix store.
-            home.file.".git-ai/config.json" = {
+            home.file."${gitAiHomeDir}/${gitAiConfigName}" = {
               source = jsonFormat.generate "git-ai-config.json" configFile;
             };
 
@@ -1043,7 +1050,7 @@ GITOGEOF
             # Run install-hooks on activation
             home.activation.git-ai-install-hooks = mkIf cfg.installHooks (
               lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-                $DRY_RUN_CMD ${cfg.package}/bin/git-ai install-hooks || true
+                $DRY_RUN_CMD ${cfg.package}/bin/${gitAiBinName} install-hooks || true
               ''
             );
           };

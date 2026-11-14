@@ -7,9 +7,11 @@ if ($args.Count -gt 0 -and $args[0] -eq '--release') {
     $BuildType = 'release'
 }
 
-$InstallDir = Join-Path $HOME '.git-ai\bin'
-$ConfigPath = Join-Path $HOME '.git-ai\config.json'
-$GitAiExe = Join-Path $InstallDir 'git-ai.exe'
+$InstallRoot = Join-Path $HOME '.git-ai'
+$ExecutableFileName = 'git-ai.exe'
+$InstallDir = Join-Path $InstallRoot 'bin'
+$ConfigPath = Join-Path $InstallRoot 'config.json'
+$GitAiExe = Join-Path $InstallDir $ExecutableFileName
 $GitShim = Join-Path $InstallDir 'git.exe'
 
 function Test-FileAvailable {
@@ -125,7 +127,7 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Replace git-ai.exe, stopping the daemon first if it is running
 Write-Host "Installing binary to $GitAiExe..."
-Install-Binary -SrcPath "target\$BuildType\git-ai.exe" -DstPath $GitAiExe -GitAiExe $GitAiExe
+Install-Binary -SrcPath "target\$BuildType\$ExecutableFileName" -DstPath $GitAiExe -GitAiExe $GitAiExe
 
 # Keep the git.exe shim in sync with the updated binary
 if (Test-Path -LiteralPath $GitShim) {

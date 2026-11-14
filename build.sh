@@ -29,15 +29,16 @@ root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 source "$root/scripts/cargo-package-version.sh"
 platform="$1"
 output_dir="${2:-$root/output}"
-executable="git-ai"
+binary_name="$(cargo_package_field "$root/Cargo.toml" default-run)"
+extension=""
 
 case "$platform" in
     linux-x64) target="x86_64-unknown-linux-musl" ;;
     linux-arm64) target="aarch64-unknown-linux-musl" ;;
     macos-x64) target="x86_64-apple-darwin" ;;
     macos-arm64) target="aarch64-apple-darwin" ;;
-    windows-x64) target="x86_64-pc-windows-msvc"; executable="git-ai.exe" ;;
-    windows-arm64) target="aarch64-pc-windows-msvc"; executable="git-ai.exe" ;;
+    windows-x64) target="x86_64-pc-windows-msvc"; extension=".exe" ;;
+    windows-arm64) target="aarch64-pc-windows-msvc"; extension=".exe" ;;
     *)
         echo "Unsupported platform: $platform" >&2
         usage >&2
@@ -52,11 +53,11 @@ cache_dir="$(cd -- "$cache_dir" && pwd)/$target"
 
 (
     cd -- "$root"
-    cargo build --locked --release --bin git-ai --target "$target" --target-dir "$cache_dir"
+    cargo build --locked --release --bin "$binary_name" --target "$target" --target-dir "$cache_dir"
 )
 
-binary="$cache_dir/$target/release/$executable"
-artifact="$output_dir/git-ai-$platform${executable#git-ai}"
+binary="$cache_dir/$target/release/$binary_name$extension"
+artifact="$output_dir/$binary_name-$platform$extension"
 if [[ ! -f "$binary" || ! -s "$binary" ]]; then
     echo "Build did not produce a nonempty binary at $binary" >&2
     exit 1

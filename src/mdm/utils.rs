@@ -518,7 +518,7 @@ pub fn ensure_parent_dir(path: &Path) -> Result<(), GitAiError> {
 /// Check if a command is a git-ai checkpoint command
 pub fn is_git_ai_checkpoint_command(cmd: &str) -> bool {
     // Must contain "git-ai" and "checkpoint"
-    cmd.contains("git-ai") && cmd.contains("checkpoint")
+    cmd.contains(crate::config::GIT_AI_BIN_NAME) && cmd.contains("checkpoint")
 }
 
 /// Generate a diff between old and new content

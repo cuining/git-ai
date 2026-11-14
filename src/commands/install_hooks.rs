@@ -952,7 +952,7 @@ fn cleanup_legacy_envelope_logs() {
     let Some(home) = dirs::home_dir() else {
         return;
     };
-    let internal = home.join(".git-ai").join("internal");
+    let internal = crate::config::internal_dir_for_home(&home);
 
     // Remove the entire logs directory
     let logs_dir = internal.join("logs");

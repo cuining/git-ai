@@ -57,10 +57,9 @@ impl Hooks {
 }
 
 fn is_git_ai_executable(path: &str) -> bool {
-    matches!(
-        path.rsplit(['/', '\\']).next(),
-        Some("git-ai" | "git-ai.exe")
-    )
+    path.rsplit(['/', '\\'])
+        .next()
+        .is_some_and(crate::config::is_git_ai_executable_name)
 }
 
 impl FileHookInstaller {

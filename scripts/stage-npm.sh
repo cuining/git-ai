@@ -20,6 +20,7 @@ if [[ ! "$package_prefix" =~ $package_pattern ]]; then
 fi
 
 version="$(cargo_package_version "$root/Cargo.toml")"
+binary_name="$(cargo_package_field "$root/Cargo.toml" default-run)"
 packages=()
 while read -r package; do
     read -r artifact _ <<< "$package"
@@ -36,13 +37,13 @@ while read -r package; do
         exit 1
     fi
     packages+=("$package")
-done <<'ARTIFACTS'
-git-ai-linux-x64 linux x64 git-ai
-git-ai-linux-arm64 linux arm64 git-ai
-git-ai-macos-x64 darwin x64 git-ai
-git-ai-macos-arm64 darwin arm64 git-ai
-git-ai-windows-x64.exe win32 x64 git-ai.exe
-git-ai-windows-arm64.exe win32 arm64 git-ai.exe
+done <<ARTIFACTS
+$binary_name-linux-x64 linux x64 $binary_name
+$binary_name-linux-arm64 linux arm64 $binary_name
+$binary_name-macos-x64 darwin x64 $binary_name
+$binary_name-macos-arm64 darwin arm64 $binary_name
+$binary_name-windows-x64.exe win32 x64 $binary_name.exe
+$binary_name-windows-arm64.exe win32 arm64 $binary_name.exe
 ARTIFACTS
 
 if [[ "${#packages[@]}" -eq 0 ]]; then
@@ -61,8 +62,9 @@ for package in "${packages[@]}"; do
     read -r artifact os cpu executable <<< "$package"
     platform="$os-$cpu"
     package_dir="$output_dir/$platform"
-    mkdir -p "$package_dir/bin"
-    install -m 755 "$release_dir/$artifact" "$package_dir/bin/$executable"
+    binary_path="bin/$executable"
+    mkdir -p "$package_dir/${binary_path%/*}"
+    install -m 755 "$release_dir/$artifact" "$package_dir/$binary_path"
     cp "$root/LICENSE" "$package_dir/LICENSE"
     cat > "$package_dir/package.json" <<MANIFEST
 {
@@ -71,7 +73,7 @@ for package in "${packages[@]}"; do
   "license": "Apache-2.0",
   "os": ["$os"],
   "cpu": ["$cpu"],
-  "files": ["bin/$executable"]
+  "files": ["$binary_path"]
 }
 MANIFEST
     printf '%s\n' "$package_dir"

@@ -1,4 +1,15 @@
 import * as vscode from "vscode";
+import * as os from "node:os";
+import * as path from "node:path";
+
+const GIT_AI_HOME_DIR = ".git-ai";
+const INTERNAL_DIR = "internal";
+
+export const localPaths = {
+  config: () => path.join(os.homedir(), GIT_AI_HOME_DIR, "config.json"),
+  distinctId: () => path.join(os.homedir(), GIT_AI_HOME_DIR, INTERNAL_DIR, "distinct_id"),
+  vscodeIdeNames: () => path.join(os.homedir(), GIT_AI_HOME_DIR, "VSCODE_IDE_NAMES"),
+};
 
 export type BlameMode = 'off' | 'line' | 'all';
 

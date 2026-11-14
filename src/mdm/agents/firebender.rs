@@ -18,7 +18,8 @@ impl FirebenderInstaller {
 
     fn is_firebender_checkpoint_command(cmd: &str) -> bool {
         cmd.contains("checkpoint firebender")
-            && (cmd.contains("git-ai") || cmd.ends_with(FIREBENDER_CHECKPOINT_CMD))
+            && (cmd.contains(crate::config::GIT_AI_BIN_NAME)
+                || cmd.ends_with(FIREBENDER_CHECKPOINT_CMD))
     }
 }
 

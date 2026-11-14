@@ -215,7 +215,7 @@ class TelemetryService : Disposable {
     private fun isOssTelemetryDisabled(): Boolean {
         return try {
             val homeDir = System.getProperty("user.home")
-            val configFile = File(homeDir, ".git-ai/config.json")
+            val configFile = File(homeDir, "$GIT_AI_HOME_DIR/config.json")
             if (!configFile.exists()) return false
             val content = configFile.readText()
             val json = JsonParser.parseString(content).asJsonObject
@@ -228,7 +228,7 @@ class TelemetryService : Disposable {
     private fun readDistinctId(): String? {
         return try {
             val homeDir = System.getProperty("user.home")
-            val distinctIdFile = File(homeDir, ".git-ai/internal/distinct_id")
+            val distinctIdFile = File(homeDir, "$GIT_AI_HOME_DIR/internal/distinct_id")
             if (distinctIdFile.exists()) {
                 distinctIdFile.readText().trim().takeIf { it.isNotEmpty() }
             } else {

@@ -1,7 +1,7 @@
 mod npm_source;
 
 use crate::api::client::ApiContext;
-use crate::config::{self, UpdateChannel};
+use crate::config::{self, GIT_AI_BIN_NAME, UpdateChannel};
 use crate::observability::log_message;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -147,7 +147,7 @@ fn get_update_check_cache_path() -> Option<PathBuf> {
     #[cfg(test)]
     {
         if let Ok(test_cache_dir) = std::env::var("GIT_AI_TEST_CACHE_DIR") {
-            return Some(PathBuf::from(test_cache_dir).join("update_check"));
+            return Some(PathBuf::from(test_cache_dir).join(config::UPDATE_CHECK_FILE_NAME));
         }
     }
 
@@ -175,7 +175,7 @@ fn exit_if_invoked_via_git_extension() {
         std::env::var(ENV_BACKGROUND_UPGRADE_WORKER).as_deref() == Ok("1"),
     ) {
         eprintln!(
-            "error: `git ai upgrade` is not supported on Windows. Run `git-ai upgrade` instead."
+            "error: `git ai upgrade` is not supported on Windows. Run `{GIT_AI_BIN_NAME} upgrade` instead."
         );
         std::process::exit(1);
     }
@@ -527,7 +527,7 @@ fn try_mock_releases(base: &str, channel: UpdateChannel) -> Option<Result<Channe
 #[cfg(not(windows))]
 pub(crate) fn npm_installed_executable() -> Option<PathBuf> {
     npm_source::package_prefix()?;
-    config::git_ai_dir_path().map(|path| path.join("bin/git-ai"))
+    Some(config::bin_dir_for_home(&crate::mdm::utils::home_dir()).join(config::GIT_AI_EXE_NAME))
 }
 
 fn install_release(
@@ -576,10 +576,9 @@ fn run_install_script(
         // binary and shims are in use and need to be replaced. The installer will wait
         // for the files to be released before proceeding.
         let pid = std::process::id();
-        let log_dir = dirs::home_dir()
-            .ok_or_else(|| "Could not determine home directory".to_string())?
-            .join(".git-ai")
-            .join("upgrade-logs");
+        let home =
+            dirs::home_dir().ok_or_else(|| "Could not determine home directory".to_string())?;
+        let log_dir = config::git_ai_dir_for_home(&home).join("upgrade-logs");
 
         // Ensure the log directory exists
         fs::create_dir_all(&log_dir)
@@ -599,6 +598,8 @@ fn run_install_script(
             .map_err(|e| format!("Failed to create log file: {}", e))?;
 
         // PowerShell wrapper that executes the script file with logging
+        let installed_executable =
+            config::bin_dir_for_home(std::path::Path::new("")).join(config::GIT_AI_EXE_NAME);
         let ps_wrapper = format!(
             "$logFile = '{}'; \
              Start-Transcript -Path $logFile -Append -Force | Out-Null; \
@@ -612,7 +613,7 @@ fn run_install_script(
                   Write-Host \"Stack trace: $($_.ScriptStackTrace)\"; \
               }} finally {{ \
                   if ($env:{} -eq '1') {{ \
-                      $daemonExe = Join-Path $HOME '.git-ai\\bin\\git-ai.exe'; \
+                      $daemonExe = Join-Path $HOME '{}'; \
                       if (Test-Path $daemonExe) {{ try {{ & $daemonExe bg start *> $null }} catch {{ }} }} \
                   }}; \
                   Stop-Transcript | Out-Null; \
@@ -624,6 +625,7 @@ fn run_install_script(
             log_path_str.replace('\'', "''"),
             script_path_str.replace('\'', "''"),
             GIT_AI_RESTART_DAEMON_AFTER_INSTALL_ENV,
+            installed_executable.display(),
             script_path_str.replace('\'', "''")
         );
 
@@ -684,11 +686,14 @@ fn run_install_script(
         // Write script to ~/.git-ai/tmp/ to avoid /tmp noexec or permission issues.
         // Fall back to the system temp dir if the home-based path is unavailable.
         let temp_dir = crate::config::git_ai_dir_path()
-            .map(|p| p.join("tmp"))
+            .map(|p| p.join(config::TMP_DIR))
             .unwrap_or_else(std::env::temp_dir);
         fs::create_dir_all(&temp_dir)
             .map_err(|e| format!("Failed to create temp directory: {}", e))?;
-        let script_path = temp_dir.join(format!("git-ai-install-{}.sh", std::process::id()));
+        let script_path = temp_dir.join(format!(
+            "{GIT_AI_BIN_NAME}-install-{}.sh",
+            std::process::id()
+        ));
 
         // Write and make executable
         let mut file = fs::File::create(&script_path)
@@ -747,7 +752,7 @@ pub fn run_with_args(args: &[String]) {
             "--background" => background = true, // Undocumented flag for internal use when spawning background process
             _ => {
                 eprintln!("Unknown argument: {}", arg);
-                eprintln!("Usage: git-ai upgrade [--force]");
+                eprintln!("Usage: {GIT_AI_BIN_NAME} upgrade [--force]");
                 std::process::exit(1);
             }
         }
@@ -814,7 +819,7 @@ fn run_impl_with_url(
             println!("You are already on the latest version!");
             println!();
             println!("To reinstall anyway, run:");
-            println!("  \x1b[1;36mgit-ai upgrade --force\x1b[0m");
+            println!("  \x1b[1;36m{GIT_AI_BIN_NAME} upgrade --force\x1b[0m");
             return action;
         }
         UpgradeAction::RunningNewerVersion => {
@@ -822,7 +827,7 @@ fn run_impl_with_url(
             println!("(This usually means you're running a development build)");
             println!();
             println!("To reinstall the selected release anyway, run:");
-            println!("  \x1b[1;36mgit-ai upgrade --force\x1b[0m");
+            println!("  \x1b[1;36m{GIT_AI_BIN_NAME} upgrade --force\x1b[0m");
             return action;
         }
         UpgradeAction::ForceReinstall => {
@@ -896,7 +901,7 @@ fn print_cached_notice(cache: &UpdateCache) {
         current_version, available_version
     );
     eprintln!(
-        "\x1b[1;33mRun \x1b[1;36mgit-ai upgrade\x1b[0m \x1b[1;33mto upgrade to the latest version.\x1b[0m"
+        "\x1b[1;33mRun \x1b[1;36m{GIT_AI_BIN_NAME} upgrade\x1b[0m \x1b[1;33mto upgrade to the latest version.\x1b[0m"
     );
     eprintln!();
 }

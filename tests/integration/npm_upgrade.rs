@@ -135,6 +135,10 @@ fn npm_upgrade_installs_the_verified_binary_and_runs_hooks_without_npm() {
         binary
     );
     assert_eq!(
+        std::fs::read_link(repo.test_home_path().join(".local/bin/git-ai")).unwrap(),
+        repo.test_home_path().join(".git-ai/bin/git-ai")
+    );
+    assert_eq!(
         std::fs::read_to_string(repo.test_home_path().join("hook-installed")).unwrap(),
         "--env"
     );

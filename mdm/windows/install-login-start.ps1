@@ -15,9 +15,10 @@ $ErrorActionPreference = 'Stop'
 
 $TaskPath = '\GitAI\'
 $TaskName = 'Start bg at logon'
-$LauncherDir = Join-Path $HOME '.git-ai\login'
+$InstallRoot = Join-Path $HOME '.git-ai'
+$LauncherDir = Join-Path $InstallRoot 'login'
 $LauncherPath = Join-Path $LauncherDir 'start-bg.ps1'
-$DefaultBin = Join-Path $HOME '.git-ai\bin\git-ai.exe'
+$DefaultBin = Join-Path $InstallRoot 'bin\git-ai.exe'
 
 $Mode = 'install'
 $Start = $true

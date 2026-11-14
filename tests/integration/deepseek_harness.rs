@@ -18,6 +18,9 @@ fn deepseek_harness_headless_attributes_file_edits() {
     let root = workspace.path().canonicalize().unwrap();
     let repo = TestRepo::new_at_path(&root.join("repo-a"));
     let other = TestRepo::new_at_path(&root.join("repo-b"));
+    let remote = "https://git.xiaojukeji.com/fixture/deepseek-harness.git";
+    repo.git(&["remote", "add", "origin", remote]).unwrap();
+    other.git(&["remote", "add", "origin", remote]).unwrap();
     let initial = "Replace this line.\nAnchor one.\nAnchor two.\nAnchor three.\n";
     fs::write(repo.path().join("existing.txt"), initial).unwrap();
     repo.stage_all_and_commit("Baseline A").unwrap();
@@ -278,6 +281,13 @@ fn deepseek_harness_resumed_transcript_links_two_commits() {
     let workspace = tempfile::tempdir().unwrap();
     let root = workspace.path().canonicalize().unwrap();
     let repo = TestRepo::new_at_path(&root.join("project"));
+    repo.git(&[
+        "remote",
+        "add",
+        "origin",
+        "https://git.xiaojukeji.com/fixture/deepseek-harness.git",
+    ])
+    .unwrap();
     let harness = HeadlessHarness::new(&repo, root.clone(), cli);
     let mut server = mockito::Server::new();
     let _models = mock_models(&mut server);

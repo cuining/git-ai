@@ -1,4 +1,4 @@
-use crate::repos::test_repo::{DaemonTestScope, TestRepo};
+use crate::repos::test_repo::{DaemonTestScope, TestRepo, get_binary_path};
 use serde_json::{Value, json};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -280,6 +280,22 @@ fn deepseek_harness_install_official_cli_version_and_enablement() {
         assert_eq!(fs::read_to_string(&patch).unwrap(), user_patch);
 
         if before.is_none() {
+            let module = fs::read_to_string(
+                fixture
+                    .profile
+                    .join("node_modules")
+                    .join(PLUGIN)
+                    .join("index.mjs"),
+            )
+            .unwrap();
+            let executable = get_binary_path().canonicalize().unwrap();
+            let executable = serde_json::to_string(&executable.to_str().unwrap()).unwrap();
+            assert!(
+                module
+                    .lines()
+                    .any(|line| line == format!("const gitAi = {executable}"))
+            );
+
             assert!(
                 fixture
                     .install(&["uninstall", "--dry-run"])

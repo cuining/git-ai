@@ -1,19 +1,24 @@
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+$InstallRootName = '.git-ai'
+$ExecutableName = 'git-ai'
+$ExecutableFileName = "$ExecutableName.exe"
+$installDir = Join-Path (Join-Path $HOME $InstallRootName) 'bin'
+$finalExe = Join-Path $installDir $ExecutableFileName
+
 function Start-DaemonIfRequested {
     if ($env:GIT_AI_RESTART_DAEMON_AFTER_INSTALL -ne '1') {
         return
     }
 
-    $daemonExe = Join-Path $HOME '.git-ai\bin\git-ai.exe'
-    if (-not (Test-Path $daemonExe)) {
+    if (-not (Test-Path $finalExe)) {
         Write-Warning 'Warning: Failed to locate git-ai.exe for daemon restart after install.'
         return
     }
 
     try {
-        & $daemonExe bg start *> $null
+        & $finalExe bg start *> $null
     } catch {
         Write-Warning 'Warning: Failed to restart git-ai background service automatically.'
     }
@@ -97,7 +102,7 @@ function Get-GitAiManagedProcesses {
     )
 
     $targetPaths = @(
-        (Normalize-PathString (Join-Path $InstallDir 'git-ai.exe')),
+        (Normalize-PathString (Join-Path $InstallDir $ExecutableFileName)),
         (Normalize-PathString (Join-Path $InstallDir 'git.exe'))
     )
 
@@ -142,7 +147,7 @@ function Wait-ForFileAvailable {
     )
 
     $elapsed = 0
-    $gitAiExe = Join-Path $InstallDir 'git-ai.exe'
+    $gitAiExe = Join-Path $InstallDir $ExecutableFileName
 
     [void](Stop-GitAiBackgroundService -GitAiExe $gitAiExe)
 
@@ -262,7 +267,7 @@ if (-not $arch) { Write-ErrorAndExit "Unsupported architecture: $([System.Runtim
 $os = 'windows'
 
 # Determine binary name and download URLs
-$binaryName = "git-ai-$os-$arch"
+$binaryName = "$ExecutableName-$os-$arch"
 
 # Determine release tag
 # Priority: 1. Local binary override, 2. Pinned version (for release builds), 3. Environment variable, 4. "latest"
@@ -349,12 +354,10 @@ if ($isElevated -and $env:GIT_AI_ALLOW_SUPERUSER -ne '1') {
     $env:GIT_AI_ALLOW_SUPERUSER = '1'
 }
 
-# Install directory: %USERPROFILE%\.git-ai\bin
-$installDir = Join-Path $HOME ".git-ai\bin"
 New-Item -ItemType Directory -Force -Path $installDir | Out-Null
 
 Write-Host ("Downloading git-ai (release: {0})..." -f $releaseTag)
-$tmpFile = Join-Path $installDir "git-ai.tmp.$PID.exe"
+$tmpFile = Join-Path $installDir "$ExecutableName.tmp.$PID.exe"
 
 function Try-Download {
     param(
@@ -409,8 +412,6 @@ try {
 # Verify checksum if embedded (release builds only)
 Verify-Checksum -File $tmpFile -BinaryName $downloadedBinaryName
 
-$finalExe = Join-Path $installDir 'git-ai.exe'
-
 # Wait for git-ai.exe to be available if it exists and is in use
 if (Test-Path -LiteralPath $finalExe) {
     if (-not (Wait-ForFileAvailable -Path $finalExe -InstallDir $installDir -MaxWaitSeconds 300 -RetryIntervalSeconds 5)) {
@@ -452,7 +453,7 @@ try {
     & $finalExe install-hooks --env | Out-Host
     Write-Success 'Successfully set up IDE/agent hooks'
 } catch {
-    Write-Warning "Warning: Failed to set up IDE/agent hooks. Please try running 'git-ai install-hooks' manually."
+    Write-Warning "Warning: Failed to set up IDE/agent hooks. Please try running '$ExecutableName install-hooks' manually."
 }
 
 # Best-effort restart only for daemon-initiated self-updates.
@@ -476,7 +477,7 @@ if ($env:GIT_AI_SKIP_PATH_UPDATE -ne '1') {
 }
 
 Write-Success "Successfully installed git-ai into $installDir"
-Write-Success "You can now run 'git-ai' from your terminal"
+Write-Success "You can now run '$ExecutableName' from your terminal"
 
 Write-Host 'Close and reopen your terminal and IDE sessions to use git-ai.' -ForegroundColor Yellow
 

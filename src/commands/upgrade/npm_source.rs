@@ -128,17 +128,17 @@ pub(super) fn stage(package: &Package) -> Result<tempfile::TempDir, String> {
     verify_sha512(&bytes, &package.dist.integrity)?;
     let root = crate::config::git_ai_dir_path()
         .ok_or("Cannot locate git-ai home")?
-        .join("tmp");
+        .join(crate::config::TMP_DIR);
     fs::create_dir_all(&root).map_err(|err| err.to_string())?;
     let stage = tempfile::Builder::new()
         .prefix("npm-upgrade-")
         .tempdir_in(root)
         .map_err(|err| err.to_string())?;
-    let expected = if cfg!(windows) {
-        "package/bin/git-ai.exe"
-    } else {
-        "package/bin/git-ai"
-    };
+    let expected = format!(
+        "package/{}/{}",
+        crate::config::BIN_DIR,
+        crate::config::GIT_AI_EXE_NAME
+    );
     let mut archive = tar::Archive::new(
         GzDecoder::new(bytes.as_slice()).take(MAX_BINARY_BYTES + MAX_METADATA_BYTES),
     );
