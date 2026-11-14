@@ -1,0 +1,41 @@
+src/api/metrics.rs
+  s_e96cbec65ca421::t_089d36a88c9f83 3,5,7,10,19-26,180-212
+src/authorship/post_commit.rs
+  s_e96cbec65ca421::t_d888135b3a553e 1,14,19,177,185,190,229,558-566,571-575,583,589,1138,1151,1160,1182-1186,1233,1239,1296-1309
+src/authorship/rewrite.rs
+  s_e96cbec65ca421::t_b69dcfe16974b4 674
+src/commands/whoami.rs
+  s_07e2decaff4c53::t_7fb948d8f902e8 222-224,334,438
+src/config.rs
+  s_e96cbec65ca421::t_7a8529a74e8976 829
+src/metrics/db.rs
+  s_e96cbec65ca421::t_34186fca1dc664 30-41,587-594,604,763-766,768,770,2677
+src/metrics/dcc_adoption.rs
+  s_e96cbec65ca421::t_cd84603e7430d4 1-128
+tests/integration/metrics_retry_idle.rs
+  s_e96cbec65ca421::t_188cbc8ab6f733 169-175,187-193,196-197,203-207,209-213,216-223,242-243,246-250,254-260
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-dcc.19",
+  "base_commit_sha": "aff6ce4ac9702ed955072fb6014f88559c2572fb",
+  "prompts": {},
+  "sessions": {
+    "s_07e2decaff4c53": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1db5c-cd8e-7a90-bace-87bc038c333a",
+        "model": "unknown"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    },
+    "s_e96cbec65ca421": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1db1a-ea52-7092-9d90-88a0d8cc2e30",
+        "model": "unknown"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
