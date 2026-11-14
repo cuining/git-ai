@@ -1,0 +1,116 @@
+agent-support/intellij/src/main/kotlin/org/jetbrains/plugins/template/services/GitAiService.kt
+  h_e26e3d7eeaef56 11-13,96-100,127,129
+agent-support/intellij/src/main/kotlin/org/jetbrains/plugins/template/services/TelemetryService.kt
+  h_e26e3d7eeaef56 218,231
+agent-support/visualstudio/src/GitAiVS/Services/BinaryResolver.cs
+  h_e26e3d7eeaef56 20-21,80-85,104
+agent-support/vscode/src/extension.ts
+  h_e26e3d7eeaef56 7,14,23
+agent-support/vscode/src/utils/binary-path.ts
+  h_e26e3d7eeaef56 5-6,43,57,78
+agent-support/vscode/src/utils/config.ts
+  h_e26e3d7eeaef56 2-12
+agent-support/vscode/src/utils/host-kind.ts
+  h_e26e3d7eeaef56 4,29
+build.sh
+  h_e26e3d7eeaef56 32-33,40-41,56,59-60
+flake.nix
+  h_e26e3d7eeaef56 14-18,83,89-92,95,98,106,113-115,118,121,130,213,230,239,252,301,698-701,705-708,713,715,1020,1053
+install.ps1
+  h_e26e3d7eeaef56 4-9,15,21,105,150,270,360,456,480
+install.sh
+  h_e26e3d7eeaef56 6-8,197,218-221,227,251,254,258,261-263,265,269,272,278,287-288,295,305
+mdm/linux/install-login-start.sh
+  h_e26e3d7eeaef56 11,17,122-123
+mdm/macos/install-login-start.sh
+  h_e26e3d7eeaef56 15-16,121,136,142
+mdm/windows/install-login-start.ps1
+  h_e26e3d7eeaef56 18-19,21
+packaging/macos/build-pkg.sh
+  h_e26e3d7eeaef56 34-36,46,48-50
+packaging/macos/scripts/postinstall
+  h_e26e3d7eeaef56 9-11,32
+packaging/windows/build-msi.ps1
+  h_e26e3d7eeaef56 18-21,52-54
+packaging/windows/git-ai.wxs
+  h_e26e3d7eeaef56 22,24,28
+scripts/cargo-package-version.sh
+  h_e26e3d7eeaef56 2-9,15-16,19
+scripts/dev.ps1
+  h_e26e3d7eeaef56 10-14,130
+scripts/dev.sh
+  h_e26e3d7eeaef56 46-54,71-75,79
+scripts/stage-npm.sh
+  h_e26e3d7eeaef56 23,40-46,65-67,76
+src/auth/credentials.rs
+  h_e26e3d7eeaef56 84-85
+src/authorship/internal_db.rs
+  h_e26e3d7eeaef56 189
+src/ci/gitlab.rs
+  h_e26e3d7eeaef56 487-495
+src/ci/workflow_templates/gitlab.yaml
+  h_e26e3d7eeaef56 25,28
+src/commands/analyze/cube.rs
+  h_e26e3d7eeaef56 46-49
+src/commands/git_hook_handlers.rs
+  h_e26e3d7eeaef56 400-433,453
+src/commands/install_env.rs
+  h_e26e3d7eeaef56 42,90-91,706,723,936-937,943-947
+src/commands/install_hooks.rs
+  h_e26e3d7eeaef56 955
+src/commands/upgrade.rs
+  h_e26e3d7eeaef56 4,150,178,530,579-581,601-602,616,628,689,693-696,755,822,830,904
+src/commands/upgrade/npm_source.rs
+  h_e26e3d7eeaef56 131,137-141
+src/config.rs
+  h_e26e3d7eeaef56 19-43,1571,1590,1601-1609,1615-1619,1675,1751-1756,1770
+src/daemon.rs
+  h_e26e3d7eeaef56 94,96-98,359,362,364,373,375,388,403,408-412,456,2359,2379,2451
+src/daemon/bash_history_db.rs
+  h_e26e3d7eeaef56 250
+src/diagnostic_sentinels.rs
+  h_e26e3d7eeaef56 19
+src/diagnostics.rs
+  h_e26e3d7eeaef56 444-445,947,1375-1388
+src/main.rs
+  h_e26e3d7eeaef56 3,7,50,57,72
+src/mdm/agents/additional_hooks.rs
+  h_e26e3d7eeaef56 60-62
+src/mdm/agents/codex.rs
+  h_e26e3d7eeaef56 84-87
+src/mdm/agents/cursor.rs
+  h_e26e3d7eeaef56 31
+src/mdm/agents/deepseek_harness.rs
+  h_e26e3d7eeaef56 263-269,271-272
+src/mdm/agents/firebender.rs
+  h_e26e3d7eeaef56 21-22
+src/mdm/agents/github_copilot.rs
+  h_e26e3d7eeaef56 35
+src/mdm/utils.rs
+  h_e26e3d7eeaef56 521
+src/metrics/db.rs
+  h_e26e3d7eeaef56 284
+src/notes/db.rs
+  h_e26e3d7eeaef56 134
+src/utils.rs
+  h_e26e3d7eeaef56 18,267-268,277-278
+tests/integration/deepseek_harness.rs
+  h_e26e3d7eeaef56 21-23,284-290
+tests/integration/deepseek_harness_install.rs
+  h_e26e3d7eeaef56 1,283-298
+tests/integration/install_hooks_comprehensive.rs
+  h_e26e3d7eeaef56 333-347
+tests/integration/npm_upgrade.rs
+  h_e26e3d7eeaef56 137-140
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-dcc.19",
+  "base_commit_sha": "d501e53db7041ba303ab83fbd4b9e511671a1006",
+  "prompts": {},
+  "humans": {
+    "h_e26e3d7eeaef56": {
+      "author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
