@@ -1,0 +1,125 @@
+README.md
+  s_e96cbec65ca421::t_c85d7630dcdc8a 127-134
+src/authorship/commit_policy.rs
+  s_e96cbec65ca421::t_890bc348ff45a0 1-13
+src/git/commit_metadata.rs
+  s_e96cbec65ca421::t_890bc348ff45a0 1-6,8-57,61-73,76-91,93-107,109-112,116-132
+  s_e96cbec65ca421::t_2b8f3049def51c 58-60
+  s_e96cbec65ca421::t_c85d7630dcdc8a 74-75
+  s_e96cbec65ca421::t_e5860ec3023e9a 92,113-115
+  s_e96cbec65ca421::t_5fe49b5e978090 7
+  s_e96cbec65ca421::t_9e35a9ae9827ef 108
+  s_e96cbec65ca421::t_537783b56abc75 133-135
+  s_e96cbec65ca421::t_029c835a233d9e 136-137
+src/authorship/mod.rs
+  s_e96cbec65ca421::t_890bc348ff45a0 8
+src/daemon.rs
+  s_e96cbec65ca421::t_bb798323a2dea9 24,920-927,929-933,936-937,942-947,951-952,954,989,1032,2218,5605
+  s_e96cbec65ca421::t_2b8f3049def51c 919
+  s_e96cbec65ca421::t_895f417f739f52 938,940
+  s_e96cbec65ca421::t_75962a12e2ed85 897
+  s_e96cbec65ca421::t_b2ace06ed45c71 2
+  s_e96cbec65ca421::t_a434f8f4eeb35c 996-997,999-1001
+  s_e96cbec65ca421::t_bdb117e41ea70b 3
+  s_e96cbec65ca421::t_2aa9f43e7b2f00 7934-7936
+  s_e96cbec65ca421::t_e5860ec3023e9a 896,901-917,928,934-935,948-949,955-959,982,991,1057,2171,2180,2220,8149
+  s_e96cbec65ca421::t_bc3910debf0b54 8088,8090-8091
+  s_e96cbec65ca421::t_45ecc99ffddfcb 2166-2170
+  s_e96cbec65ca421::t_4ba1d270311cb0 25
+  s_e96cbec65ca421::t_cb87b8e96698c0 960-962
+  s_e96cbec65ca421::t_ca98ed3df00e9d 979-981
+  s_e96cbec65ca421::t_d4d9ea6f5ebc93 983-985
+  s_e96cbec65ca421::t_17300599c3c511 987-988
+  s_e96cbec65ca421::t_605b0caae554d4 990
+  s_e96cbec65ca421::t_b493617cea6c81 992-995
+  s_e96cbec65ca421::t_2dc5f1cb197c23 1002
+  s_e96cbec65ca421::t_f07a96456f718d 1033
+  s_e96cbec65ca421::t_6bcac2a19efd50 2172-2174,2177-2179
+  s_e96cbec65ca421::t_db3ce5c6790bb9 2181-2183
+  s_e96cbec65ca421::t_2299fb4585ba66 2219
+  s_e96cbec65ca421::t_a42d5aa6432776 2221-2223
+  s_e96cbec65ca421::t_90c93b5de98e91 7933
+  s_e96cbec65ca421::t_9ac7b0e333b8f7 7937-7939
+  s_e96cbec65ca421::t_71b4b0839e3f10 8089
+  s_e96cbec65ca421::t_7ddb527d1638ae 8092-8094
+  s_e96cbec65ca421::t_a0e6d66d8b6790 8146-8148
+  s_e96cbec65ca421::t_9acf016010aa14 15-17,878,899,963-972,974,976-977,1018-1020,1035,1040,1046,2175-2176,2184-2189,2224,2226-2228,5566-5567,5569,5571-5584,6148,6226,7274,7894-7910,7915-7921,7940,7992-7994,8004,8095-8107,8140,8145
+src/authorship/rewrite.rs
+  s_e96cbec65ca421::t_a434f8f4eeb35c 4,6,9,479-484,539-543,545,629-633,635,666,678-700,780-786,846
+  s_e96cbec65ca421::t_76e0ac59610c5b 767-769,773,845,847-851
+  s_e96cbec65ca421::t_f2095e854249dc 544
+  s_e96cbec65ca421::t_073d97ec76d54e 634
+src/authorship/rewrite_revert.rs
+  s_e96cbec65ca421::t_b2ace06ed45c71 47
+  s_e96cbec65ca421::t_cce18bb627afce 42-46,48-51
+  s_e96cbec65ca421::t_5a1354df95c524 13,29-30,36
+  s_e96cbec65ca421::t_8414c5da0b9f00 9,11,27
+  s_e96cbec65ca421::t_ab2fe34b48f9fc 10
+  s_e96cbec65ca421::t_2b57e70a33a67f 7
+tests/integration/no_count.rs
+  s_e96cbec65ca421::t_0876ec1397b750 241
+  s_e96cbec65ca421::t_63d2a5098d648c 251,281-284,286-289
+  s_e96cbec65ca421::t_577467d88b995f 16-19,62-65,71,83-91,94-97,122-124,126-130,247-250,252-278,290-302
+  s_e96cbec65ca421::t_dd8248cc237ad3 1-15,20-61,66-70,72-78,80-82,98-121,131-217,230-240,242-246,309
+  s_e96cbec65ca421::t_93ba2b38fd758c 218-223,225-229
+  s_e96cbec65ca421::t_17a0f49689d227 79
+  s_e96cbec65ca421::t_e8fcd11d6e846b 92-93
+  s_e96cbec65ca421::t_23972140b3eaa3 125
+  s_e96cbec65ca421::t_1b46103a7e25cf 224
+  s_e96cbec65ca421::t_af05dd7875a390 279-280
+  s_e96cbec65ca421::t_6afc412e18bf73 285
+  s_e96cbec65ca421::t_c48ec808d615d8 303-308
+src/authorship/post_commit.rs
+  s_e96cbec65ca421::t_715da43ae5ccba 178-179,181-186,200-201,208,210,213,216,221,572,709,1159
+  s_e96cbec65ca421::t_5630a00cce6e2d 225
+  s_e96cbec65ca421::t_3baf22eb83352d 692-702
+  s_e96cbec65ca421::t_3cb6bdefd4f128 12,180,217
+  s_e96cbec65ca421::t_866e642fa8c048 5
+  s_e96cbec65ca421::t_df68dfa1b796be 296,301-313,396,424-426,435,488,513-521,555,559-571,707
+  s_e96cbec65ca421::t_639bfb1a38c965 703-705
+  s_e96cbec65ca421::t_8d3a38868f9787 13-14
+  s_e96cbec65ca421::t_21ad7ccb8ea8cd 218-219
+  s_e96cbec65ca421::t_a035ca4f23e82a 222
+  s_e96cbec65ca421::t_24b7f68ea25a87 226
+  s_e96cbec65ca421::t_c795b154761908 300
+  s_e96cbec65ca421::t_fe3239218c90ac 573-575
+  s_e96cbec65ca421::t_69e9cb73ce14fe 706
+  s_e96cbec65ca421::t_803c6735cd2a4b 708
+  s_e96cbec65ca421::t_1a12565f878ab1 710-712
+  s_e96cbec65ca421::t_dbb9aa13ceb291 1158
+  s_e96cbec65ca421::t_8b00cbd520e0fd 1160-1162
+  s_e96cbec65ca421::t_bed1900c14635b 18,21,175,229-230,245-248,576-587,661,713-726,836,893-898,904,909-918,1134
+src/git/mod.rs
+  s_e96cbec65ca421::t_890bc348ff45a0 3
+src/authorship/stats.rs
+  s_e96cbec65ca421::t_76e0ac59610c5b 53
+  s_e96cbec65ca421::t_cce18bb627afce 2,5,7,78-89,110,116
+src/commands/git_handlers.rs
+  s_e96cbec65ca421::t_c85d7630dcdc8a 202,207,234-238
+  s_e96cbec65ca421::t_cc6f17934aa206 239-241,278
+src/authorship/virtual_attribution.rs
+  s_e96cbec65ca421::t_c7a2e931e99cf2 1389,2083-2089
+  s_e96cbec65ca421::t_3cb6bdefd4f128 45,48-49,1365,1385-1388,1390-1395,2072,2082,2090-2091
+  s_e96cbec65ca421::t_151a5fb3ffaade 2093-2095,2255,2269
+tests/integration/main.rs
+  s_e96cbec65ca421::t_dd8248cc237ad3 100
+src/authorship/attribution_recovery.rs
+  s_e96cbec65ca421::t_5fe49b5e978090 9,11,192,266,605,611,1967
+  s_e96cbec65ca421::t_866e642fa8c048 190
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-dcc.19",
+  "base_commit_sha": "0a5bc5874bad53e7bc27dc4986de827913262d2e",
+  "prompts": {},
+  "sessions": {
+    "s_e96cbec65ca421": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1db1a-ea52-7092-9d90-88a0d8cc2e30",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
