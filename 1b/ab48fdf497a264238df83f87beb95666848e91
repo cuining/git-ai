@@ -1,0 +1,19 @@
+tests/integration/rewrite_results.rs
+  s_e96cbec65ca421::t_d4f625ef13edba 1-252
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-dcc.19",
+  "base_commit_sha": "1bab48fdf497a264238df83f87beb95666848e91",
+  "prompts": {},
+  "sessions": {
+    "s_e96cbec65ca421": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1db1a-ea52-7092-9d90-88a0d8cc2e30",
+        "model": "unknown"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
