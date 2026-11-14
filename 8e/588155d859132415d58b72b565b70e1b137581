@@ -1,0 +1,14 @@
+packaging/README.md
+  h_e26e3d7eeaef56 47,50,54-55,60-61
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-dcc.19",
+  "base_commit_sha": "8e588155d859132415d58b72b565b70e1b137581",
+  "prompts": {},
+  "humans": {
+    "h_e26e3d7eeaef56": {
+      "author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
