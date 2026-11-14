@@ -1,0 +1,21 @@
+mdm/README.md
+  s_e23bf86cad936b::t_38c22b4d0dc0a5 14-17,39-40,70,81,94,105
+packaging/README.md
+  s_e23bf86cad936b::t_4792e805a10032 20-24,35-36,40-42
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-dcc.13",
+  "base_commit_sha": "8853f32315139841fa4765822ec77cd1d06aa3c9",
+  "prompts": {},
+  "sessions": {
+    "s_e23bf86cad936b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d02d-f6cc-74d3-b83c-bfaa1075f497",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}

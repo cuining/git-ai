@@ -1,0 +1,24 @@
+tests/integration/deepseek_harness_install.rs
+  s_e23bf86cad936b::t_055e3bef14965e 275,280-283,306,308,311-313,318-320
+  s_e23bf86cad936b::t_a0f52e78943e50 321
+agent-support/deepseek-harness/package.json
+  s_e23bf86cad936b::t_70e7185ce12e16 3
+agent-support/deepseek-harness/README.md
+  s_e23bf86cad936b::t_70e7185ce12e16 7,20,24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-dcc.13",
+  "base_commit_sha": "606ad2863a27a2f49baa0d0b2b2ee34e7a2f7c46",
+  "prompts": {},
+  "sessions": {
+    "s_e23bf86cad936b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d02d-f6cc-74d3-b83c-bfaa1075f497",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}

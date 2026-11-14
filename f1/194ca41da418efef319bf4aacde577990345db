@@ -1,0 +1,28 @@
+tests/integration/config_cli_coverage.rs
+  s_6c4eaea63ce0cc::t_1280c30a91f0c0 174-175,177-183,189-194
+  s_6c4eaea63ce0cc::t_6646de3358ba20 176
+  s_6c4eaea63ce0cc::t_b5f61e45e95b9a 184-188
+  s_6c4eaea63ce0cc::t_ed1cd923757eeb 173
+src/config.rs
+  s_6c4eaea63ce0cc::t_3ca4d37b28ee34 1045-1046
+Cargo.toml
+  s_6c4eaea63ce0cc::t_3ca4d37b28ee34 3
+Cargo.lock
+  s_6c4eaea63ce0cc::t_1baae25d6bdd60 1069
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-dcc.15",
+  "base_commit_sha": "f1194ca41da418efef319bf4aacde577990345db",
+  "prompts": {},
+  "sessions": {
+    "s_6c4eaea63ce0cc": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d430-18b9-7e11-af8f-c7c6edabf05a",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}

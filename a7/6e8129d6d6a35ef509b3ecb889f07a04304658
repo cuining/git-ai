@@ -1,0 +1,31 @@
+src/commands/upgrade/npm.rs
+  s_e23bf86cad936b::t_98cd592029118c 45
+src/commands/upgrade.rs
+  s_e23bf86cad936b::t_98cd592029118c 1
+packaging/windows/git-ai.wxs
+  s_e23bf86cad936b::t_6dc64808e60337 44
+src/commands/install_hooks.rs
+  s_e23bf86cad936b::t_98cd592029118c 361,420-424,908
+.github/workflows/release.yml
+  s_e23bf86cad936b::t_6dc64808e60337 549
+packaging/README.md
+  s_e23bf86cad936b::t_6dc64808e60337 93-96,110
+tests/integration/install_hooks_comprehensive.rs
+  s_e23bf86cad936b::t_8a38c4e1a5423a 381,384-396
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.7-dcc.14",
+  "base_commit_sha": "a76e8129d6d6a35ef509b3ecb889f07a04304658",
+  "prompts": {},
+  "sessions": {
+    "s_e23bf86cad936b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d02d-f6cc-74d3-b83c-bfaa1075f497",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}

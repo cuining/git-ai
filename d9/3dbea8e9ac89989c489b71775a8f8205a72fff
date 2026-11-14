@@ -1,0 +1,23 @@
+Cargo.toml
+  s_4e3459120d92b8::t_a51a9703e7f26b 3
+src/authorship/range_authorship.rs
+  s_4e3459120d92b8::t_413369441d2992 377,379
+Cargo.lock
+  s_4e3459120d92b8::t_754d1108898f6f 1069
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-dcc.15",
+  "base_commit_sha": "d93dbea8e9ac89989c489b71775a8f8205a72fff",
+  "prompts": {},
+  "sessions": {
+    "s_4e3459120d92b8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d4d7-6b23-7960-9f99-c61f0d030566",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}

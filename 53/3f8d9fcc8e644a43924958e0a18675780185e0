@@ -1,0 +1,14 @@
+tests/integration/usage_period.rs
+  h_e26e3d7eeaef56 353-356,364,366
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-dcc.17",
+  "base_commit_sha": "533f8d9fcc8e644a43924958e0a18675780185e0",
+  "prompts": {},
+  "humans": {
+    "h_e26e3d7eeaef56": {
+      "author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
