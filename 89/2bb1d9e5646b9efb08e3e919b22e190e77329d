@@ -1,0 +1,21 @@
+build.sh
+  s_4c8208988ccd0f::t_3bb6886dba8a7a 2-4,18-21,29-33,62,64-113,115-124,127-128,130-169,176,200-202,220-224
+  s_4c8208988ccd0f::t_f6b465d319175a 63,114,125-126,129,177
+  s_4c8208988ccd0f::t_d8fc01dc96e06e 203-219
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7",
+  "base_commit_sha": "892bb1d9e5646b9efb08e3e919b22e190e77329d",
+  "prompts": {},
+  "sessions": {
+    "s_4c8208988ccd0f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1dde0-1b32-7792-91d1-6c93dac1f25b",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "QA <qa@example.com>"
+    }
+  }
+}
