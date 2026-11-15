@@ -1,0 +1,21 @@
+tests/integration/repos/test_repo.rs
+  s_e96cbec65ca421::t_7eee8cbc642edb 2901-2914,2986-2990
+tests/integration/test_utils.rs
+  s_e96cbec65ca421::t_8178d1f1640f64 100-107,110,120-123,126,130
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7",
+  "base_commit_sha": "564e14df447aa07ed64fe150be89df93b5ba6a5d",
+  "prompts": {},
+  "sessions": {
+    "s_e96cbec65ca421": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1db1a-ea52-7092-9d90-88a0d8cc2e30",
+        "model": "unknown"
+      },
+      "human_author": "cuining <cuining@didiglobal.com>"
+    }
+  }
+}
