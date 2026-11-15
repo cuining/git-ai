@@ -1,0 +1,40 @@
+src/mdm/utils.rs
+  s_3a6ca9df478618::t_f869ae356289c9 515
+  s_3a6ca9df478618::t_7bf97e74242102 453-460,516-540
+src/mdm/agents/codex.rs
+  s_3a6ca9df478618::t_dc7177d0c122df 5-6,21,228,230-231,251-254,267-271,300,312-315,335,341,345,347-348,351-379,381,383-384,388-393,395-397,400,610-622,624-680,683-730,732-737,743,750,754,770-771,774,785-786,790-791,812,816,840-844,856-860,868,896-900,916-920,925,933-934,937-938,954-959,989-993,1009-1013,1018,1184-1189,1229-1234,1256-1261,1305-1310,1388-1392,1419-1423
+src/streams/agents/codex.rs
+  s_3a6ca9df478618::t_e13580b90b057e 4,9,15-20,63,104-107,113-123,129-135,143-151
+src/streams/agents/mod.rs
+  s_3a6ca9df478618::t_9c07fc1154670e 18
+src/streams/model_extraction.rs
+  s_3a6ca9df478618::t_a4eb38d9758376 234-238,247-253
+tests/integration/codex.rs
+  s_3a6ca9df478618::t_78795ed14619c9 15-166
+tests/integration/streams_e2e.rs
+  s_d102f98846c009::t_d0bc14d3cdb44b 790-879
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7",
+  "base_commit_sha": "e9a87b70e6ed1ae871ce1d8582ea1f0fc77af2c6",
+  "prompts": {},
+  "sessions": {
+    "s_3a6ca9df478618": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1de99-f009-7733-b246-87f012b9513b",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "QA <qa@example.com>"
+    },
+    "s_d102f98846c009": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1de79-a692-7d22-adce-6f4328b16444",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "QA <qa@example.com>"
+    }
+  }
+}
