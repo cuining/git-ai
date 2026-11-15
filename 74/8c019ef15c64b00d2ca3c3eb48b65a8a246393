@@ -1,0 +1,21 @@
+src/metrics/db.rs
+  s_9c53b2abcd3ae8::t_4153cc877b155d 18,35-44,109-114,1789,1887,1926,1969,2038,2097
+tests/integration/usage_period.rs
+  s_9c53b2abcd3ae8::t_1842335ad3a993 12,221-228,230,238,251-252,256-257,267-299,352-370
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.7",
+  "base_commit_sha": "748c019ef15c64b00d2ca3c3eb48b65a8a246393",
+  "prompts": {},
+  "sessions": {
+    "s_9c53b2abcd3ae8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1df1d-1ea8-7ac1-8a06-3687a76dbfc1",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "QA <qa@example.com>"
+    }
+  }
+}
