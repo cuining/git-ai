@@ -1,0 +1,24 @@
+src/metrics/db.rs
+  s_4c8208988ccd0f::t_31fa2611334583 1818,3194-3207
+  s_4c8208988ccd0f::t_7166b29ea5f09c 98-99,106-107,1019-1038,1042
+  s_4c8208988ccd0f::t_3a1b0a1e6ed916 3208-3209
+tests/integration/usage_period.rs
+  s_4c8208988ccd0f::t_31fa2611334583 236-241
+  s_4c8208988ccd0f::t_d71c281ff2cb7c 235
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7",
+  "base_commit_sha": "eb64b40305c2970eda3d93412dc4afbb650e0bf0",
+  "prompts": {},
+  "sessions": {
+    "s_4c8208988ccd0f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1dde0-1b32-7792-91d1-6c93dac1f25b",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Tester <test@example.com>"
+    }
+  }
+}
