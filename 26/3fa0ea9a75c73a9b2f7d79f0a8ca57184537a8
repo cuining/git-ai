@@ -1,0 +1,29 @@
+tests/integration/repos/test_repo.rs
+  s_3a6ca9df478618::t_a65e187b445c7d 195
+  s_3a6ca9df478618::t_e4205ece3c6844 196-200
+tests/integration/metrics_retry_idle.rs
+  s_3a6ca9df478618::t_aa5563336ef7d2 87,92
+  s_3a6ca9df478618::t_a65e187b445c7d 302,322-323
+  s_3a6ca9df478618::t_f68a5a263c0997 269,299-301,303
+  s_3a6ca9df478618::t_c24a19abc118d8 263-268,270-298,304-321,324-327
+tests/integration/usage_period.rs
+  s_3a6ca9df478618::t_a65e187b445c7d 165
+  s_3a6ca9df478618::t_57bf6d5483a99e 289
+  s_3a6ca9df478618::t_a31ae68e598d27 166-169,175-176,288,293
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-261115.9",
+  "base_commit_sha": "263fa0ea9a75c73a9b2f7d79f0a8ca57184537a8",
+  "prompts": {},
+  "sessions": {
+    "s_3a6ca9df478618": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1de99-f009-7733-b246-87f012b9513b",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "QA <qa@example.com>"
+    }
+  }
+}
