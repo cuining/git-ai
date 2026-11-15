@@ -1,0 +1,19 @@
+build.sh
+  s_15fbb863334e97::t_21d8e1f9ebf278 128-129
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-261115.10",
+  "base_commit_sha": "1149d39042b867ffa3ba043ba9f77a558191e3fd",
+  "prompts": {},
+  "sessions": {
+    "s_15fbb863334e97": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1df52-02c4-7130-bd9d-443f62a36c80",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "QA <qa@example.com>"
+    }
+  }
+}
