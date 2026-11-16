@@ -1,0 +1,26 @@
+src/authorship/stats.rs
+  s_68bc448afb3418::t_47bb3f926e17fd 610
+  s_68bc448afb3418::t_5767ccd18f6509 2,506,611-617,619
+src/authorship/authorship_log_serialization.rs
+  s_68bc448afb3418::t_06e85fe8497297 4,37-42,54-70
+src/commands/diff.rs
+  s_68bc448afb3418::t_fb22f1a4d8c1d4 2,1105-1118
+tests/integration/stats.rs
+  s_68bc448afb3418::t_05931df2923150 7,206-264
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-261116.16",
+  "base_commit_sha": "e9e656f66101c3ef3d853b96254e8773820d2a10",
+  "prompts": {},
+  "sessions": {
+    "s_68bc448afb3418": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e011-9964-7681-8e3d-ce026029eee7",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "QA <qa@example.com>"
+    }
+  }
+}
