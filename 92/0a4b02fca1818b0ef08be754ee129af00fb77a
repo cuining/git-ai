@@ -1,0 +1,30 @@
+Cargo.toml
+  s_eb67102c020205::t_96daa2fb7cb42c 46
+src/authorship/attribution_recovery.rs
+  s_eb67102c020205::t_96daa2fb7cb42c 9-10,15,20,387,394-399,1411-1467,1476-1485
+  s_eb67102c020205::t_c3c364a4e871ad 1468-1475
+  s_eb67102c020205::t_ee37e173d8a0b8 2043-2068
+  s_eb67102c020205::t_3eed9b75969887 1486,2042
+tests/integration/bash_attribution.rs
+  s_eb67102c020205::t_cc9ccf2cc31a3c 9,621-624,652-655,659-664,670-690,693-697
+  s_eb67102c020205::t_8f51258de60a15 625-651,656-658,691-692,698-704
+  s_eb67102c020205::t_c3c364a4e871ad 665-669
+Cargo.lock
+  s_eb67102c020205::t_eb8907dc15f622 1114
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-261116.16",
+  "base_commit_sha": "920a4b02fca1818b0ef08be754ee129af00fb77a",
+  "prompts": {},
+  "sessions": {
+    "s_eb67102c020205": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e287-96b6-76c0-b665-169fedee21f4",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "QA <qa@example.com>"
+    }
+  }
+}
