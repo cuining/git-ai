@@ -1,0 +1,24 @@
+src/authorship/ignore.rs
+  s_68bc448afb3418::t_49a2637149cac7 47,420-421,448,476
+tests/integration/diff_ignore_binary.rs
+  s_68bc448afb3418::t_49a2637149cac7 485,550-551,600
+tests/integration/usage_period.rs
+  s_68bc448afb3418::t_3de0854f1fd05f 356-430,449,464
+  s_68bc448afb3418::t_3fe70190002226 431-448,450-463,465-467
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-261116.16",
+  "base_commit_sha": "33e7920622c85ba05a27e125ef1196465d1aa671",
+  "prompts": {},
+  "sessions": {
+    "s_68bc448afb3418": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e011-9964-7681-8e3d-ce026029eee7",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "QA <qa@example.com>"
+    }
+  }
+}
