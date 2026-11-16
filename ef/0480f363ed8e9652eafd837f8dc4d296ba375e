@@ -1,0 +1,55 @@
+src/commands/checkpoint_agent/orchestrator.rs
+  s_68bc448afb3418::t_8521acda704c49 619
+  s_68bc448afb3418::t_c554af6153539f 616-618,640-643
+  s_68bc448afb3418::t_75883453924cad 607-610,615,621,639,644
+tests/integration/bash_attribution.rs
+  s_68bc448afb3418::t_2cb4029536fcc6 708-710,714,763-765,845-864
+  s_68bc448afb3418::t_1ac77a5845588f 792-796,810-812,820-834,836-839
+  s_68bc448afb3418::t_cb0b67f1c766ef 4,18,707,711-713,715-762,766-791,797-809,813-819,835,840-844,865-868
+  s_68bc448afb3418::t_2d4b6dba25f972 3
+  s_68bc448afb3418::t_db408a953aa864 869-870
+src/authorship/post_commit.rs
+  s_68bc448afb3418::t_94bd81134dbfd1 6,95-96,105-106,110-112,417,429,772,887,897
+  s_68bc448afb3418::t_cc6dcbdd19917e 16-18,761
+  s_68bc448afb3418::t_58bdd9329df243 20,97-99,103-104,107-109
+  s_68bc448afb3418::t_2bfe4a3f2779a7 418-419,483-487,510-514,888-889,930-934,944-948
+  s_68bc448afb3418::t_e3419df6ba866c 758-760,762-771,917,922
+  s_68bc448afb3418::t_c554af6153539f 100-102
+  s_68bc448afb3418::t_efeb920b1f9d5b 773
+src/authorship/virtual_attribution.rs
+  s_68bc448afb3418::t_cc6dcbdd19917e 48-49,2067,2208
+  s_68bc448afb3418::t_2bfe4a3f2779a7 2095-2097,2136-2141,2144-2147,2282-2296,2543-2548,2808-2813
+  s_68bc448afb3418::t_e3419df6ba866c 2542,2549
+  s_68bc448afb3418::t_274deef4c6e95d 45,2065-2066,2086,2093-2094,2098-2103,2119-2135,2142-2143,2148-2151,2183
+src/authorship/attribution_recovery.rs
+  s_68bc448afb3418::t_58bdd9329df243 389,396-408,419-424,1504,1510
+  s_68bc448afb3418::t_c554af6153539f 426
+  s_68bc448afb3418::t_8521acda704c49 6-8,418
+src/commands/checkpoint_agent/bash_tool.rs
+  s_68bc448afb3418::t_75883453924cad 33-35
+  s_68bc448afb3418::t_e262bba12394d6 42
+  s_68bc448afb3418::t_8521acda704c49 54
+  s_68bc448afb3418::t_d01bfa5e94d8d5 17,19,21-22,25-32,36-41,43-53,55-57
+  s_68bc448afb3418::t_c2e4ed21b91721 58
+tests/integration/codex.rs
+  s_68bc448afb3418::t_2cb4029536fcc6 1319-1322,1335,1354
+  s_68bc448afb3418::t_d245715e0bfd54 1292-1304,1701
+src/authorship/conflict_resolution.rs
+  s_68bc448afb3418::t_94bd81134dbfd1 13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-261116.16",
+  "base_commit_sha": "ef0480f363ed8e9652eafd837f8dc4d296ba375e",
+  "prompts": {},
+  "sessions": {
+    "s_68bc448afb3418": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e011-9964-7681-8e3d-ce026029eee7",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "QA <qa@example.com>"
+    }
+  }
+}
