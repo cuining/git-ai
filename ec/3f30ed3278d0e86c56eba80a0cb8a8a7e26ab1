@@ -1,0 +1,26 @@
+src/authorship/stats.rs
+  s_68bc448afb3418::t_7a8bff758cb987 6,53,78,91
+tests/integration/stats.rs
+  s_68bc448afb3418::t_654c4cd954b221 246-248,251-254
+  s_68bc448afb3418::t_7a8bff758cb987 122,200-201,308
+  s_68bc448afb3418::t_09382937bd79ab 207-245,249-250,255-263
+  s_68bc448afb3418::t_15eb11b2d8c546 206
+src/commands/diff.rs
+  s_68bc448afb3418::t_df04dc5b5b2c69 4,495,521,856-857,859,1861-1877,1884-1897,1900-1901,1904,1906-1918,1922-1925,1927-1928,1939,1965-1966
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-261116.16",
+  "base_commit_sha": "ec3f30ed3278d0e86c56eba80a0cb8a8a7e26ab1",
+  "prompts": {},
+  "sessions": {
+    "s_68bc448afb3418": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e011-9964-7681-8e3d-ce026029eee7",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "QA <qa@example.com>"
+    }
+  }
+}
