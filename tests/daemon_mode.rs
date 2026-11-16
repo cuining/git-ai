@@ -6360,6 +6360,7 @@ fn daemon_memory_threshold_logs_uploads_and_aborts_without_draining() {
                 "GIT_AI_TEST_DELAY_CHECKPOINT_ADMISSION",
                 "memory-limit-checkpoint=10000",
             ),
+            ("GIT_AI_DAEMON_LOG_UPLOAD", "true"),
             ("GIT_AI_API_BASE_URL", mock_api.base_url()),
             ("GIT_AI_API_KEY", "test-api-key"),
         ],
@@ -8478,6 +8479,7 @@ fn daemon_debug_logging_does_not_reupload_ureq_logs() {
     let mut mock_api = MockApiServer::start();
     let repo = TestRepo::new_with_daemon_env(&[
         ("RUST_LOG", "debug"),
+        ("GIT_AI_DAEMON_LOG_UPLOAD", "true"),
         ("GIT_AI_API_BASE_URL", mock_api.base_url()),
         ("GIT_AI_API_KEY", "test-api-key"),
     ]);
@@ -8706,7 +8708,7 @@ fn daemon_repository_allowlist_covers_attribution_and_metrics() {
         .daemon_home_path()
         .join(".git-ai/internal/bash-checkpoints-db");
     let bash_records: i64 = if bash_db_path.exists() {
-        rusqlite::Connection::open_with_flags(
+        git_ai::sqlite::open_with_flags_and_memory_limits(
             bash_db_path,
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
         )

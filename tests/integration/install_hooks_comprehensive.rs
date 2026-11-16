@@ -689,18 +689,26 @@ fn npm_managed_default_install_keeps_codex_hooks_when_config_breaks() {
     stub_cursor(&repo, &mut install);
     let installed = install.output().unwrap();
     assert!(installed.status.success(), "{installed:?}");
-    assert!(codex_home.join("hooks.json").is_file());
-    assert!(
-        fs::read_to_string(codex_home.join("config.toml"))
-            .unwrap()
-            .contains("trusted_hash")
-    );
+    let hooks_path = codex_home.join("hooks.json");
+    let original_hooks = fs::read_to_string(&hooks_path).unwrap();
+    let hooks: serde_json::Value = serde_json::from_str(&original_hooks).unwrap();
+    for event in ["PreToolUse", "PostToolUse", "Stop"] {
+        assert!(
+            hooks["hooks"][event][0]["hooks"][0]["command"]
+                .as_str()
+                .is_some_and(|command| command.ends_with("checkpoint codex --hook-input stdin")),
+            "{event} should run the Codex checkpoint"
+        );
+    }
+    let config_path = codex_home.join("config.toml");
+    let config: toml::Value = toml::from_str(&fs::read_to_string(&config_path).unwrap()).unwrap();
+    assert_eq!(config["features"]["hooks"].as_bool(), Some(true));
     assert!(
         repo.git_ai_with_env(&["install-hooks", "--unknown"], &env)
             .is_err()
     );
     let broken = "invalid = [";
-    fs::write(codex_home.join("config.toml"), broken).unwrap();
+    fs::write(&config_path, broken).unwrap();
     let mut failed_command =
         repo.git_ai_command_without_pre_sync_for_test(&["install-hooks"], &env);
     #[cfg(unix)]
@@ -708,10 +716,8 @@ fn npm_managed_default_install_keeps_codex_hooks_when_config_breaks() {
     let failed = failed_command.output().unwrap();
     assert!(failed.status.success(), "{failed:?}");
     assert!(String::from_utf8_lossy(&failed.stderr).contains("Failed to parse Codex config.toml"));
-    assert_eq!(
-        fs::read_to_string(codex_home.join("config.toml")).unwrap(),
-        broken
-    );
+    assert_eq!(fs::read_to_string(&config_path).unwrap(), broken);
+    assert_eq!(fs::read_to_string(&hooks_path).unwrap(), original_hooks);
 }
 
 #[cfg(unix)]

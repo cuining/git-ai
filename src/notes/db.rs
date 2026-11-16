@@ -667,7 +667,7 @@ mod tests {
 
     #[test]
     fn test_upgrade_preserves_pending_notes_without_guessing_their_repo() {
-        let conn = Connection::open_in_memory().unwrap();
+        let conn = crate::sqlite::open_with_memory_limits(":memory:").unwrap();
         conn.execute_batch(MIGRATIONS[0]).unwrap();
         conn.execute_batch(
             "CREATE TABLE schema_metadata (key TEXT PRIMARY KEY, value TEXT);

@@ -1,7 +1,7 @@
 use url::Url;
 
 /// Normalize repo URL to canonical HTTPS format
-/// Accepts: HTTPS, HTTP, SSH (scp-like [user@]host:path or ssh://), git:// URLs
+/// Accepts: HTTPS, HTTP, SSH (scp-like `[user@]host:path` or ssh://), git:// URLs
 /// Returns: Canonical HTTPS URL without credentials, .git suffix, or trailing slash
 pub fn normalize_repo_url(url_str: &str) -> Result<String, String> {
     let url_str = url_str.trim();
