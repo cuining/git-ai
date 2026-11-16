@@ -1,0 +1,66 @@
+src/commands/checkpoint_agent/bash_tool.rs
+  s_68bc448afb3418::t_0a54b73adc8a7b 326,722-723,1137-1139,1159-1173,1291-1293
+  s_68bc448afb3418::t_9eb066b3b5dc9b 261-262,267,592-600,719-721,724,1140,1145,1294,1299
+  s_c6887b8ebc7513::t_0c6016b7e1110c 591
+src/daemon/checkpoint.rs
+  s_c6887b8ebc7513::t_b7e118f234c471 183,458
+  s_c6887b8ebc7513::t_51442a5fb7ea15 457,459
+tests/integration/bash_attribution.rs
+  s_c6887b8ebc7513::t_51442a5fb7ea15 895-898,927-931
+  s_c6887b8ebc7513::t_3269e08e754864 1300,1351,1357,1363,1414,1421
+  s_68bc448afb3418::t_a4c6e710a5d6fa 121,147,168,179,370-374,788,796-799,801-804,806-807,815-879,886-894,899-925,936-1013
+  s_c6887b8ebc7513::t_8dd5d71bb6f8a8 789-795,800,805,809-814,926,932-935
+  s_68bc448afb3418::t_32c2f851126c9e 880-885
+  s_68bc448afb3418::t_46c8d59261213e 1014-1015
+  s_c6887b8ebc7513::t_ee1c0684daf108 808
+src/authorship/attribution_recovery.rs
+  s_c6887b8ebc7513::t_f4fd89ab390e86 456,460
+  s_c6887b8ebc7513::t_2ff00a6bb2d267 457-459,462-465
+  s_c6887b8ebc7513::t_6b22023f437bc9 467,480
+  s_c6887b8ebc7513::t_54fd57fd19438a 470,481,483
+  s_c6887b8ebc7513::t_aff63ba49e44af 454
+  s_c6887b8ebc7513::t_51442a5fb7ea15 485-489,578,582-585,587,589-591
+  s_c6887b8ebc7513::t_b7e118f234c471 569-571
+  s_c6887b8ebc7513::t_1ad2c8db9f5af7 5-7,16,27,211-224,386,425-426,439,451-453,455,461,466,468-469,471-479,482,484,490-493,495-496,552-568,572-577,579-581,586,588,592-593
+  s_c6887b8ebc7513::t_84f04256a40f0c 594-595
+src/authorship/working_log.rs
+  s_c6887b8ebc7513::t_2149b4fecb3370 127
+  s_c6887b8ebc7513::t_b7e118f234c471 126,128,164
+tests/integration/checkpoint_unit.rs
+  s_c6887b8ebc7513::t_b7e118f234c471 238,289,399,1287
+src/daemon.rs
+  s_c6887b8ebc7513::t_54fd57fd19438a 7894,7965
+  s_c6887b8ebc7513::t_b7e118f234c471 1072-1075,1130,1147,1234,6063,6071-6072,6430-6433,6442-6445
+  s_c6887b8ebc7513::t_caa0e2e852c43c 6037
+src/authorship/post_commit.rs
+  s_c6887b8ebc7513::t_1ad2c8db9f5af7 552,982
+  s_68bc448afb3418::t_39fe6aa94732a5 15,22,112-143,441-442,454,513,543,788,794-795,911-912,922,958,973
+src/authorship/virtual_attribution.rs
+  s_c6887b8ebc7513::t_1ad2c8db9f5af7 2004
+  s_68bc448afb3418::t_39fe6aa94732a5 8,46,49,2066,2068,2087,2094-2099,2101-2106,2108-2113,2131,2134,2154-2178,2235,2309,2317,2571,2573,2839
+  s_c6887b8ebc7513::t_2149b4fecb3370 2107,2141-2147,2149-2153
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-261116.23",
+  "base_commit_sha": "81932da46c00d958423442171863f6167842c7dc",
+  "prompts": {},
+  "sessions": {
+    "s_68bc448afb3418": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e011-9964-7681-8e3d-ce026029eee7",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "QA <qa@example.com>"
+    },
+    "s_c6887b8ebc7513": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e32e-eb39-7601-8c3f-e1b085b64815",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "QA <qa@example.com>"
+    }
+  }
+}
