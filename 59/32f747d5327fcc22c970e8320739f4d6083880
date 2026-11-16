@@ -1,0 +1,25 @@
+tests/integration/bash_attribution.rs
+  s_c6887b8ebc7513::t_41f3772a5e3062 439-454,456-466,472-517
+  s_c6887b8ebc7513::t_cb67e0abe99b5c 7-8,455,467-471
+  s_c6887b8ebc7513::t_43e467cfc2db20 9,518-519
+src/commands/checkpoint_agent/bash_tool.rs
+  s_c6887b8ebc7513::t_31cc1541d86f1d 261-263,514-515,579-580,711,757-759,762,765-776,778-780
+  s_c6887b8ebc7513::t_33053890b39a60 158-167,521,524,526
+  s_c6887b8ebc7513::t_70686acb1e98d9 777
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-261116.23",
+  "base_commit_sha": "5932f747d5327fcc22c970e8320739f4d6083880",
+  "prompts": {},
+  "sessions": {
+    "s_c6887b8ebc7513": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e32e-eb39-7601-8c3f-e1b085b64815",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "QA <qa@example.com>"
+    }
+  }
+}
