@@ -1,0 +1,25 @@
+src/notes/db.rs
+  s_fd87f7ef6d8704::t_c7c4f391dbe4d5 670
+src/repo_url.rs
+  s_fd87f7ef6d8704::t_c7c4f391dbe4d5 4
+tests/daemon_mode.rs
+  s_fd87f7ef6d8704::t_c7c4f391dbe4d5 6363,8482,8711
+tests/integration/install_hooks_comprehensive.rs
+  s_fd87f7ef6d8704::t_c7c4f391dbe4d5 692-705,711,719-720
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-261116.23",
+  "base_commit_sha": "7ef66ace1f1b245e62f5a9a8744e92ec24bf99df",
+  "prompts": {},
+  "sessions": {
+    "s_fd87f7ef6d8704": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e388-55d2-7a30-9135-36902106e9eb",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "QA <qa@example.com>"
+    }
+  }
+}
