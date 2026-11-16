@@ -1,0 +1,19 @@
+tests/integration/usage_period.rs
+  s_c6887b8ebc7513::t_a8d3040dcff716 685-686,694,781-783
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7-261116.23",
+  "base_commit_sha": "2691fed8b1709f5a819af591f92eaa0d7c022048",
+  "prompts": {},
+  "sessions": {
+    "s_c6887b8ebc7513": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e32e-eb39-7601-8c3f-e1b085b64815",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "QA <qa@example.com>"
+    }
+  }
+}
