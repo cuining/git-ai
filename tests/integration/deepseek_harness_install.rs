@@ -1,7 +1,8 @@
 #[cfg(target_os = "macos")]
 use crate::install_hooks_comprehensive::stub_cursor;
 use crate::repos::test_repo::{DaemonTestScope, TestRepo};
-use std::{fs, path::Path, process::Output};
+use std::time::{Duration, Instant};
+use std::{fs, path::Path, process::Command, process::Output};
 
 const PACKAGE: &str = "dsh-git-ai-attribution";
 const USER_PATCH: &str = "# Keep this comment\r\n- id: user-plugin\r\n  disabled: !!js false\r\n";
@@ -297,7 +298,7 @@ fn deepseek_harness_reinstall_refreshes_the_configured_executable() {
 }
 
 #[test]
-fn deepseek_harness_upgrades_the_previous_bundle_without_replacing_its_files() {
+fn deepseek_harness_npm_upgrade_refreshes_the_previous_bundle() {
     let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
     let home = repo.test_home_path().join("DSH home");
     let profile = home.join("profiles/desktop");
@@ -315,24 +316,61 @@ fn deepseek_harness_upgrades_the_previous_bundle_without_replacing_its_files() {
     fs::write(
         &patch,
         format!(
-            "{USER_PATCH}# BEGIN dsh-git-ai-attribution\r\n- insert:\r\n    - id: git-ai-attribution\r\n      name: '{previous_module}'\r\n# END dsh-git-ai-attribution\r\n"
+            "{USER_PATCH}# BEGIN dsh-git-ai-attribution\r\n- insert:\r\n    - id: git-ai-attribution\r\n      name: '{previous_module}'\r\n      config:\r\n        captureBash: true\r\n# END dsh-git-ai-attribution\r\n"
         ),
     )
     .unwrap();
 
-    assert_report(
-        run(&repo, Some(&home), &["install-hooks"]),
-        "DeepSeek Harness: Hooks updated",
-    );
-    let updated = fs::read_to_string(&patch).unwrap();
+    let staged = repo.git_ai_command_without_pre_sync_for_test(&[], &[]);
+    #[cfg(target_os = "macos")]
+    let mut upgrade = {
+        let mut command = Command::new("/bin/bash");
+        command.arg(concat!(env!("CARGO_MANIFEST_DIR"), "/install.sh"));
+        command
+    };
+    #[cfg(windows)]
+    let mut upgrade = {
+        let mut command = Command::new("powershell");
+        command
+            .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
+            .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/install.ps1"));
+        command
+    };
+    let output = upgrade
+        .envs(
+            staged
+                .get_envs()
+                .filter_map(|(key, value)| value.map(|value| (key, value))),
+        )
+        .env("GIT_AI_NPM_UPGRADE", "1")
+        .env("GIT_AI_LOCAL_BINARY", staged.get_program())
+        .env("GIT_AI_TEST_DSH_RESOURCES", "")
+        .env("DSH_HOME", &home)
+        .env_remove("GIT_AI_RESTART_DAEMON_AFTER_INSTALL")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+
     let version = serde_json::from_str::<serde_json::Value>(include_str!(
         "../../agent-support/deepseek-harness/package.json"
     ))
     .unwrap();
     let version = version["version"].as_str().unwrap();
     let module = format!("./local-plugins/{PACKAGE}/{version}/package/git-ai.mjs");
+    let started = Instant::now();
+    let updated = loop {
+        let actual = fs::read_to_string(&patch).unwrap();
+        if actual.contains(&format!("name: '{module}'")) {
+            break actual;
+        }
+        assert!(
+            started.elapsed() < Duration::from_secs(8),
+            "npm upgrade left the old plugin registered: {actual}"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    };
     assert!(updated.starts_with(USER_PATCH));
-    assert!(updated.contains(&format!("name: '{module}'")));
+    assert!(updated.contains("captureBash: true"));
     let installed_file = profile.join(module);
     assert_eq!(
         fs::read_to_string(&installed_file).unwrap(),
@@ -349,6 +387,43 @@ fn deepseek_harness_upgrades_the_previous_bundle_without_replacing_its_files() {
         fs::read_to_string(previous_manifest).unwrap(),
         previous_manifest_contents
     );
+}
+
+#[rstest::rstest]
+#[case::uninstalled("{}", USER_PATCH)]
+#[case::manual(
+    "{}",
+    "- insert:\r\n    - id: git-ai-attribution\r\n      name: ./my-copy.mjs\r\n"
+)]
+#[case::disabled(
+    r#"{"dependencies":{"dsh-git-ai-attribution":"file:local-plugins/dsh-git-ai-attribution/bundles/0.1.1.tgz"},"dsh":{"profile":{"bundles":[]}}}"#,
+    USER_PATCH
+)]
+fn deepseek_harness_upgrade_refresh_respects_plugin_selection(
+    #[case] manifest: &str,
+    #[case] patch: &str,
+) {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let home = repo.test_home_path().join("DSH home");
+    let profile = home.join("profiles/desktop");
+    fs::create_dir_all(&profile).unwrap();
+    fs::write(profile.join("package.json"), manifest).unwrap();
+    fs::write(profile.join("cordis.patch.yml"), patch).unwrap();
+
+    run(
+        &repo,
+        Some(&home),
+        &["install-hooks", "--refresh-managed-deepseek"],
+    );
+    assert_eq!(
+        fs::read_to_string(profile.join("package.json")).unwrap(),
+        manifest
+    );
+    assert_eq!(
+        fs::read_to_string(profile.join("cordis.patch.yml")).unwrap(),
+        patch
+    );
+    assert!(!profile.join("local-plugins").exists());
 }
 
 #[cfg(target_os = "macos")]

@@ -2,6 +2,7 @@ use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::TestRepo;
 use crate::test_utils::{
     codex_checkpoint, committed_metric_for_commit, extract_json_object, isolated_metrics_db_path,
+    sparse_str,
 };
 use chrono::{DateTime, Days, NaiveDate, Utc};
 use git_ai::metrics::PosEncoded;
@@ -252,6 +253,70 @@ fn usage_machine_reports_local_id1_lines_and_the_inclusive_day() {
             "pending_events": 0,
         })
     );
+}
+
+#[rstest::rstest]
+#[case::instead_of(true)]
+#[case::no_remote(false)]
+fn usage_machine_counts_real_commits_with_resolved_repository_identity(
+    #[case] company_alias: bool,
+) {
+    let (_metrics_dir, metrics_path) = isolated_metrics_db_path();
+    let repo = TestRepo::new_with_daemon_env(&[("GIT_AI_TEST_METRICS_DB_PATH", &metrics_path)]);
+    let host = "git.xiaojukeji.com";
+    if company_alias {
+        repo.git_og(&["remote", "add", "origin", "work:repo"])
+            .unwrap();
+        repo.git_og(&[
+            "config",
+            "url.https://git.xiaojukeji.com/team/.insteadOf",
+            "work:",
+        ])
+        .unwrap();
+        repo.git_ai(&[
+            "config",
+            "set",
+            "allow_repositories",
+            "https://git.xiaojukeji.com/*",
+        ])
+        .unwrap();
+    }
+
+    let path = repo.path().join("app.rs");
+    codex_checkpoint(&repo, &path, "usage-identity", "PreToolUse", "edit");
+    fs::write(&path, "fn main() {}\n").unwrap();
+    codex_checkpoint(&repo, &path, "usage-identity", "PostToolUse", "edit");
+    let commit = repo
+        .stage_all_and_commit("Record a local contribution")
+        .unwrap();
+    repo.filename("app.rs")
+        .assert_committed_lines(crate::lines!["fn main() {}".ai()]);
+
+    let event = committed_metric_for_commit(&metrics_path, &commit.commit_sha);
+    let date = DateTime::from_timestamp(i64::from(event.timestamp), 0)
+        .unwrap()
+        .date_naive();
+    let usage = usage_date_json(
+        &repo,
+        &metrics_path,
+        date.pred_opt().unwrap(),
+        date.succ_opt().unwrap(),
+        company_alias.then_some(host),
+    );
+    assert_eq!(usage["totals"]["commit_count"], 1, "{usage}");
+    assert_eq!(usage["totals"]["added_lines"], 1);
+    assert_eq!(usage["totals"]["ai_lines"], 1);
+    assert_eq!(usage["daily"][0]["ai_lines"], 1);
+    assert_eq!(usage["pending_events"], 0);
+    if company_alias {
+        assert_eq!(
+            usage["repos"][0]["repo"],
+            "https://git.xiaojukeji.com/team/repo"
+        );
+    } else {
+        let id = sparse_str(&event.attrs, attr_pos::LOCAL_REPO_ID).unwrap();
+        assert_eq!(usage["repos"][0]["repo"], format!("local:{id}"));
+    }
 }
 
 #[test]

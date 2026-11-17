@@ -353,6 +353,19 @@ pub fn run(args: &[String]) -> Result<HashMap<String, String>, GitAiError> {
     run_command(args, false)
 }
 
+pub(crate) fn refresh_managed_deepseek() -> Result<(), GitAiError> {
+    #[cfg(any(target_os = "macos", windows))]
+    {
+        let params = HookInstallerParams {
+            binary_path: get_current_binary_path()?,
+        };
+        if crate::mdm::agents::DeepSeekHarnessInstaller::refresh_managed(&params)?.is_some() {
+            println!("DeepSeek Harness hooks updated. Reopen Desktop to load the updated plugin.");
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn run_command(
     args: &[String],
     self_install: bool,

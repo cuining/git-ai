@@ -438,7 +438,18 @@ if (Test-Path -LiteralPath $gitShim) {
 }
 
 # The detached upgrade wrapper owns the daemon restart.
-if ($npmUpgrade) { exit 0 }
+if ($npmUpgrade) {
+    try {
+        $refreshLogs = Join-Path $HOME '.git-ai\upgrade-logs'
+        New-Item -ItemType Directory -Force -Path $refreshLogs | Out-Null
+        Start-Process -FilePath $finalExe -ArgumentList 'install-hooks', '--refresh-managed-deepseek' `
+            -WindowStyle Hidden -RedirectStandardOutput (Join-Path $refreshLogs 'deepseek-hooks.log') `
+            -RedirectStandardError (Join-Path $refreshLogs 'deepseek-hooks.err.log')
+    } catch {
+        Write-Warning "Could not start DeepSeek Harness hook refresh: $_"
+    }
+    exit 0
+}
 
 # Login user with install token if provided
 $needLogin = $false

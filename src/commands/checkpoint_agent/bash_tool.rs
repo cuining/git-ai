@@ -575,7 +575,7 @@ pub fn snapshot(
     let mut entries = HashMap::new();
 
     // Pass the git-ai ignore ruleset directly into the walker via filter_entry.
-    // This prunes entire ignored directories (node_modules/, target/, etc.)
+    // This prunes entire ignored directories (node_modules/, .next/, etc.)
     // before the walker descends into them — including directories that are in
     // default_ignore_patterns() but not yet in the repo's .gitignore (a common
     // case for node_modules that the user hasn't gitignored yet).

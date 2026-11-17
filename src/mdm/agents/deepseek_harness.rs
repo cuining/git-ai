@@ -734,6 +734,7 @@ fn prepare_install(
     profile: &Profile,
     params: &HookInstallerParams,
     desktop: Option<&Desktop>,
+    managed_only: bool,
 ) -> Result<Option<HookUpdate>, GitAiError> {
     let path = profile.patch_path();
     let original = read_patch(&path)?;
@@ -753,6 +754,11 @@ fn prepare_install(
     // A legacy insertion alongside a package record is an interrupted migration.
     let legacy = entry.as_ref().is_some_and(|entry| entry.module.is_some());
     let pending = entry.as_ref().is_some_and(|entry| entry.pending.is_some());
+    if managed_only
+        && !(bundle.selected() || (bundle == ProfileBundle::Absent && (legacy || pending)))
+    {
+        return Ok(None);
+    }
     let select = bundle == ProfileBundle::Absent || legacy || entry.is_none() || pending;
 
     let home_patch = profile.home.join(PATCH);
@@ -1010,6 +1016,31 @@ fn prepare_uninstall(
     }))
 }
 
+impl DeepSeekHarnessInstaller {
+    pub(crate) fn refresh_managed(
+        params: &HookInstallerParams,
+    ) -> Result<Option<String>, GitAiError> {
+        Self::install_profile(params, false, true)
+    }
+
+    fn install_profile(
+        params: &HookInstallerParams,
+        dry_run: bool,
+        managed_only: bool,
+    ) -> Result<Option<String>, GitAiError> {
+        let Some(profile) = Profile::find()? else {
+            return Ok(None);
+        };
+        let desktop = Desktop::find();
+        let plan = || prepare_install(&profile, params, desktop.as_ref(), managed_only);
+        let preview = plan()?;
+        if dry_run || preview.is_none() {
+            return Ok(preview.map(|update| update.diff));
+        }
+        apply_update(&profile, desktop.as_ref(), plan)
+    }
+}
+
 impl HookInstaller for DeepSeekHarnessInstaller {
     fn name(&self) -> &str {
         "DeepSeek Harness"
@@ -1028,7 +1059,10 @@ impl HookInstaller for DeepSeekHarnessInstaller {
         let desktop = Desktop::find();
         let (hooks_installed, hooks_up_to_date) = match &profile {
             Some(profile)
-                if matches!(prepare_install(profile, params, desktop.as_ref()), Ok(None)) =>
+                if matches!(
+                    prepare_install(profile, params, desktop.as_ref(), false),
+                    Ok(None)
+                ) =>
             {
                 (true, true)
             }
@@ -1055,16 +1089,7 @@ impl HookInstaller for DeepSeekHarnessInstaller {
         params: &HookInstallerParams,
         dry_run: bool,
     ) -> Result<Option<String>, GitAiError> {
-        let Some(profile) = Profile::find()? else {
-            return Ok(None);
-        };
-        let desktop = Desktop::find();
-        let plan = || prepare_install(&profile, params, desktop.as_ref());
-        let preview = plan()?;
-        if dry_run || preview.is_none() {
-            return Ok(preview.map(|update| update.diff));
-        }
-        apply_update(&profile, desktop.as_ref(), plan)
+        Self::install_profile(params, dry_run, false)
     }
 
     fn uninstall_hooks(

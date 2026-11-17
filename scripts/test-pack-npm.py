@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import unittest
 
 
@@ -86,12 +87,12 @@ class NpmPackageTests(unittest.TestCase):
                     self.assertEqual(package.getmember(f"package/bin/{binary}").mode, 0o755)
 
     @unittest.skipUnless(host_platform.system() in ("Darwin", "Linux"), "requires Bash")
-    def test_npm_upgrade_replaces_binary_without_running_first_install(self):
+    def test_npm_upgrade_replaces_binary_and_only_refreshes_managed_hooks_on_macos(self):
         home = self.root / "home"
         target = home / ".git-ai/bin/git-ai"
         target.parent.mkdir(parents=True)
         target.write_bytes(b"previous executable")
-        self.binary.write_bytes(b'#!/bin/sh\n: > "$HOME/installer-called-binary"\n')
+        self.binary.write_bytes(b'#!/bin/sh\nprintf "%s\\n" "$*" > "$HOME/installer-args"\n')
         result = subprocess.run(
             ["/bin/bash", str(self.root / "install.sh")],
             env={"HOME": str(home), "PATH": "/usr/bin:/bin", "SHELL": "/bin/bash",
@@ -102,7 +103,18 @@ class NpmPackageTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(target.read_bytes(), self.binary.read_bytes())
         self.assertTrue(os.access(target, os.X_OK))
-        self.assertFalse((home / "installer-called-binary").exists())
+        invocation = home / "installer-args"
+        if host_platform.system() == "Darwin":
+            deadline = time.monotonic() + 5
+            args = ""
+            while not args and time.monotonic() < deadline:
+                if invocation.exists():
+                    args = invocation.read_text().strip()
+                if not args:
+                    time.sleep(0.05)
+            self.assertEqual(args, "install-hooks --refresh-managed-deepseek")
+        else:
+            self.assertFalse(invocation.exists())
         self.assertFalse((home / ".local/bin/git-ai").exists())
 
     def test_existing_version_archive_is_not_overwritten(self):

@@ -38,6 +38,14 @@ pub fn handle_git_ai(args: &[String]) {
         return;
     }
 
+    if args == ["install-hooks", "--refresh-managed-deepseek"] {
+        if let Err(error) = commands::install_hooks::refresh_managed_deepseek() {
+            eprintln!("DeepSeek Harness hook refresh failed: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
     // Initialize the global telemetry handle so that observability and CAS
     // events are routed over the control socket instead of being written to
     // per-PID log files.

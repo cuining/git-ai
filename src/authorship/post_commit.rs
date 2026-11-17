@@ -14,6 +14,7 @@ use crate::config::Config;
 use crate::error::GitAiError;
 use crate::git::notes_api::write_note;
 use crate::git::repository::{Repository, batch_read_paths_at_treeishes, exec_git};
+use crate::metrics::attrs::MetricRepositoryIdentity;
 use std::collections::{HashMap, HashSet};
 use std::io::IsTerminal;
 
@@ -1110,18 +1111,11 @@ pub(crate) fn commit_metric_attrs(
     parent_sha: &str,
     human_author: &str,
 ) -> crate::metrics::EventAttributes {
-    let mut attrs = crate::metrics::EventAttributes::with_version(env!("CARGO_PKG_VERSION"))
+    let attrs = crate::metrics::EventAttributes::with_version(env!("CARGO_PKG_VERSION"))
         .author(human_author)
         .commit_sha(commit_sha)
         .base_commit_sha(parent_sha);
-
-    if let Ok(Some(remote_name)) = repo.get_default_remote()
-        && let Ok(remotes) = repo.remotes_with_urls()
-        && let Some((_, url)) = remotes.into_iter().find(|(n, _)| n == &remote_name)
-        && let Ok(normalized) = crate::repo_url::normalize_repo_url(&url)
-    {
-        attrs = attrs.repo_url(normalized);
-    }
+    let mut attrs = MetricRepositoryIdentity::from_repo(repo).apply_to(attrs);
 
     if let Ok(head_ref) = repo.head()
         && let Ok(short_branch) = head_ref.shorthand()

@@ -691,10 +691,17 @@ fn test_markdown_stats_formatting() {
 }
 
 #[test]
-fn test_stats_default_ignores_build_directories() {
+fn test_stats_counts_source_in_build_directories_and_ignores_marked_outputs() {
     let repo = TestRepo::new();
-    let mut source = repo.filename("src/build-tools/main.rs");
-    source.set_contents(crate::lines!["fn main() {}".ai()]);
+    let sources = [
+        "scripts/build/main.rs",
+        "src/out/main.rs",
+        "src/target/main.rs",
+    ];
+    for path in sources {
+        repo.filename(path)
+            .set_contents_no_stage(crate::lines!["fn main() {}".ai()]);
+    }
     let generated = [
         "dist/output.rs",
         "nested/build/output.rs",
@@ -705,20 +712,33 @@ fn test_stats_default_ignores_build_directories() {
         "out/output.rs",
         "nested/target/output.rs",
     ];
+    fs::write(
+        repo.path().join(".git-ai-ignore"),
+        "nested/build/output.rs\nout/output.rs\nnested/target/output.rs\n",
+    )
+    .unwrap();
     for path in generated {
         repo.filename(path)
-            .set_contents(crate::lines!["generated".unattributed_human()]);
+            .set_contents_no_stage(crate::lines!["generated".unattributed_human()]);
     }
-    repo.stage_all_and_commit("Add source and build outputs")
-        .unwrap();
-    source.assert_committed_lines(crate::lines!["fn main() {}".ai()]);
+    let stage: Vec<_> = ["add", "--"]
+        .into_iter()
+        .chain(sources)
+        .chain(generated)
+        .collect();
+    repo.git(&stage).unwrap();
+    repo.commit("Add source and build outputs").unwrap();
+    for path in sources {
+        repo.filename(path)
+            .assert_committed_lines(crate::lines!["fn main() {}".ai()]);
+    }
     for path in generated {
         repo.filename(path)
             .assert_committed_lines(crate::lines!["generated".unattributed_human()]);
     }
 
     let stats = stats_from_args(&repo, &["stats", "HEAD", "--json"]);
-    assert_eq!((stats.git_diff_added_lines, stats.ai_additions), (1, 1));
+    assert_eq!((stats.git_diff_added_lines, stats.ai_additions), (3, 3));
 }
 
 #[test]
