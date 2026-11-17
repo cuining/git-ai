@@ -691,6 +691,37 @@ fn test_markdown_stats_formatting() {
 }
 
 #[test]
+fn test_stats_default_ignores_build_directories() {
+    let repo = TestRepo::new();
+    let mut source = repo.filename("src/build-tools/main.rs");
+    source.set_contents(crate::lines!["fn main() {}".ai()]);
+    let generated = [
+        "dist/output.rs",
+        "nested/build/output.rs",
+        "coverage/output.rs",
+        "nested/__pycache__/output.rs",
+        ".next/output.rs",
+        "nested/.nuxt/output.rs",
+        "out/output.rs",
+        "nested/target/output.rs",
+    ];
+    for path in generated {
+        repo.filename(path)
+            .set_contents(crate::lines!["generated".unattributed_human()]);
+    }
+    repo.stage_all_and_commit("Add source and build outputs")
+        .unwrap();
+    source.assert_committed_lines(crate::lines!["fn main() {}".ai()]);
+    for path in generated {
+        repo.filename(path)
+            .assert_committed_lines(crate::lines!["generated".unattributed_human()]);
+    }
+
+    let stats = stats_from_args(&repo, &["stats", "HEAD", "--json"]);
+    assert_eq!((stats.git_diff_added_lines, stats.ai_additions), (1, 1));
+}
+
+#[test]
 fn test_stats_default_ignores_snapshot_files() {
     let repo = TestRepo::new();
     repo.filename("README.md")

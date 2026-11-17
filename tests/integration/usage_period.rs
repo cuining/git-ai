@@ -1,13 +1,16 @@
 use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::TestRepo;
-use crate::test_utils::{extract_json_object, isolated_metrics_db_path};
-use chrono::{Days, NaiveDate, Utc};
+use crate::test_utils::{
+    codex_checkpoint, committed_metric_for_commit, extract_json_object, isolated_metrics_db_path,
+};
+use chrono::{DateTime, Days, NaiveDate, Utc};
 use git_ai::metrics::PosEncoded;
 use git_ai::metrics::attrs::{EventAttributes, attr_pos};
 use git_ai::metrics::db::MetricsDatabase;
-use git_ai::metrics::events::CommittedValues;
+use git_ai::metrics::events::{CommittedValues, committed_pos};
 use git_ai::metrics::types::MetricEvent;
 use serde_json::{Value, json};
+use std::fs;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -249,6 +252,169 @@ fn usage_machine_reports_local_id1_lines_and_the_inclusive_day() {
             "pending_events": 0,
         })
     );
+}
+
+#[test]
+fn usage_machine_breaks_down_company_additions_by_file_category() {
+    let (_metrics_db_dir, metrics_db_path) = isolated_metrics_db_path();
+    let repo =
+        TestRepo::new_with_daemon_env(&[("GIT_AI_TEST_METRICS_DB_PATH", metrics_db_path.as_str())]);
+    let remote = "https://git.xiaojukeji.com/company/usage";
+    let test_path = repo.path().join("test/app.test.ts");
+    fs::create_dir_all(test_path.parent().unwrap()).unwrap();
+    fs::write(&test_path, "// baseline\n").unwrap();
+    repo.stage_all_and_commit("Initial commit").unwrap();
+    repo.filename("test/app.test.ts")
+        .assert_committed_lines(crate::lines!["// baseline".unattributed_human()]);
+    repo.git(&["remote", "add", "origin", remote]).unwrap();
+    for (path, contents) in [
+        ("src/app.ts", "const ready = true;\n"),
+        ("test/setup.test.ts", "// untracked test setup\n"),
+        ("src/generated/client.ts", "export const client = 1;\n"),
+        ("src/generated/README.md", "# Client documentation\n"),
+        ("src/config.json", "{}\n"),
+    ] {
+        let path = repo.path().join(path);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, contents).unwrap();
+    }
+    repo.git_ai(&["checkpoint", "mock_known_human", "src/app.ts"])
+        .unwrap();
+    let manual_commit = repo
+        .stage_all_and_commit("Add categorized manual files")
+        .unwrap();
+    for (path, line) in [
+        ("src/app.ts", "const ready = true;"),
+        ("test/setup.test.ts", "// untracked test setup"),
+        ("src/generated/client.ts", "export const client = 1;"),
+        ("src/generated/README.md", "# Client documentation"),
+        ("src/config.json", "{}"),
+    ] {
+        repo.filename(path)
+            .assert_committed_lines(crate::lines![line.human()]);
+    }
+    let loose_test_path = repo.path().join("test/untracked.test.ts");
+    fs::write(&loose_test_path, "// separate test setup\n").unwrap();
+    codex_checkpoint(
+        &repo,
+        &test_path,
+        "usage-session",
+        "PreToolUse",
+        "usage-edit",
+    );
+    fs::write(&test_path, "// baseline\nexpect(ready).toBe(true);\n").unwrap();
+    codex_checkpoint(
+        &repo,
+        &test_path,
+        "usage-session",
+        "PostToolUse",
+        "usage-edit",
+    );
+    let commit = repo
+        .stage_all_and_commit("Add categorized AI changes")
+        .unwrap();
+    repo.filename("test/app.test.ts")
+        .assert_committed_lines(crate::lines![
+            "// baseline".unattributed_human(),
+            "expect(ready).toBe(true);".ai(),
+        ]);
+    repo.filename("test/untracked.test.ts")
+        .assert_committed_lines(crate::lines!["// separate test setup".unattributed_human()]);
+
+    let event = committed_metric_for_commit(&metrics_db_path, &commit.commit_sha);
+    let manual = committed_metric_for_commit(&metrics_db_path, &manual_commit.commit_sha);
+    let first_date = DateTime::from_timestamp(i64::from(manual.timestamp), 0)
+        .unwrap()
+        .date_naive();
+    let last_date = DateTime::from_timestamp(i64::from(event.timestamp), 0)
+        .unwrap()
+        .date_naive();
+    insert_personal_rows(
+        &metrics_db_path,
+        &[
+            serde_json::to_string(&event).unwrap(),
+            usage_commit_row(last_date, remote, &"1".repeat(40), None, [4, 3, 0]),
+            usage_commit_row(
+                last_date,
+                "https://example.org/external",
+                &"2".repeat(40),
+                None,
+                [99, 0, 0],
+            ),
+        ],
+    );
+    let rules = json!([
+        {"pattern": "**/*.md", "type": "markdown"},
+        {"pattern": "**/generated/**", "type": "auto_generated"},
+        {"pattern": "**/*.test.ts", "type": "test"},
+        {"pattern": "**/*.json", "type": null},
+    ])
+    .to_string();
+    // The query uses local calendar days. Include the neighboring days for
+    // runner time zones where the UTC date of a real commit differs.
+    let start = first_date.pred_opt().unwrap().to_string();
+    let end = last_date.succ_opt().unwrap().to_string();
+    let usage = || -> Value {
+        let output = repo
+            .git_ai_with_env(
+                &[
+                    "usage",
+                    "--json",
+                    "--start-date",
+                    &start,
+                    "--end-date",
+                    &end,
+                    "--repo-host",
+                    "git.xiaojukeji.com",
+                ],
+                &[
+                    ("GIT_AI_TEST_METRICS_DB_PATH", &metrics_db_path),
+                    ("GIT_AI_USAGE_CODE_TYPE_RULES", &rules),
+                ],
+            )
+            .unwrap();
+        serde_json::from_str(&extract_json_object(&output)).unwrap()
+    };
+    let actual = usage();
+    let expected = json!({
+        "business": {"added_lines": 1, "ai_lines": 0, "human_lines": 1, "unknown_lines": 0},
+        "test": {"added_lines": 3, "ai_lines": 1, "human_lines": 1, "unknown_lines": 1},
+        "auto_generated": {"added_lines": 1, "ai_lines": 0, "human_lines": 1, "unknown_lines": 0},
+        "markdown": {"added_lines": 1, "ai_lines": 0, "human_lines": 1, "unknown_lines": 0},
+        "missing_detail_lines": 4,
+    });
+    assert_eq!(actual["totals"]["commit_count"], 3);
+    assert_eq!(actual["totals"]["added_lines"], 11);
+    assert_eq!(actual["totals"]["by_type"], expected);
+    let daily = actual["daily"].as_array().unwrap();
+    let daily_test_ai: u64 = daily
+        .iter()
+        .map(|day| day["by_type"]["test"]["ai_lines"].as_u64().unwrap())
+        .sum();
+    assert_eq!(daily_test_ai, 1);
+    assert_eq!(actual["repos"].as_array().unwrap().len(), 1);
+    assert_eq!(actual["repos"][0]["repo"], remote);
+    assert_eq!(actual["repos"][0]["by_type"], expected);
+
+    let mut conflicting_detail = manual;
+    let hunks = conflicting_detail
+        .values
+        .get_mut(&committed_pos::HUNKS.to_string())
+        .unwrap();
+    *hunks = Value::String(
+        hunks
+            .as_str()
+            .unwrap()
+            .replace("src/app.ts", "src/other.test.ts"),
+    );
+    insert_personal_rows(
+        &metrics_db_path,
+        &[serde_json::to_string(&conflicting_detail).unwrap()],
+    );
+    let conflicted = usage();
+    assert_eq!(conflicted["totals"]["added_lines"], 11);
+    assert_eq!(conflicted["totals"]["by_type"]["missing_detail_lines"], 9);
+    assert_eq!(conflicted["totals"]["by_type"]["test"]["ai_lines"], 1);
 }
 
 #[test]
