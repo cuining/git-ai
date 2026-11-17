@@ -81,12 +81,15 @@ define_feature_flags!(
     lite_mode: lite_mode, debug = false, release = false,
     auth_keyring: auth_keyring, debug = false, release = false,
     transcript_streaming: transcript_streaming, debug = true, release = true,
+    transcript_upload: transcript_upload, debug = false, release = false,
     transcript_sweep: transcript_sweep, debug = true, release = true,
     checkpoint_debug_log: checkpoint_debug_log, debug = false, release = false,
     bash_checkpoints_v2: bash_checkpoints_v2, debug = false, release = false,
-    daemon_log_upload: daemon_log_upload, debug = true, release = true,
-    rewrite_metrics_events: rewrite_metrics_events, debug = true, release = false,
-    token_usage_metrics: token_usage_metrics, debug = true, release = true,
+    daemon_log_upload: daemon_log_upload,
+        debug = option_env!("OSS_BUILD") == Some("1"),
+        release = option_env!("OSS_BUILD") == Some("1"),
+    rewrite_metrics_events: rewrite_metrics_events, debug = true, release = true,
+    token_usage_metrics: token_usage_metrics, debug = false, release = false,
     untraced_commit_fixup: untraced_commit_fixup, debug = true, release = true,
     untraced_fixup_ignore_temp_repos: untraced_fixup_ignore_temp_repos, debug = true, release = true,
 );
@@ -136,17 +139,21 @@ mod tests {
     #[test]
     fn test_default_feature_flags() {
         let flags = FeatureFlags::default();
+        assert_eq!(
+            flags.daemon_log_upload,
+            option_env!("OSS_BUILD") == Some("1")
+        );
         #[cfg(debug_assertions)]
         {
             assert!(!flags.lite_mode);
             assert!(!flags.auth_keyring);
             assert!(flags.transcript_streaming);
+            assert!(!flags.transcript_upload);
             assert!(flags.transcript_sweep);
             assert!(!flags.checkpoint_debug_log);
             assert!(!flags.bash_checkpoints_v2);
-            assert!(flags.daemon_log_upload);
             assert!(flags.rewrite_metrics_events);
-            assert!(flags.token_usage_metrics);
+            assert!(!flags.token_usage_metrics);
             assert!(flags.untraced_commit_fixup);
             assert!(flags.untraced_fixup_ignore_temp_repos);
         }
@@ -155,12 +162,12 @@ mod tests {
             assert!(!flags.lite_mode);
             assert!(!flags.auth_keyring);
             assert!(flags.transcript_streaming);
+            assert!(!flags.transcript_upload);
             assert!(flags.transcript_sweep);
             assert!(!flags.checkpoint_debug_log);
             assert!(!flags.bash_checkpoints_v2);
-            assert!(flags.daemon_log_upload);
-            assert!(!flags.rewrite_metrics_events);
-            assert!(flags.token_usage_metrics);
+            assert!(flags.rewrite_metrics_events);
+            assert!(!flags.token_usage_metrics);
             assert!(flags.untraced_commit_fixup);
             assert!(flags.untraced_fixup_ignore_temp_repos);
         }
@@ -279,6 +286,7 @@ mod tests {
             lite_mode: true,
             auth_keyring: true,
             transcript_streaming: true,
+            transcript_upload: false,
             transcript_sweep: true,
             checkpoint_debug_log: false,
             bash_checkpoints_v2: true,
@@ -293,6 +301,7 @@ mod tests {
         assert!(serialized.contains("lite_mode"));
         assert!(serialized.contains("auth_keyring"));
         assert!(serialized.contains("transcript_streaming"));
+        assert!(serialized.contains("transcript_upload"));
         assert!(serialized.contains("transcript_sweep"));
         assert!(serialized.contains("checkpoint_debug_log"));
         assert!(serialized.contains("bash_checkpoints_v2"));
@@ -309,6 +318,7 @@ mod tests {
             lite_mode: true,
             auth_keyring: true,
             transcript_streaming: true,
+            transcript_upload: false,
             transcript_sweep: true,
             checkpoint_debug_log: true,
             bash_checkpoints_v2: true,
@@ -322,6 +332,7 @@ mod tests {
         assert_eq!(cloned.lite_mode, flags.lite_mode);
         assert_eq!(cloned.auth_keyring, flags.auth_keyring);
         assert_eq!(cloned.transcript_streaming, flags.transcript_streaming);
+        assert_eq!(cloned.transcript_upload, flags.transcript_upload);
         assert_eq!(cloned.transcript_sweep, flags.transcript_sweep);
         assert_eq!(cloned.checkpoint_debug_log, flags.checkpoint_debug_log);
         assert_eq!(cloned.bash_checkpoints_v2, flags.bash_checkpoints_v2);

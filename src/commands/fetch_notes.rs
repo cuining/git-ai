@@ -39,7 +39,7 @@ pub fn handle_fetch_notes(args: &[String]) {
             }
             other if other.starts_with('-') => {
                 eprintln!("Error: unknown option '{}'", other);
-                eprintln!("Run 'git ai fetch-notes --help' for usage");
+                eprintln!("Run 'git-ai fetch-notes --help' for usage");
                 std::process::exit(1);
             }
             // Positional argument treated as remote name
@@ -78,7 +78,7 @@ pub fn handle_fetch_notes(args: &[String]) {
                 } else {
                     eprintln!("Error: {}", e);
                     eprintln!(
-                        "Hint: specify a remote with 'git ai fetch-notes <remote>' or 'git ai fetch-notes --remote <name>'"
+                        "Hint: specify a remote with 'git-ai fetch-notes <remote>' or 'git-ai fetch-notes --remote <name>'"
                     );
                 }
                 std::process::exit(1);
@@ -132,6 +132,7 @@ pub fn handle_fetch_notes(args: &[String]) {
                 let status = match notes_existence {
                     NotesExistence::Found => "found".to_string(),
                     NotesExistence::NotFound => "not_found".to_string(),
+                    NotesExistence::Skipped => "skipped".to_string(),
                 };
                 let output = FetchNotesJsonOutput {
                     remote: remote_name,
@@ -149,6 +150,9 @@ pub fn handle_fetch_notes(args: &[String]) {
                     }
                     NotesExistence::NotFound => {
                         eprintln!(" no notes found on remote ({:.2}s).", elapsed.as_secs_f64());
+                    }
+                    NotesExistence::Skipped => {
+                        eprintln!(" skipped by repository filters.");
                     }
                 }
             }
@@ -191,9 +195,9 @@ fn print_json_error(status: &str, message: &str, remote: Option<&str>) {
 }
 
 fn print_fetch_notes_help() {
-    eprintln!("git ai fetch-notes - Synchronously fetch AI authorship notes from a remote");
+    eprintln!("git-ai fetch-notes - Synchronously fetch AI authorship notes from a remote");
     eprintln!();
-    eprintln!("Usage: git ai fetch-notes [options] [<remote>]");
+    eprintln!("Usage: git-ai fetch-notes [options] [<remote>]");
     eprintln!();
     eprintln!("Options:");
     eprintln!("  <remote>           Remote to fetch from (default: upstream or origin)");
@@ -202,7 +206,7 @@ fn print_fetch_notes_help() {
     eprintln!("  -h, --help         Show this help message");
     eprintln!();
     eprintln!("Examples:");
-    eprintln!("  git ai fetch-notes              Fetch from default remote");
-    eprintln!("  git ai fetch-notes upstream      Fetch from 'upstream' remote");
-    eprintln!("  git ai fetch-notes --json        Fetch and output JSON result");
+    eprintln!("  git-ai fetch-notes              Fetch from default remote");
+    eprintln!("  git-ai fetch-notes upstream      Fetch from 'upstream' remote");
+    eprintln!("  git-ai fetch-notes --json        Fetch and output JSON result");
 }

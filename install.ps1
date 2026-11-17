@@ -264,6 +264,11 @@ $os = 'windows'
 # Determine binary name and download URLs
 $binaryName = "git-ai-$os-$arch"
 
+$npmUpgrade = $env:GIT_AI_NPM_UPGRADE -eq '1'
+if ($npmUpgrade -and [string]::IsNullOrWhiteSpace($env:GIT_AI_LOCAL_BINARY)) {
+    Write-ErrorAndExit 'npm upgrade requires a verified local binary'
+}
+
 # Determine release tag
 # Priority: 1. Local binary override, 2. Pinned version (for release builds), 3. Environment variable, 4. "latest"
 if (-not [string]::IsNullOrWhiteSpace($env:GIT_AI_LOCAL_BINARY)) {
@@ -384,7 +389,7 @@ if (-not [string]::IsNullOrWhiteSpace($env:GIT_AI_LOCAL_BINARY)) {
         Write-ErrorAndExit "Local binary not found at $($env:GIT_AI_LOCAL_BINARY)"
     }
     Copy-Item -Force -Path $env:GIT_AI_LOCAL_BINARY -Destination $tmpFile
-    $downloadedBinaryName = "$binaryName.exe"
+    $downloadedBinaryName = if ($npmUpgrade) { "git-ai.exe" } else { "$binaryName.exe" }
 } elseif (Try-Download -Url $downloadUrlExe) {
     $downloadedBinaryName = "$binaryName.exe"
 } elseif (Try-Download -Url $downloadUrlNoExt) {
@@ -420,7 +425,7 @@ if (Test-Path -LiteralPath $finalExe) {
 }
 
 Move-Item -Force -Path $tmpFile -Destination $finalExe
-try { Unblock-File -Path $finalExe -ErrorAction SilentlyContinue } catch { }
+if (-not $npmUpgrade) { try { Unblock-File -Path $finalExe -ErrorAction SilentlyContinue } catch { } }
 
 # Refresh git.exe for existing wrapper users (it's a copy, not a symlink on Windows)
 $gitShim = Join-Path $installDir 'git.exe'
@@ -429,7 +434,21 @@ if (Test-Path -LiteralPath $gitShim) {
         Write-ErrorAndExit "Timeout waiting for $gitShim to be available. Please close any running git processes and try again."
     }
     Copy-Item -Force -Path $finalExe -Destination $gitShim
-    try { Unblock-File -Path $gitShim -ErrorAction SilentlyContinue } catch { }
+    if (-not $npmUpgrade) { try { Unblock-File -Path $gitShim -ErrorAction SilentlyContinue } catch { } }
+}
+
+# The detached upgrade wrapper owns the daemon restart.
+if ($npmUpgrade) {
+    try {
+        $refreshLogs = Join-Path $HOME '.git-ai\upgrade-logs'
+        New-Item -ItemType Directory -Force -Path $refreshLogs | Out-Null
+        Start-Process -FilePath $finalExe -ArgumentList 'install-hooks', '--refresh-managed-deepseek' `
+            -WindowStyle Hidden -RedirectStandardOutput (Join-Path $refreshLogs 'deepseek-hooks.log') `
+            -RedirectStandardError (Join-Path $refreshLogs 'deepseek-hooks.err.log')
+    } catch {
+        Write-Warning "Could not start DeepSeek Harness hook refresh: $_"
+    }
+    exit 0
 }
 
 # Login user with install token if provided

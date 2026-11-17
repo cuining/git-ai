@@ -43,12 +43,12 @@ if [[ -f "$_PROFILE" ]] && grep -q '\.git-ai-local-dev/gitwrap/bin' "$_PROFILE";
     echo "Cleaned up old git-ai local dev PATH export from $_PROFILE"
 fi
 
-# Run production installer if ~/.git-ai isn't set up or ~/.git-ai/bin isn't on PATH in the profile
+# Install the local build if the environment has not been set up yet.
+NEEDS_INSTALL=false
 if [[ ! -d "$HOME/.git-ai/bin" ]] || [[ ! -f "$HOME/.git-ai/config.json" ]] || \
    { [[ -f "$_PROFILE" ]] && ! grep -q '\.git-ai/bin' "$_PROFILE"; } || \
    { [[ ! -f "$_PROFILE" ]]; }; then
-    echo "Running git-ai installer..."
-    curl -sSL https://usegitai.com/install.sh | bash
+    NEEDS_INSTALL=true
 fi
 
 # Build the binary
@@ -57,6 +57,11 @@ if [[ "$BUILD_TYPE" == "release" ]]; then
     cargo build --release
 else
     cargo build
+fi
+
+if [[ "$NEEDS_INSTALL" == true ]]; then
+    echo "Installing local git-ai build..."
+    GIT_AI_LOCAL_BINARY="$PWD/target/$BUILD_TYPE/git-ai" bash "$(dirname "$0")/../install.sh"
 fi
 
 # Install binary via temp file + atomic mv to avoid macOS code signature cache

@@ -1017,8 +1017,14 @@ fn store_metrics_in_db(events: &[MetricEvent]) -> Result<Vec<i64>, GitAiError> {
         return Ok(Vec::new());
     }
 
+    let config = events.iter().any(is_repository_metric).then(Config::fresh);
     let event_jsons: Vec<String> = events
         .iter()
+        .filter(|event| {
+            config
+                .as_ref()
+                .is_none_or(|config| metric_repository_allowed(config, event))
+        })
         .map(serde_json::to_string)
         .collect::<Result<_, _>>()?;
 
@@ -1031,6 +1037,11 @@ fn store_metrics_in_db(events: &[MetricEvent]) -> Result<Vec<i64>, GitAiError> {
         .lock()
         .map_err(|_| GitAiError::Generic("metrics DB lock poisoned".to_string()))?;
     db_lock.insert_events(&event_jsons)
+}
+
+fn is_repository_metric(event: &MetricEvent) -> bool {
+    event.event_id != MetricEventId::InstallHooks as u16
+        && event.event_id != MetricEventId::DaemonIngestAnomaly as u16
 }
 
 /// How much of the pending backlog one flush invocation may drain, and
@@ -1254,19 +1265,22 @@ where
     Ok(result)
 }
 
-fn should_deliver_metric_event(config: &Config, event: &MetricEvent) -> bool {
-    // Transcript-derived events keep flowing for sessions tracked before a
-    // repo was excluded, so they get the same upload-time repo gate.
-    let transcript_derived = event.event_id == MetricEventId::SessionEvent as u16
-        || event.event_id == MetricEventId::TokenUsage as u16;
-    if !transcript_derived {
+pub(crate) fn should_deliver_metric_event(config: &Config, event: &MetricEvent) -> bool {
+    let flags = config.get_feature_flags();
+    if event.is_local_only(flags.transcript_upload, flags.token_usage_metrics) {
+        return false;
+    }
+    // Apply the current policy to events already queued before it changed.
+    metric_repository_allowed(config, event)
+}
+
+fn metric_repository_allowed(config: &Config, event: &MetricEvent) -> bool {
+    if !is_repository_metric(event) || !config.has_repository_filters() {
         return true;
     }
 
-    let remotes = sparse_get_string(&event.attrs, attr_pos::REPO_URL)
-        .flatten()
-        .map(|url| vec![(String::new(), url)]);
-    config.is_allowed_repository_with_remotes(remotes.as_ref())
+    let url = sparse_get_string(&event.attrs, attr_pos::REPO_URL).flatten();
+    config.is_allowed_repository_url(url.as_deref())
 }
 
 fn current_unix_ts() -> u64 {
@@ -1713,13 +1727,15 @@ pub fn flush_notes() {
     // Dequeue up to 50 pending notes.
     let pending = match crate::notes::db::NotesDatabase::global() {
         Ok(db) => match db.lock() {
-            Ok(mut lock) => match lock.dequeue_pending(50) {
-                Ok(rows) => rows,
-                Err(e) => {
-                    tracing::warn!(%e, "notes: failed to dequeue pending rows");
-                    return;
+            Ok(mut lock) => {
+                match lock.dequeue_pending_matching(50, |url| cfg.is_allowed_repository_url(url)) {
+                    Ok(rows) => rows,
+                    Err(e) => {
+                        tracing::warn!(%e, "notes: failed to dequeue pending rows");
+                        return;
+                    }
                 }
-            },
+            }
             Err(e) => {
                 tracing::warn!("notes: DB lock poisoned: {}", e);
                 return;
@@ -1835,8 +1851,12 @@ fn flush_notes_for_await() -> usize {
 }
 
 fn count_pending_notes_for_await() -> usize {
+    let cfg = Config::fresh();
     match crate::notes::db::NotesDatabase::global() {
         Ok(db) => match db.lock() {
+            Ok(lock) if cfg.has_repository_filters() => lock
+                .count_pending_matching(|url| cfg.is_allowed_repository_url(url))
+                .unwrap_or(0),
             Ok(lock) => lock.count_pending_uploadable().unwrap_or(0),
             Err(_) => 0,
         },

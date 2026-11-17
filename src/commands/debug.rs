@@ -1426,11 +1426,13 @@ mod tests {
     #[cfg(windows)]
     fn stdout_stderr_sleep_command() -> (&'static str, Vec<&'static str>) {
         (
-            "powershell.exe",
+            "cmd.exe",
             vec![
-                "-NoProfile",
-                "-Command",
-                "[Console]::Out.Write('out'); [Console]::Error.Write('err'); Start-Sleep -Seconds 60",
+                "/D",
+                "/S",
+                "/C",
+                // Redirect the delay command so it cannot keep the output pipes open.
+                "echo out & echo err 1>&2 & ping.exe /n 10 127.0.0.1 >NUL 2>&1",
             ],
         )
     }
@@ -1565,8 +1567,8 @@ mod tests {
     #[test]
     fn test_run_command_capture_with_timeout_reports_partial_output() {
         let (program, args) = stdout_stderr_sleep_command();
-        let err = run_command_capture_with_timeout(program, &args, Duration::from_millis(300))
-            .unwrap_err();
+        let timeout = Duration::from_secs(3);
+        let err = run_command_capture_with_timeout(program, &args, timeout).unwrap_err();
 
         assert!(err.contains("timed out after"), "{err}");
         assert!(

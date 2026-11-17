@@ -219,10 +219,9 @@ pub fn execute_preset_checkpoint(
         requests.extend(new_requests);
     }
 
-    if config::Config::get()
-        .get_feature_flags()
-        .checkpoint_debug_log
-    {
+    let config = config::Config::get();
+    // Raw hook payloads can describe more repositories than the generated checkpoints.
+    if config.get_feature_flags().checkpoint_debug_log && !config.has_repository_filters() {
         write_checkpoint_debug_log(preset_name, hook_input, &trace_id, events_len, &requests);
     }
 
@@ -383,15 +382,30 @@ fn execute_post_file_edit(
     metadata
         .entry("edit_kind".to_string())
         .or_insert_with(|| "file_edit".to_string());
+    let stream_source = allowed_stream_source(e.stream_source, &e.context.cwd, &mut metadata);
     Ok(split_files_into_requests(
         files,
         e.context.trace_id,
         checkpoint_kind,
         Some(e.context.agent_id),
         PreparedPathRole::Edited,
-        e.stream_source,
+        stream_source,
         metadata,
     ))
+}
+
+fn allowed_stream_source(
+    source: Option<StreamSource>,
+    cwd: &Path,
+    metadata: &mut HashMap<String, String>,
+) -> Option<StreamSource> {
+    let source = source?;
+    if config::Config::get().is_allowed_repository_at_path(Some(cwd)) {
+        Some(source)
+    } else {
+        metadata.remove("transcript_path");
+        None
+    }
 }
 
 fn execute_known_human_edit(e: KnownHumanEdit) -> Result<Vec<CheckpointRequest>, GitAiError> {
@@ -611,13 +625,14 @@ fn execute_post_bash_call(e: PostBashCall) -> Result<Vec<CheckpointRequest>, Git
     metadata
         .entry("edit_kind".to_string())
         .or_insert_with(|| "bash".to_string());
+    let stream_source = allowed_stream_source(e.stream_source, &e.context.cwd, &mut metadata);
     Ok(split_files_into_requests(
         files,
         e.context.trace_id,
         CheckpointKind::AiAgent,
         Some(e.context.agent_id),
         PreparedPathRole::Edited,
-        e.stream_source,
+        stream_source,
         metadata,
     ))
 }

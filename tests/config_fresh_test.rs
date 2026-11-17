@@ -2,7 +2,7 @@ use git_ai::api::client::ApiContext;
 use git_ai::auth::client::OAuthClient;
 /// Tests for config refresh behavior (Config::fresh() vs Config::get())
 /// These tests verify that Config::fresh() reads from disk while Config::get() uses cached values.
-use git_ai::config::{Config, load_file_config_public, save_file_config};
+use git_ai::config::{Config, DEFAULT_API_BASE_URL, load_file_config_public, save_file_config};
 use serial_test::serial;
 use std::env;
 use tempfile::TempDir;
@@ -205,7 +205,7 @@ fn test_config_fresh_respects_env_vars() {
 
     // Without env var, should use default
     let config1 = Config::fresh();
-    assert_eq!(config1.api_base_url(), "https://usegitai.com");
+    assert_eq!(config1.api_base_url(), DEFAULT_API_BASE_URL);
 
     // With env var set, should use env var
     unsafe {
@@ -219,7 +219,7 @@ fn test_config_fresh_respects_env_vars() {
         env::remove_var("GIT_AI_API_BASE_URL");
     }
     let config3 = Config::fresh();
-    assert_eq!(config3.api_base_url(), "https://usegitai.com");
+    assert_eq!(config3.api_base_url(), DEFAULT_API_BASE_URL);
 
     // Restore original GIT_AI_API_BASE_URL (home guard restores home vars via Drop)
     unsafe {
@@ -324,4 +324,43 @@ fn test_api_context_picks_up_api_key_changes() {
     // Create new ApiContext - should see no API key
     let ctx3 = ApiContext::new(None);
     assert!(ctx3.api_key.is_none());
+}
+
+#[test]
+#[serial]
+#[cfg(unix)]
+fn test_config_save_is_atomic_and_private() {
+    use std::io::Read;
+    use std::os::unix::fs::PermissionsExt;
+    let temp_dir = TempDir::new().unwrap();
+    let _home_guard = HomeEnvGuard::set(temp_dir.path());
+    let mut config = git_ai::config::FileConfig {
+        quiet: Some(true),
+        ..Default::default()
+    };
+    save_file_config(&config).unwrap();
+    let path = temp_dir.path().join(".git-ai/config.json");
+    let original = std::fs::read(&path).unwrap();
+    let mut previous_file = std::fs::File::open(&path).unwrap();
+    config.prompt_storage = Some("local".to_string());
+    save_file_config(&config).unwrap();
+    let mut observed = Vec::new();
+    previous_file.read_to_end(&mut observed).unwrap();
+    assert_eq!(
+        observed, original,
+        "open readers must retain the complete prior config"
+    );
+    assert!(Config::fresh().is_quiet());
+    assert_eq!(
+        std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    assert_eq!(
+        std::fs::metadata(path.parent().unwrap())
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o700
+    );
 }

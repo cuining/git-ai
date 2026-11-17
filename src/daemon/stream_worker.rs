@@ -26,6 +26,22 @@ use tokio::time::{Duration, interval};
 
 const TRIGGERED_SWEEP_COOLDOWN: Duration = Duration::from_secs(30);
 
+pub(super) fn stream_repo_work_dir(
+    tool: &str,
+    stream_path: &Path,
+    hint: Option<&Path>,
+    config: &config::Config,
+) -> Option<PathBuf> {
+    let infer = || crate::streams::agent::get_agent(tool)?.infer_cwd(stream_path);
+    // A checkpoint's worktree describes the edited file, which can belong
+    // to a different repository than the session that contains the edit.
+    if config.has_repository_filters() {
+        infer().or_else(|| hint.map(Path::to_path_buf))
+    } else {
+        hint.map(Path::to_path_buf).or_else(infer)
+    }
+}
+
 /// Extract a Unix-epoch u32 timestamp from a raw JSON event's "timestamp" field.
 /// Handles both ISO 8601 strings (e.g. "2026-05-11T23:13:12.819Z") and numeric
 /// milliseconds (e.g. 1759845073835). Returns None if the field is missing or unparseable.
@@ -487,6 +503,8 @@ impl StreamWorker {
     async fn run_sweep(&mut self, priority: Priority) -> Result<(), String> {
         use crate::daemon::sweep_coordinator::SweepItem;
 
+        let config = config::Config::fresh();
+        let allow_shared_streams = config.is_allowed_repository_url(None);
         let items = self
             .sweep_coordinator
             .run_sweep()
@@ -494,7 +512,12 @@ impl StreamWorker {
 
         tracing::info!(discovered = items.len(), "sweep completed");
 
-        for (i, item) in items.iter().enumerate().take(10) {
+        let log_limit = if config.has_repository_filters() {
+            0
+        } else {
+            10
+        };
+        for (i, item) in items.iter().enumerate().take(log_limit) {
             match item {
                 SweepItem::Session {
                     session_id,
@@ -525,8 +548,11 @@ impl StreamWorker {
                 }
             }
         }
-        if items.len() > 10 {
-            tracing::info!(remaining = items.len() - 10, "... and more sweep items");
+        if log_limit > 0 && items.len() > log_limit {
+            tracing::info!(
+                remaining = items.len() - log_limit,
+                "... and more sweep items"
+            );
         }
 
         let mut enqueued_this_sweep: HashSet<(PathBuf, String)> = HashSet::new();
@@ -540,9 +566,25 @@ impl StreamWorker {
                     external_session_id,
                     external_parent_session_id,
                 } => {
-                    let inferred_cwd = crate::streams::agent::get_agent(&tool)
-                        .as_ref()
-                        .and_then(|a| a.infer_cwd(&canonical_path));
+                    let work_dir = stream_repo_work_dir(&tool, &canonical_path, None, &config)
+                        .or_else(|| {
+                            if !config.has_repository_filters() {
+                                return None;
+                            }
+                            self.streams_db
+                                .get_stream(
+                                    &session_id,
+                                    "transcript",
+                                    &canonical_path.to_string_lossy(),
+                                )
+                                .ok()
+                                .flatten()?
+                                .repo_work_dir
+                                .map(PathBuf::from)
+                        });
+                    if !config.is_allowed_repository_at_path(work_dir.as_deref()) {
+                        continue;
+                    }
 
                     let tasks = self.enqueue_streams_for_session(
                         &tool,
@@ -552,8 +594,9 @@ impl StreamWorker {
                         None,
                         Some(external_session_id.as_str()),
                         external_parent_session_id.as_deref(),
-                        inferred_cwd.as_deref(),
+                        work_dir.as_deref(),
                         &session_id,
+                        allow_shared_streams,
                         &mut enqueued_this_sweep,
                     );
 
@@ -566,6 +609,9 @@ impl StreamWorker {
                     stream_kind,
                     canonical_path,
                 } => {
+                    if !allow_shared_streams {
+                        continue;
+                    }
                     let dedup_key = (canonical_path.clone(), stream_kind.clone());
                     if self.in_flight.contains(&dedup_key)
                         || enqueued_this_sweep.contains(&dedup_key)
@@ -623,7 +669,17 @@ impl StreamWorker {
     }
 
     /// Handle a checkpoint notification.
-    async fn handle_checkpoint_notification(&mut self, notification: CheckpointNotification) {
+    async fn handle_checkpoint_notification(&mut self, mut notification: CheckpointNotification) {
+        let config = config::Config::fresh();
+        notification.repo_work_dir = stream_repo_work_dir(
+            &notification.tool,
+            &notification.stream_path,
+            notification.repo_work_dir.as_deref(),
+            &config,
+        );
+        if !config.is_allowed_repository_at_path(notification.repo_work_dir.as_deref()) {
+            return;
+        }
         let canonical_path = std::fs::canonicalize(&notification.stream_path)
             .unwrap_or_else(|_| notification.stream_path.clone());
 
@@ -638,6 +694,7 @@ impl StreamWorker {
             notification.external_parent_session_id.as_deref(),
             notification.repo_work_dir.as_deref(),
             &notification.session_id,
+            config.is_allowed_repository_url(None),
             &mut enqueued,
         );
 
@@ -647,7 +704,7 @@ impl StreamWorker {
 
         // Sweep subagent transcripts for this main session (Claude only for now)
         if notification.tool == "claude" {
-            self.sweep_subagents_for_session(&notification);
+            self.sweep_subagents_for_session(&notification, &config);
         }
     }
 
@@ -655,7 +712,11 @@ impl StreamWorker {
     ///
     /// Given a main session at `<project>/<uuid>.jsonl`, subagents live at
     /// `<project>/<uuid>/subagents/agent-*.jsonl`.
-    fn sweep_subagents_for_session(&mut self, notification: &CheckpointNotification) {
+    fn sweep_subagents_for_session(
+        &mut self,
+        notification: &CheckpointNotification,
+        config: &config::Config,
+    ) {
         let stream_path = &notification.stream_path;
 
         let subagents_dir = match stream_path.file_stem() {
@@ -700,6 +761,15 @@ impl StreamWorker {
             let session_id = generate_session_id(&external_session_id, "claude");
 
             let canonical = std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+            let work_dir = stream_repo_work_dir(
+                "claude",
+                &canonical,
+                notification.repo_work_dir.as_deref(),
+                config,
+            );
+            if !config.is_allowed_repository_at_path(work_dir.as_deref()) {
+                continue;
+            }
             let dedup_key = (canonical.clone(), "transcript".to_string());
             if self.in_flight.contains(&dedup_key) {
                 continue;
@@ -732,7 +802,7 @@ impl StreamWorker {
                 &canonical,
                 &external_session_id,
                 external_parent_session_id.as_deref(),
-                notification.repo_work_dir.as_deref(),
+                work_dir.as_deref(),
             ) {
                 tracing::warn!(
                     session_id = %session_id,
@@ -750,7 +820,7 @@ impl StreamWorker {
                 trace_id: Some(notification.trace_id.clone()),
                 tool_use_id: None,
                 canonical_path: canonical,
-                repo_work_dir: notification.repo_work_dir.clone(),
+                repo_work_dir: work_dir,
                 retry_count: 0,
                 next_retry_at: None,
             });
@@ -769,6 +839,7 @@ impl StreamWorker {
         external_parent_session_id: Option<&str>,
         repo_work_dir: Option<&Path>,
         non_shared_session_id: &str,
+        allow_shared_streams: bool,
         enqueued: &mut HashSet<(PathBuf, String)>,
     ) -> Vec<ProcessingTask> {
         let agent = crate::streams::agent::get_agent(tool);
@@ -781,8 +852,9 @@ impl StreamWorker {
             // exception because a Copilot transcript checkpoint implies the
             // same underlying agent likely wrote fresh trace rows.
             if stream.shared
-                && priority == Priority::Immediate
-                && !Self::should_enqueue_shared_stream_immediately(tool, &stream)
+                && (!allow_shared_streams
+                    || (priority == Priority::Immediate
+                        && !Self::should_enqueue_shared_stream_immediately(tool, &stream)))
             {
                 continue;
             }
@@ -984,10 +1056,11 @@ impl StreamWorker {
 
         // Handle result
         match result {
-            Ok(Ok(())) => {
+            Ok(Ok(true)) => {
                 // Success - task is done.
                 self.notify_token_usage(&task);
             }
+            Ok(Ok(false)) => {}
             Ok(Err(e)) => {
                 // Error - handle retry logic
                 self.handle_processing_error(task, e).await;
@@ -1017,7 +1090,7 @@ impl StreamWorker {
         telemetry: &DaemonTelemetryWorkerHandle,
         task: &ProcessingTask,
         shutdown_flag: &AtomicBool,
-    ) -> Result<(), StreamError> {
+    ) -> Result<bool, StreamError> {
         let task_path_str = task.canonical_path.display().to_string();
         let stream = db
             .get_stream(&task.session_id, &task.stream_kind, &task_path_str)?
@@ -1049,16 +1122,20 @@ impl StreamWorker {
                 .map(|ext_pid| generate_session_id(ext_pid, &stream.tool))
         };
 
-        // Resolve repo_work_dir with priority: task (hook) > DB > infer from transcript.
         // Shared streams serve multiple repos so repo_url must not be set at the batch level.
+        let config = config::Config::fresh();
         let resolved_work_dir = if is_shared_stream {
             None
         } else {
-            task.repo_work_dir
-                .clone()
-                .or_else(|| stream.repo_work_dir.as_ref().map(PathBuf::from))
-                .or_else(|| agent.infer_cwd(&path))
+            let hint = task
+                .repo_work_dir
+                .as_deref()
+                .or_else(|| stream.repo_work_dir.as_deref().map(Path::new));
+            stream_repo_work_dir(&task.tool, &path, hint, &config)
         };
+        if !config.is_allowed_repository_at_path(resolved_work_dir.as_deref()) {
+            return Ok(false);
+        }
 
         // Persist inferred cwd to DB if stream didn't already have one
         if !is_shared_stream
@@ -1229,7 +1306,7 @@ impl StreamWorker {
             "processed session"
         );
 
-        Ok(())
+        Ok(true)
     }
 
     /// Handle a processing error with exponential backoff.
@@ -1344,9 +1421,10 @@ impl StreamWorker {
                 Ok(Err(e)) => {
                     tracing::error!(error = %e, session_id = %task.session_id, "drain task processing error");
                 }
-                Ok(Ok(())) => {
+                Ok(Ok(true)) => {
                     self.notify_token_usage(&task);
                 }
+                Ok(Ok(false)) => {}
             }
         }
     }
@@ -1813,7 +1891,7 @@ mod subagent_sweep_tests {
             external_parent_session_id: None,
         };
 
-        worker.sweep_subagents_for_session(&notification);
+        worker.sweep_subagents_for_session(&notification, config::Config::get());
 
         // Should have enqueued 2 subagent tasks
         assert_eq!(worker.priority_queue.len(), 2);
@@ -1870,7 +1948,7 @@ mod subagent_sweep_tests {
             external_parent_session_id: None,
         };
 
-        worker.sweep_subagents_for_session(&notification);
+        worker.sweep_subagents_for_session(&notification, config::Config::get());
         assert_eq!(worker.priority_queue.len(), 0);
     }
 
@@ -2022,7 +2100,7 @@ mod subagent_sweep_tests {
             external_parent_session_id: None,
         };
 
-        worker.sweep_subagents_for_session(&notification);
+        worker.sweep_subagents_for_session(&notification, config::Config::get());
 
         // Should not enqueue the in-flight subagent
         assert_eq!(worker.priority_queue.len(), 0);

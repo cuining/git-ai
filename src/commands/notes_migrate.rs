@@ -32,7 +32,7 @@ pub fn handle_notes_migrate(args: &[String]) {
             }
             other => {
                 eprintln!("error: unknown option '{}'", other);
-                eprintln!("Run 'git ai notes migrate --help' for usage");
+                eprintln!("Run 'git-ai notes migrate --help' for usage");
                 std::process::exit(1);
             }
         }
@@ -61,6 +61,12 @@ pub fn handle_notes_migrate(args: &[String]) {
             std::process::exit(1);
         }
     };
+    if !cfg.is_allowed_repository_ref(Some(&repo)) {
+        eprintln!(
+            "Skipping Notes migration because the repository is outside the allowlist or excluded."
+        );
+        return;
+    }
 
     // 3. Build the API client.
     let backend_url = match cfg.notes_backend_url() {
@@ -397,9 +403,9 @@ fn cat_file_batch(
 }
 
 fn print_help() {
-    eprintln!("git ai notes migrate - Bulk-upload existing git notes to the HTTP backend");
+    eprintln!("git-ai notes migrate - Bulk-upload existing git notes to the HTTP backend");
     eprintln!();
-    eprintln!("Usage: git ai notes migrate [options]");
+    eprintln!("Usage: git-ai notes migrate [options]");
     eprintln!();
     eprintln!("Options:");
     eprintln!("  --force, --all  Re-upload all notes even if already cached locally.");

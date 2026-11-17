@@ -1,11 +1,13 @@
 use crate::authorship::ignore::effective_ignore_patterns;
 use crate::authorship::internal_db::InternalDatabase;
 use crate::authorship::range_authorship;
-use crate::authorship::stats::stats_command;
+use crate::authorship::stats::{commit_summaries, stats_command};
 use crate::commands;
 use crate::config;
+use crate::error::GitAiError;
 use crate::git::find_repository;
 use crate::git::find_repository_in_path;
+use crate::git::repo_state::is_valid_git_oid;
 use crate::git::repository::{CommitRange, Repository};
 use crate::git::sync_authorship::{NotesExistence, fetch_authorship_notes, push_authorship_notes};
 use crate::observability::log_message;
@@ -25,6 +27,22 @@ pub fn handle_git_ai(args: &[String]) {
 
     if args.is_empty() {
         print_help();
+        return;
+    }
+
+    if args[0] == "stats" && args[1..].iter().any(|arg| arg == "--commits-stdin") {
+        if let Err(error) = handle_commit_summaries(&args[1..]) {
+            eprintln!("Commit summaries failed: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
+    if args == ["install-hooks", "--refresh-managed-deepseek"] {
+        if let Err(error) = commands::install_hooks::refresh_managed_deepseek() {
+            eprintln!("DeepSeek Harness hook refresh failed: {error}");
+            std::process::exit(1);
+        }
         return;
     }
 
@@ -157,17 +175,19 @@ pub fn handle_git_ai(args: &[String]) {
             println!("{}", config.git_cmd());
             std::process::exit(0);
         }
-        "install-hooks" | "install" => match commands::install_hooks::run(&args[1..]) {
-            Ok(statuses) => {
-                if let Ok(statuses_value) = serde_json::to_value(&statuses) {
-                    log_message("install-hooks", "info", Some(statuses_value));
+        command @ ("install-hooks" | "install") => {
+            match commands::install_hooks::run_command(&args[1..], command == "install") {
+                Ok(statuses) => {
+                    if let Ok(statuses_value) = serde_json::to_value(&statuses) {
+                        log_message("install-hooks", "info", Some(statuses_value));
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Install hooks failed: {}", e);
+                    std::process::exit(1);
                 }
             }
-            Err(e) => {
-                eprintln!("Install hooks failed: {}", e);
-                std::process::exit(1);
-            }
-        },
+        }
         "uninstall" | "uninstall-hooks" => match commands::install_hooks::run_uninstall(&args[1..])
         {
             Ok(statuses) => {
@@ -255,18 +275,18 @@ pub(crate) fn handle_notes_subcommand(args: &[String]) {
             handle_notes_serve(&args[1..]);
         }
         "--help" | "-h" | "help" => {
-            eprintln!("git ai notes - Notes backend management commands");
+            eprintln!("git-ai notes - Notes backend management commands");
             eprintln!();
-            eprintln!("Usage: git ai notes <subcommand> [options]");
+            eprintln!("Usage: git-ai notes <subcommand> [options]");
             eprintln!();
             eprintln!("Subcommands:");
             eprintln!("  migrate    Bulk-upload existing git notes to the HTTP backend");
             eprintln!();
-            eprintln!("Run 'git ai notes <subcommand> --help' for details.");
+            eprintln!("Run 'git-ai notes <subcommand> --help' for details.");
         }
         other => {
             eprintln!("Unknown git-ai notes subcommand: {}", other);
-            eprintln!("Run 'git ai notes --help' for usage.");
+            eprintln!("Run 'git-ai notes --help' for usage.");
             std::process::exit(1);
         }
     }
@@ -292,9 +312,9 @@ fn handle_notes_serve(args: &[String]) {
             }
             "--help" | "-h" => {
                 eprintln!(
-                    "git ai notes serve - Run the in-memory notes backend reference server\n\
+                    "git-ai notes serve - Run the in-memory notes backend reference server\n\
                      \n\
-                     Usage: git ai notes serve [--bind <addr:port>] [--port <port>]\n\
+                     Usage: git-ai notes serve [--bind <addr:port>] [--port <port>]\n\
                      \n\
                      This is a reference implementation. All notes are stored in process\n\
                      memory; auth headers are accepted but not validated. It exists to\n\
@@ -304,7 +324,7 @@ fn handle_notes_serve(args: &[String]) {
                 return;
             }
             other => {
-                eprintln!("Unknown argument to `git ai notes serve`: {}", other);
+                eprintln!("Unknown argument to `git-ai notes serve`: {}", other);
                 std::process::exit(1);
             }
         }
@@ -347,6 +367,9 @@ fn print_help() {
     );
     eprintln!("  stats [commit]     Show AI authorship statistics for a commit");
     eprintln!("    --json                 Output in JSON format");
+    eprintln!(
+        "    --commits-stdin --json  Summarize up to 500 full commit hashes read one per line"
+    );
     eprintln!("  usage              Show local AI usage statistics");
     eprintln!("    --period <1d|3d|7d|30d>  Time window (default: 30d)");
     eprintln!("    --json                 Output in JSON format");
@@ -370,12 +393,10 @@ fn print_help() {
     eprintln!("    unset <key>           Remove config value (reverts to default)");
     eprintln!("  debug              Print support/debug diagnostics");
     eprintln!("  bg                 Run and control git-ai background service");
-    eprintln!("  install, install-hooks  Install hooks for AI authorship tracking");
+    eprintln!("  install            Install Git AI and set up agent hooks");
+    eprintln!("  install-hooks      Set up agent hooks for the current executable");
     eprintln!(
         "    --env                  Also add git-ai to shell PATH configs (used by the install scripts)"
-    );
-    eprintln!(
-        "    --wsl                  Also install git-ai in eligible WSL distributions (Windows only)"
     );
     eprintln!("    --skills               Also install agent skill files");
     eprintln!("    --visual-studio-extension");
@@ -516,7 +537,7 @@ fn handle_checkpoint(args: &[String]) {
 
     // Check repository allowlist before sending to daemon.
     // Skip entirely when no allow/exclude filters are configured (common case)
-    // to avoid spawning a `git remote -v` subprocess.
+    // to avoid reading repository config.
     let t_allowlist = std::time::Instant::now();
     {
         let config = config::Config::get();
@@ -525,11 +546,7 @@ fn handle_checkpoint(args: &[String]) {
             for request in &requests {
                 for file in &request.files {
                     if checked_repos.insert(file.repo_work_dir.clone())
-                        && let Ok(repo) =
-                            crate::git::repository::discover_repository_in_path_no_git_exec(
-                                &file.repo_work_dir,
-                            )
-                        && !config.is_allowed_repository(&Some(repo))
+                        && !config.is_allowed_repository_at_path(Some(&file.repo_work_dir))
                     {
                         eprintln!(
                             "Skipping checkpoint because repository is excluded or not in allow_repositories list"
@@ -782,6 +799,7 @@ fn notes_existence_label(existence: NotesExistence) -> &'static str {
     match existence {
         NotesExistence::Found => "found",
         NotesExistence::NotFound => "not_found",
+        NotesExistence::Skipped => "skipped",
     }
 }
 
@@ -965,6 +983,41 @@ fn handle_ai_diff(args: &[String]) {
         eprintln!("Diff failed: {}", e);
         std::process::exit(1);
     }
+}
+
+fn handle_commit_summaries(args: &[String]) -> Result<(), GitAiError> {
+    if args.len() != 2 || !args.iter().any(|arg| arg == "--json") {
+        return Err(GitAiError::Generic(
+            "Usage: git-ai stats --commits-stdin --json".into(),
+        ));
+    }
+    const MAX_COMMITS: usize = 500;
+    const MAX_INPUT_BYTES: usize = MAX_COMMITS * (64 + 2);
+    let mut input = String::new();
+    std::io::stdin()
+        .take(MAX_INPUT_BYTES as u64 + 1)
+        .read_to_string(&mut input)?;
+    if input.len() > MAX_INPUT_BYTES || input.lines().count() > MAX_COMMITS {
+        return Err(GitAiError::Generic(format!(
+            "Expected at most {MAX_COMMITS} commit hashes"
+        )));
+    }
+    let commits = input
+        .lines()
+        .map(|line| {
+            is_valid_git_oid(line)
+                .then(|| line.to_ascii_lowercase())
+                .ok_or_else(|| {
+                    GitAiError::Generic("Expected a full commit hash on each line".into())
+                })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let repo = find_repository(&[])?;
+    println!(
+        "{}",
+        serde_json::to_string(&commit_summaries(&repo, &commits)?)?
+    );
+    Ok(())
 }
 
 fn handle_stats(args: &[String]) {

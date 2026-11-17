@@ -3,6 +3,8 @@ mod claude_code;
 mod cline;
 mod codex;
 mod cursor;
+#[cfg(any(target_os = "macos", windows))]
+mod deepseek_harness;
 mod droid;
 mod firebender;
 mod gemini;
@@ -20,6 +22,8 @@ pub use claude_code::ClaudeCodeInstaller;
 pub use cline::ClineInstaller;
 pub use codex::CodexInstaller;
 pub use cursor::CursorInstaller;
+#[cfg(any(target_os = "macos", windows))]
+pub(crate) use deepseek_harness::DeepSeekHarnessInstaller;
 pub use droid::DroidInstaller;
 pub use firebender::FirebenderInstaller;
 pub use gemini::GeminiInstaller;
@@ -54,6 +58,9 @@ pub fn get_all_installers() -> Vec<Box<dyn HookInstaller>> {
 
     #[cfg(windows)]
     installers.push(Box::new(VisualStudioInstaller));
+
+    #[cfg(any(target_os = "macos", windows))]
+    installers.push(Box::new(DeepSeekHarnessInstaller));
 
     installers.push(Box::new(WindsurfInstaller));
     installers

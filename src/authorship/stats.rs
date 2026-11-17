@@ -1,7 +1,12 @@
 use crate::authorship::authorship_log::LineRange;
-use crate::authorship::ignore::{build_ignore_matcher, should_ignore_file_with_matcher};
+use crate::authorship::authorship_log_serialization::AuthorshipLog;
+use crate::authorship::ignore::{
+    IgnoreMatcher, build_ignore_matcher, effective_ignore_patterns, should_ignore_file_with_matcher,
+};
+use crate::commands::diff::for_each_non_merge_commit_diff;
 use crate::error::GitAiError;
 use crate::git::notes_api::read_authorship;
+use crate::git::refs::notes_for_commits;
 use crate::git::repository::{Repository, exec_git};
 use crate::mdm::spinner::Spinner;
 use crate::utils::is_interactive_terminal;
@@ -38,6 +43,58 @@ pub struct CommitStats {
     pub git_diff_added_lines: u32,
     #[serde(default)]
     pub tool_model_breakdown: BTreeMap<String, ToolModelHeadlineStats>,
+}
+
+#[derive(Serialize)]
+pub(crate) struct CommitSummary {
+    commit_hash: String,
+    ai_lines_added: u32,
+    git_lines_added: u32,
+}
+
+pub(crate) fn commit_summaries(
+    repo: &Repository,
+    commits: &[String],
+) -> Result<Vec<CommitSummary>, GitAiError> {
+    let notes: HashMap<_, _> = notes_for_commits(repo, commits)?
+        .into_iter()
+        .filter_map(|(sha, text)| {
+            AuthorshipLog::deserialize_from_string(&text)
+                .ok()
+                .map(|note| (sha, note))
+        })
+        .collect();
+    let noted: Vec<_> = commits
+        .iter()
+        .map(String::as_str)
+        .filter(|sha| notes.contains_key(*sha))
+        .collect();
+    if noted.is_empty() {
+        return Ok(Vec::new());
+    }
+    let ignore = build_ignore_matcher(&effective_ignore_patterns(repo, &[], &[]));
+    let mut summaries = Vec::with_capacity(noted.len());
+    for_each_non_merge_commit_diff(repo, &noted, |sha, hunks| {
+        if let Some(note) = notes.get(sha) {
+            summaries.push(hunks.map(|hunks| {
+                let stats = stats_for_commit_stats_from_hunks_with_matcher(
+                    &ignore,
+                    &hunks,
+                    Some(note),
+                    false,
+                );
+                (stats.ai_accepted <= stats.git_diff_added_lines).then(|| CommitSummary {
+                    commit_hash: sha.to_string(),
+                    ai_lines_added: stats.ai_accepted,
+                    git_lines_added: stats.git_diff_added_lines,
+                })
+            }));
+        }
+    })?;
+    summaries
+        .into_iter()
+        .filter_map(Result::transpose)
+        .collect()
 }
 
 pub fn stats_command(
@@ -628,14 +685,26 @@ pub(crate) fn stats_for_commit_stats_from_hunks_with_merge_flag(
     authorship_log: Option<&crate::authorship::authorship_log_serialization::AuthorshipLog>,
     is_merge_commit: bool,
 ) -> CommitStats {
-    let ignore_matcher = build_ignore_matcher(ignore_patterns);
+    stats_for_commit_stats_from_hunks_with_matcher(
+        &build_ignore_matcher(ignore_patterns),
+        hunks,
+        authorship_log,
+        is_merge_commit,
+    )
+}
 
+fn stats_for_commit_stats_from_hunks_with_matcher(
+    ignore_matcher: &IgnoreMatcher,
+    hunks: &[crate::commands::diff::DiffHunk],
+    authorship_log: Option<&AuthorshipLog>,
+    is_merge_commit: bool,
+) -> CommitStats {
     let mut git_diff_added_lines = 0u32;
     let mut git_diff_deleted_lines = 0u32;
     let mut added_lines_by_file: HashMap<String, Vec<u32>> = HashMap::new();
 
     for hunk in hunks {
-        if should_ignore_file_with_matcher(&hunk.file_path, &ignore_matcher) {
+        if should_ignore_file_with_matcher(&hunk.file_path, ignore_matcher) {
             continue;
         }
         git_diff_added_lines += hunk.added_lines.len() as u32;

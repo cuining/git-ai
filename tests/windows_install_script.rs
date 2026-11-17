@@ -238,8 +238,16 @@ fn run_installed_git_ai(repo: &TestRepo, args: &[&str], timeout: Duration) -> Co
 }
 
 fn run_installed_git_wrapper(repo: &TestRepo, args: &[&str], timeout: Duration) -> CommandResult {
-    let mut command = Command::new(installed_git_wrapper_path(repo));
-    command.args(args).current_dir(repo.path());
+    let wrapper = installed_git_wrapper_path(repo);
+    let mut command = Command::new(&wrapper);
+    command
+        .args(args)
+        .current_dir(repo.path())
+        // The test installer skips PATH updates, so point Git to the fixture extension.
+        .env(
+            "GIT_EXEC_PATH",
+            wrapper.parent().expect("wrapper install dir"),
+        );
     configure_install_env(&mut command, repo);
     run_command_with_timeout(&mut command, timeout)
 }

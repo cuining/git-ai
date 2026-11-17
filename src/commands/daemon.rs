@@ -1,21 +1,22 @@
 use crate::daemon::daemon_log_file_path;
 use crate::daemon::{
-    ControlRequest, DaemonConfig, local_socket_connects_with_timeout, read_daemon_pid,
-    remove_stale_daemon_files, send_control_request, send_control_request_with_timeout,
+    ControlRequest, DaemonConfig, local_socket_connects_with_timeout, process_alive,
+    read_daemon_pid, remove_stale_daemon_files, send_control_request,
+    send_control_request_with_timeout, shutdown_wait_timeout,
 };
 use crate::sandbox::ensure_daemon_start_allowed;
 use crate::utils::LockFile;
 #[cfg(windows)]
 use crate::utils::{CREATE_BREAKAWAY_FROM_JOB, CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW};
+#[cfg(windows)]
+use std::ffi::OsStr;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
-#[cfg(windows)]
-use std::{ffi::OsStr, path::Path};
 
 pub fn handle_daemon(args: &[String]) {
     if args.is_empty() || is_help(args[0].as_str()) {
@@ -40,6 +41,17 @@ pub fn handle_daemon(args: &[String]) {
             let repo = parse_repo_arg(&args[1..]).unwrap_or_else(default_repo_path);
             if let Err(e) = handle_status(repo) {
                 eprintln!("Failed to get status: {}", e);
+                std::process::exit(1);
+            }
+        }
+        "health" => {
+            if let Err(e) = daemon_config_from_env_or_default_paths().and_then(|config| {
+                if args.len() != 1 {
+                    return Err("health takes no arguments".to_string());
+                }
+                check_daemon_health(&config)
+            }) {
+                eprintln!("Background service is unhealthy: {}", e);
                 std::process::exit(1);
             }
         }
@@ -189,7 +201,7 @@ fn ensure_daemon_running_attached(timeout: Duration) -> Result<DaemonConfig, Str
 
     #[cfg(windows)]
     {
-        spawn_daemon_run_detached(&config)?;
+        spawn_daemon_run_detached(&config, None)?;
         if wait_for_daemon_up(&config, timeout) {
             return Ok(config);
         }
@@ -236,11 +248,18 @@ fn handle_run(args: &[String]) -> Result<(), String> {
             // Daemon is fully dead (lock released, sockets removed, threads joined).
             // Now safe to self-update — if the install cannot proceed, bring the
             // daemon back so a failed update does not leave the service down.
+            #[cfg(not(windows))]
+            let installed_exe = crate::commands::upgrade::npm_installed_executable();
             match crate::daemon::daemon_run_pending_self_update() {
                 crate::daemon::DaemonSelfUpdateOutcome::Installed => {
                     #[cfg(not(windows))]
                     {
-                        ensure_daemon_running(Duration::from_secs(5)).map(|_| ())?;
+                        if let Some(exe) = installed_exe {
+                            let config = daemon_config_from_env_or_default_paths()?;
+                            restart_daemon_after_install(&config, &exe)?;
+                        } else {
+                            ensure_daemon_running(Duration::from_secs(5)).map(|_| ())?;
+                        }
                     }
                 }
                 crate::daemon::DaemonSelfUpdateOutcome::NoUpdate
@@ -282,7 +301,7 @@ pub(crate) fn ensure_daemon_running(
             );
         }
 
-        start_daemon_detached_with_config(config, timeout)
+        start_daemon_detached_with_config(config, timeout, None)
     }
 }
 
@@ -320,7 +339,6 @@ pub(crate) fn daemon_is_up(config: &DaemonConfig) -> bool {
         && local_socket_connects_with_timeout(&config.trace_socket_path, probe_timeout).is_ok()
 }
 
-#[cfg(any(windows, not(any(test, feature = "test-support"))))]
 fn wait_for_daemon_up(config: &DaemonConfig, timeout: Duration) -> bool {
     let deadline = Instant::now() + timeout;
     loop {
@@ -334,10 +352,10 @@ fn wait_for_daemon_up(config: &DaemonConfig, timeout: Duration) -> bool {
     }
 }
 
-#[cfg(not(any(test, feature = "test-support")))]
 fn start_daemon_detached_with_config(
     config: DaemonConfig,
     timeout: Duration,
+    installed_exe: Option<&Path>,
 ) -> Result<DaemonConfig, String> {
     if daemon_is_up(&config) {
         return Ok(config);
@@ -354,7 +372,7 @@ fn start_daemon_detached_with_config(
         ));
     }
 
-    spawn_daemon_run_detached(&config)?;
+    spawn_daemon_run_detached(&config, installed_exe)?;
     if wait_for_daemon_up(&config, timeout) {
         return Ok(config);
     }
@@ -381,13 +399,18 @@ fn powershell_single_quote_literal(value: &OsStr) -> String {
     format!("'{}'", value.to_string_lossy().replace('\'', "''"))
 }
 
-#[cfg(any(windows, not(any(test, feature = "test-support"))))]
-fn spawn_daemon_run_detached(config: &DaemonConfig) -> Result<(), String> {
+fn spawn_daemon_run_detached(
+    config: &DaemonConfig,
+    installed_exe: Option<&Path>,
+) -> Result<(), String> {
     // Use current_git_ai_exe() instead of current_exe() to resolve through
     // symlinks. When the current exe is the git shim (e.g. ~/.local/bin/git),
     // current_exe() would spawn `git daemon run` which re-enters handle_git()
     // instead of handle_git_ai(), causing a fork bomb in async mode.
-    let exe = crate::utils::current_git_ai_exe().map_err(|e| e.to_string())?;
+    let exe = match installed_exe {
+        Some(path) => path.to_path_buf(),
+        None => crate::utils::current_git_ai_exe().map_err(|e| e.to_string())?,
+    };
     let runtime_dir = daemon_runtime_dir(config)?;
 
     #[cfg(windows)]
@@ -538,6 +561,30 @@ fn attach_daemon_health(config: &DaemonConfig, output: &mut serde_json::Value) {
     }
 }
 
+pub(crate) fn check_daemon_health(config: &DaemonConfig) -> Result<(), String> {
+    local_socket_connects_with_timeout(&config.trace_socket_path, Duration::from_millis(100))
+        .map_err(|error| format!("Trace2 socket is unavailable: {error}"))?;
+    let response = send_control_request(&config.control_socket_path, &ControlRequest::StatusDaemon)
+        .map_err(|error| error.to_string())?;
+    if !response.ok {
+        return Err(response
+            .error
+            .unwrap_or_else(|| "daemon rejected the health query".to_string()));
+    }
+    let status = response.data.unwrap_or_default();
+    match (
+        status["sequencer_stalled"].as_bool(),
+        status["side_effect_error_families"].as_u64(),
+    ) {
+        (Some(false), Some(0)) => Ok(()),
+        (Some(true), _) => Err("attribution sequencer stalled".to_string()),
+        (Some(false), Some(count)) => {
+            Err(format!("attribution writes failed for {count} families"))
+        }
+        _ => Err("daemon returned an invalid health snapshot".to_string()),
+    }
+}
+
 fn handle_tail(args: &[String]) -> Result<(), String> {
     let config = daemon_config_from_env_or_default_paths()?;
     if !daemon_is_up(&config) {
@@ -637,14 +684,55 @@ const GRACEFUL_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 
 fn handle_shutdown(args: &[String]) -> Result<(), String> {
     let config = daemon_config_from_env_or_default_paths()?;
-    if has_flag(args, "--hard") {
+    if has_flag(args, "--if-running") {
+        if has_flag(args, "--hard") {
+            return Err("--if-running cannot be combined with --hard".to_string());
+        }
+        shutdown_daemon_if_running(&config)?;
+    } else {
         if !daemon_is_up(&config) && !daemon_startup_is_blocked(&config) {
             return Err("background service is not running".to_string());
         }
-        hard_kill_daemon(&config)
-    } else {
-        soft_shutdown_daemon(&config)
+        if has_flag(args, "--hard") {
+            return hard_kill_daemon(&config);
+        }
+        soft_shutdown_daemon(&config, read_daemon_pid(&config).ok())?;
     }
+    let response = crate::daemon::ControlResponse::ok(None, None);
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&response).map_err(|e| e.to_string())?
+    );
+    Ok(())
+}
+
+fn shutdown_daemon_if_running(config: &DaemonConfig) -> Result<(), String> {
+    let pid = read_daemon_pid(config).ok();
+    if daemon_confirmed_stopped(config)? {
+        return Ok(());
+    }
+    soft_shutdown_daemon(config, pid).or_else(|error| {
+        // Another caller may have completed shutdown during our request.
+        if !pid.is_some_and(process_alive) && daemon_confirmed_stopped(config).unwrap_or(false) {
+            Ok(())
+        } else {
+            Err(error)
+        }
+    })
+}
+
+fn daemon_confirmed_stopped(config: &DaemonConfig) -> Result<bool, String> {
+    config
+        .ensure_parent_dirs()
+        .map_err(|error| error.to_string())?;
+    let Some(_lock) = LockFile::try_acquire(&config.lock_path) else {
+        return Ok(false);
+    };
+    let timeout = Duration::from_millis(100);
+    Ok(
+        local_socket_connects_with_timeout(&config.control_socket_path, timeout).is_err()
+            && local_socket_connects_with_timeout(&config.trace_socket_path, timeout).is_err(),
+    )
 }
 
 fn handle_restart(args: &[String]) -> Result<(), String> {
@@ -674,13 +762,19 @@ fn handle_restart(args: &[String]) -> Result<(), String> {
     ensure_daemon_running_attached(daemon_startup_timeout()).map(|_| ())
 }
 
-fn soft_shutdown_daemon(config: &DaemonConfig) -> Result<(), String> {
+fn soft_shutdown_daemon(config: &DaemonConfig, pid: Option<u32>) -> Result<(), String> {
+    // The response follows checkpoint draining. The daemon then owns the
+    // teardown deadline and the final opportunity to persist loss metrics.
     let response = send_control_request(&config.control_socket_path, &ControlRequest::Shutdown)
         .map_err(|e| e.to_string())?;
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&response).map_err(|e| e.to_string())?
-    );
+    if !response.ok {
+        return Err(response
+            .error
+            .unwrap_or_else(|| "daemon rejected shutdown".to_string()));
+    }
+    if !wait_for_daemon_dead(config, shutdown_wait_timeout(&response), pid) {
+        return Err("timed out waiting for background service to exit".to_string());
+    }
     Ok(())
 }
 
@@ -697,7 +791,7 @@ fn hard_kill_daemon(config: &DaemonConfig) -> Result<(), String> {
         return Err(format!("kill -9 {} failed: {}", pid, err));
     }
     // Wait briefly for the OS to reap the process and release the lock.
-    let _ = wait_for_daemon_dead(config, Duration::from_secs(2));
+    let _ = wait_for_daemon_dead(config, Duration::from_secs(2), None);
     Ok(())
 }
 
@@ -719,12 +813,12 @@ fn hard_kill_daemon(config: &DaemonConfig) -> Result<(), String> {
             ));
         }
     }
-    let _ = wait_for_daemon_dead(config, Duration::from_secs(2));
+    let _ = wait_for_daemon_dead(config, Duration::from_secs(2), None);
     Ok(())
 }
 
-fn wait_for_daemon_dead(config: &DaemonConfig, timeout: Duration) -> bool {
-    let deadline = Instant::now() + timeout;
+fn wait_for_daemon_dead(config: &DaemonConfig, timeout: Duration, pid: Option<u32>) -> bool {
+    let started = Instant::now();
     loop {
         let sockets_down = !daemon_is_up(config);
         let lock_free = LockFile::try_acquire(&config.lock_path)
@@ -733,10 +827,10 @@ fn wait_for_daemon_dead(config: &DaemonConfig, timeout: Duration) -> bool {
                 true
             })
             .unwrap_or(false);
-        if sockets_down && lock_free {
+        if sockets_down && lock_free && !pid.is_some_and(process_alive) {
             return true;
         }
-        if Instant::now() >= deadline {
+        if started.elapsed() >= timeout {
             return false;
         }
         thread::sleep(Duration::from_millis(50));
@@ -800,7 +894,7 @@ pub(crate) fn stop_daemon(config: &DaemonConfig, timeout: Duration) -> Result<()
     }
 
     let remaining = deadline.saturating_duration_since(Instant::now());
-    if wait_for_daemon_dead(config, remaining) {
+    if wait_for_daemon_dead(config, remaining, None) {
         return Ok(());
     }
 
@@ -816,6 +910,33 @@ pub(crate) fn restart_daemon(config: &DaemonConfig) -> Result<(), String> {
         stop_daemon(config, GRACEFUL_SHUTDOWN_TIMEOUT)?;
     }
     ensure_daemon_running(Duration::from_secs(5)).map(|_| ())
+}
+
+pub(crate) fn repair_daemon(restart: bool, installed_exe: Option<&Path>) -> Result<(), String> {
+    let config = daemon_config_from_env_or_default_paths()?;
+    if !restart && check_daemon_health(&config).is_ok() {
+        return Ok(());
+    }
+    shutdown_daemon_if_running(&config)?;
+    let config = start_daemon_detached_with_config(config, Duration::from_secs(5), installed_exe)?;
+    check_daemon_health(&config)
+}
+
+#[cfg(not(windows))]
+pub(crate) fn restart_daemon_after_install(
+    config: &DaemonConfig,
+    exe: &Path,
+) -> Result<(), String> {
+    if daemon_is_up(config) || daemon_startup_is_blocked(config) {
+        let old_pid = read_daemon_pid(config).ok();
+        // Wait until checkpoint drain finishes. stop_daemon's short budget
+        // escalates to SIGKILL while that drain is still running.
+        soft_shutdown_daemon(config, old_pid)?;
+        if let Some(pid) = old_pid {
+            wait_for_process_exit(pid, Duration::from_secs(2));
+        }
+    }
+    start_daemon_detached_with_config(config.clone(), Duration::from_secs(5), Some(exe)).map(|_| ())
 }
 
 fn parse_repo_arg(args: &[String]) -> Option<String> {
@@ -852,7 +973,8 @@ fn print_help() {
     eprintln!("  git-ai bg start [--retry-secs <n>]");
     eprintln!("  git-ai bg run");
     eprintln!("  git-ai bg status [--repo <path>]");
-    eprintln!("  git-ai bg shutdown [--hard]");
+    eprintln!("  git-ai bg health");
+    eprintln!("  git-ai bg shutdown [--hard | --if-running]");
     eprintln!("  git-ai bg restart [--hard]");
     eprintln!("  git-ai bg tail [-n <lines>] [--full] [-f | --follow]");
 }

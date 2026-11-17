@@ -10,6 +10,7 @@ pub mod db;
 pub mod events;
 pub mod local_stats;
 pub mod model_pricing;
+pub(crate) mod personal_usage;
 pub mod pos_encoded;
 pub mod types;
 

@@ -21,6 +21,13 @@ fn isolated_metrics_db_path() -> (tempfile::TempDir, String) {
     (dir, path.to_string_lossy().to_string())
 }
 
+fn token_usage_daemon_env(metrics_db_path: &str) -> [(&'static str, &str); 2] {
+    [
+        ("GIT_AI_TEST_METRICS_DB_PATH", metrics_db_path),
+        ("GIT_AI_TOKEN_USAGE_METRICS", "1"),
+    ]
+}
+
 fn token_usage_events(metrics_db_path: &str) -> Vec<MetricEvent> {
     let db = MetricsDatabase::open_at_path(Path::new(metrics_db_path))
         .expect("metrics db should open at isolated path");
@@ -139,8 +146,7 @@ fn claude_usage_line(msg: &str, req: &str, ts: &str, output: u64, cost_usd: Opti
 #[test]
 fn claude_transcript_emits_token_usage_bucket_events() {
     let (_metrics_db_dir, metrics_db_path) = isolated_metrics_db_path();
-    let repo =
-        TestRepo::new_with_daemon_env(&[("GIT_AI_TEST_METRICS_DB_PATH", metrics_db_path.as_str())]);
+    let repo = TestRepo::new_with_daemon_env(&token_usage_daemon_env(&metrics_db_path));
     repo.git(&[
         "remote",
         "add",
@@ -250,8 +256,7 @@ fn claude_transcript_emits_token_usage_bucket_events() {
 #[test]
 fn usage_command_reports_tokens_and_cost_from_token_usage_events() {
     let (_metrics_db_dir, metrics_db_path) = isolated_metrics_db_path();
-    let repo =
-        TestRepo::new_with_daemon_env(&[("GIT_AI_TEST_METRICS_DB_PATH", metrics_db_path.as_str())]);
+    let repo = TestRepo::new_with_daemon_env(&token_usage_daemon_env(&metrics_db_path));
     repo.git(&[
         "remote",
         "add",
@@ -327,8 +332,7 @@ fn usage_command_reports_tokens_and_cost_from_token_usage_events() {
 #[test]
 fn codex_transcript_emits_deltas_with_reasoning_tokens() {
     let (_metrics_db_dir, metrics_db_path) = isolated_metrics_db_path();
-    let repo =
-        TestRepo::new_with_daemon_env(&[("GIT_AI_TEST_METRICS_DB_PATH", metrics_db_path.as_str())]);
+    let repo = TestRepo::new_with_daemon_env(&token_usage_daemon_env(&metrics_db_path));
     repo.git(&["commit", "--allow-empty", "-m", "initial"])
         .expect("initial commit should succeed");
     let repo_root = repo.canonical_path();
@@ -413,6 +417,7 @@ fn fast_long_context_codex_usage_emits_tier_and_speed_fields() {
     let (_metrics_db_dir, metrics_db_path) = isolated_metrics_db_path();
     let repo = TestRepo::new_with_daemon_env(&[
         ("GIT_AI_TEST_METRICS_DB_PATH", metrics_db_path.as_str()),
+        ("GIT_AI_TOKEN_USAGE_METRICS", "1"),
         // The org-configured attribute map must ride token-usage events
         // like every other event type.
         (
@@ -522,8 +527,7 @@ fn fast_long_context_codex_usage_emits_tier_and_speed_fields() {
 #[test]
 fn forked_codex_session_counts_only_its_own_usage() {
     let (_metrics_db_dir, metrics_db_path) = isolated_metrics_db_path();
-    let repo =
-        TestRepo::new_with_daemon_env(&[("GIT_AI_TEST_METRICS_DB_PATH", metrics_db_path.as_str())]);
+    let repo = TestRepo::new_with_daemon_env(&token_usage_daemon_env(&metrics_db_path));
     repo.git(&["commit", "--allow-empty", "-m", "initial"])
         .expect("initial commit should succeed");
     let repo_root = repo.canonical_path();
@@ -608,8 +612,7 @@ fn forked_codex_session_counts_only_its_own_usage() {
 #[test]
 fn appended_transcript_lines_update_existing_buckets() {
     let (_metrics_db_dir, metrics_db_path) = isolated_metrics_db_path();
-    let repo =
-        TestRepo::new_with_daemon_env(&[("GIT_AI_TEST_METRICS_DB_PATH", metrics_db_path.as_str())]);
+    let repo = TestRepo::new_with_daemon_env(&token_usage_daemon_env(&metrics_db_path));
     repo.git(&["commit", "--allow-empty", "-m", "initial"])
         .expect("initial commit should succeed");
     let repo_root = repo.canonical_path();
@@ -721,8 +724,7 @@ fn disabled_flag_spawns_nothing_and_deletes_collected_data() {
 #[test]
 fn resumed_session_through_the_daemon_does_not_double_count() {
     let (_metrics_db_dir, metrics_db_path) = isolated_metrics_db_path();
-    let repo =
-        TestRepo::new_with_daemon_env(&[("GIT_AI_TEST_METRICS_DB_PATH", metrics_db_path.as_str())]);
+    let repo = TestRepo::new_with_daemon_env(&token_usage_daemon_env(&metrics_db_path));
     repo.git(&["commit", "--allow-empty", "-m", "initial"])
         .expect("initial commit should succeed");
     let repo_root = repo.canonical_path();
@@ -792,8 +794,7 @@ fn resumed_session_through_the_daemon_does_not_double_count() {
 #[test]
 fn subagent_transcript_owns_its_usage_and_links_to_the_parent() {
     let (_metrics_db_dir, metrics_db_path) = isolated_metrics_db_path();
-    let repo =
-        TestRepo::new_with_daemon_env(&[("GIT_AI_TEST_METRICS_DB_PATH", metrics_db_path.as_str())]);
+    let repo = TestRepo::new_with_daemon_env(&token_usage_daemon_env(&metrics_db_path));
     repo.git(&["commit", "--allow-empty", "-m", "initial"])
         .expect("initial commit should succeed");
     let repo_root = repo.canonical_path();
@@ -890,8 +891,7 @@ fn sidechain_usage_line(msg: &str, req: &str, ts: &str, cache_read: u64) -> Stri
 #[test]
 fn unchanged_buckets_are_not_reemitted() {
     let (_metrics_db_dir, metrics_db_path) = isolated_metrics_db_path();
-    let repo =
-        TestRepo::new_with_daemon_env(&[("GIT_AI_TEST_METRICS_DB_PATH", metrics_db_path.as_str())]);
+    let repo = TestRepo::new_with_daemon_env(&token_usage_daemon_env(&metrics_db_path));
     repo.git(&["commit", "--allow-empty", "-m", "initial"])
         .expect("initial commit should succeed");
     let repo_root = repo.canonical_path();
@@ -946,8 +946,7 @@ fn unchanged_buckets_are_not_reemitted() {
 #[test]
 fn replacement_lowering_a_bucket_reemits_lower_totals() {
     let (_metrics_db_dir, metrics_db_path) = isolated_metrics_db_path();
-    let repo =
-        TestRepo::new_with_daemon_env(&[("GIT_AI_TEST_METRICS_DB_PATH", metrics_db_path.as_str())]);
+    let repo = TestRepo::new_with_daemon_env(&token_usage_daemon_env(&metrics_db_path));
     repo.git(&["commit", "--allow-empty", "-m", "initial"])
         .expect("initial commit should succeed");
     let repo_root = repo.canonical_path();
@@ -1012,8 +1011,7 @@ fn replacement_lowering_a_bucket_reemits_lower_totals() {
 #[test]
 fn emptied_bucket_emits_zero_exactly_once() {
     let (_metrics_db_dir, metrics_db_path) = isolated_metrics_db_path();
-    let repo =
-        TestRepo::new_with_daemon_env(&[("GIT_AI_TEST_METRICS_DB_PATH", metrics_db_path.as_str())]);
+    let repo = TestRepo::new_with_daemon_env(&token_usage_daemon_env(&metrics_db_path));
     repo.git(&["commit", "--allow-empty", "-m", "initial"])
         .expect("initial commit should succeed");
     let repo_root = repo.canonical_path();
@@ -1099,8 +1097,7 @@ fn emptied_bucket_emits_zero_exactly_once() {
 #[test]
 fn deleted_transcript_is_handled_quietly() {
     let (_metrics_db_dir, metrics_db_path) = isolated_metrics_db_path();
-    let repo =
-        TestRepo::new_with_daemon_env(&[("GIT_AI_TEST_METRICS_DB_PATH", metrics_db_path.as_str())]);
+    let repo = TestRepo::new_with_daemon_env(&token_usage_daemon_env(&metrics_db_path));
     repo.git(&["commit", "--allow-empty", "-m", "initial"])
         .expect("initial commit should succeed");
     let repo_root = repo.canonical_path();
@@ -1161,8 +1158,7 @@ fn deleted_transcript_is_handled_quietly() {
 #[cfg(not(windows))]
 fn startup_token_usage_sweep_logs_discovered_transcripts() {
     let (_metrics_db_dir, metrics_db_path) = isolated_metrics_db_path();
-    let mut repo =
-        TestRepo::new_with_daemon_env(&[("GIT_AI_TEST_METRICS_DB_PATH", metrics_db_path.as_str())]);
+    let mut repo = TestRepo::new_with_daemon_env(&token_usage_daemon_env(&metrics_db_path));
     repo.git(&["commit", "--allow-empty", "-m", "initial"])
         .expect("initial commit should succeed");
     let repo_root = repo.canonical_path();
@@ -1193,10 +1189,7 @@ fn startup_token_usage_sweep_logs_discovered_transcripts() {
     content.push_str(&claude_usage_line("m2", "r2", &recent_ts(6, 0), 70, None));
     content.push('\n');
     fs::write(&transcript_path, content).unwrap();
-    repo.restart_dedicated_daemon_with_env_for_test(&[(
-        "GIT_AI_TEST_METRICS_DB_PATH",
-        metrics_db_path.as_str(),
-    )]);
+    repo.restart_dedicated_daemon_with_env_for_test(&token_usage_daemon_env(&metrics_db_path));
 
     let logs = wait_for_daemon_log(&repo, "token-usage sweep completed");
     assert!(logs.contains("token-usage sweep started"), "{logs}");

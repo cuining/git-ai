@@ -1269,32 +1269,24 @@ impl Repository {
     }
 
     pub fn remotes(&self) -> Result<Vec<String>, GitAiError> {
+        let mut seen = std::collections::HashSet::new();
         Ok(self
             .remotes_with_urls()?
             .into_iter()
             .map(|(name, _)| name)
+            .filter(|name| seen.insert(name.clone()))
             .collect())
     }
 
     // List all remotes with their URLs as tuples (name, url)
     pub fn remotes_with_urls(&self) -> Result<Vec<(String, String)>, GitAiError> {
-        let config = self.get_git_config_file()?;
-        let mut remotes = Vec::new();
+        self.get_git_config_file()
+            .map(|config| remotes_from_config(&config))
+    }
 
-        for section in config.sections() {
-            if !section.header().name().eq_ignore_ascii_case(b"remote") {
-                continue;
-            }
-            let Some(name) = section.header().subsection_name() else {
-                continue;
-            };
-            let Some(url) = section.body().value("url") else {
-                continue;
-            };
-            remotes.push((name.to_string(), url.to_string()));
-        }
-
-        Ok(remotes)
+    pub(crate) fn fetch_remotes(&self) -> Result<Vec<(String, String)>, GitAiError> {
+        self.get_git_config_file()
+            .map(|config| fetch_remotes_from_config(&config))
     }
 
     fn load_optional_config_file(
@@ -1476,20 +1468,8 @@ impl Repository {
 
     // Non-standard method of getting a 'default' remote
     pub fn get_default_remote(&self) -> Result<Option<String>, GitAiError> {
-        let remotes = self.remotes()?;
-        if remotes.is_empty() {
-            return Ok(None);
-        }
-        // Prefer 'origin' if it exists
-        for i in 0..remotes.len() {
-            if let Some(name) = remotes.get(i)
-                && name == "origin"
-            {
-                return Ok(Some("origin".to_string()));
-            }
-        }
-        // Otherwise, just use the first remote
-        Ok(remotes.first().map(|s| s.to_string()))
+        let remotes = self.remotes_with_urls()?;
+        Ok(default_remote(&remotes).map(|(name, _)| name.clone()))
     }
 
     #[allow(dead_code)]
@@ -2339,6 +2319,71 @@ pub fn config_get_str_for_path_no_git_exec(
     let paths = discover_repository_paths_no_git_exec(path)?;
     git_config_file_for_repo_paths(&paths.git_dir, &paths.git_common_dir)
         .map(|cfg| cfg.string(key).map(|cow| cow.to_string()))
+}
+
+pub(crate) fn remotes_for_path(path: &Path) -> Result<Vec<(String, String)>, GitAiError> {
+    let paths = discover_repository_paths_no_git_exec(path)?;
+    let config = git_config_file_for_repo_paths(&paths.git_dir, &paths.git_common_dir)?;
+    Ok(fetch_remotes_from_config(&config))
+}
+
+fn remotes_from_config(config: &gix_config::File<'_>) -> Vec<(String, String)> {
+    let mut remotes = Vec::new();
+    for section in config.sections() {
+        let header = section.header();
+        if !header.name().eq_ignore_ascii_case(b"remote") {
+            continue;
+        }
+        let Some(name) = header.subsection_name().map(ToString::to_string) else {
+            continue;
+        };
+        for url in section.body().values("url") {
+            if url.is_empty() {
+                // An empty value resets earlier URLs for this remote in Git.
+                remotes.retain(|(remote, _)| remote != &name);
+            } else {
+                remotes.push((name.clone(), url.to_string()));
+            }
+        }
+    }
+    remotes
+}
+
+fn fetch_remotes_from_config(config: &gix_config::File<'_>) -> Vec<(String, String)> {
+    let mut rewrites = Vec::new();
+    for section in config.sections() {
+        let header = section.header();
+        if header.name().eq_ignore_ascii_case(b"url")
+            && let Some(base) = header.subsection_name()
+        {
+            rewrites.extend(
+                section
+                    .body()
+                    .values("insteadOf")
+                    .into_iter()
+                    .map(|prefix| (prefix.to_string(), base)),
+            );
+        }
+    }
+    // Git applies a single rewrite, choosing the longest matching prefix.
+    rewrites.sort_by_key(|(prefix, _)| std::cmp::Reverse(prefix.len()));
+    let mut remotes = remotes_from_config(config);
+    for (_, url) in &mut remotes {
+        if let Some(rewritten) = rewrites
+            .iter()
+            .find_map(|(prefix, base)| url.strip_prefix(prefix).map(|rest| format!("{base}{rest}")))
+        {
+            *url = rewritten;
+        }
+    }
+    remotes
+}
+
+pub(crate) fn default_remote(remotes: &[(String, String)]) -> Option<&(String, String)> {
+    remotes
+        .iter()
+        .find(|(name, _)| name == "origin")
+        .or_else(|| remotes.first())
 }
 
 fn repository_object_hash_kind_for_path_no_git_exec(

@@ -110,7 +110,10 @@ fn print_config_help() {
     println!("  disable_auto_updates         Disable auto updates (bool)");
     println!("  update_channel               Update channel (latest/next)");
     println!("  feature_flags                Feature flags (object)");
-    println!("  api_base_url                 API base URL (default: https://usegitai.com)");
+    println!(
+        "  api_base_url                 API base URL (default: {})",
+        crate::config::DEFAULT_API_BASE_URL
+    );
     println!("  api_key                      API key for X-API-Key header");
     println!("  author.name                  git-ai author display name override");
     println!("  author.email                 git-ai author email override");

@@ -87,16 +87,25 @@ def run_cmd(
 def build_release_binary(repo_dir: Path, target_dir: Path) -> Path:
     env = dict(os.environ)
     env["CARGO_TARGET_DIR"] = str(target_dir)
+    metadata = json.loads(run_cmd(
+        ["cargo", "metadata", "--no-deps", "--format-version", "1"],
+        cwd=repo_dir,
+        env=env,
+        timeout_s=120,
+    ).stdout)
+    package = next(package for package in metadata["packages"]
+                   if Path(package["manifest_path"]).resolve() == (repo_dir / "Cargo.toml").resolve())
+    binary_name = package.get("default_run") or package["name"]
     run_cmd(
-        ["cargo", "build", "--release", "--bin", "git-ai"],
+        ["cargo", "build", "--release", "--bin", binary_name],
         cwd=repo_dir,
         env=env,
         timeout_s=3600,
     )
     if os.name == "nt":
-        binary = target_dir / "release" / "git-ai.exe"
+        binary = target_dir / "release" / f"{binary_name}.exe"
     else:
-        binary = target_dir / "release" / "git-ai"
+        binary = target_dir / "release" / binary_name
     if not binary.exists():
         raise BenchmarkError(f"Expected binary not found: {binary}")
     return binary
@@ -215,6 +224,8 @@ def setup_variant_runtime(
         control_socket = daemon_dir / "control.sock"
         trace_socket = daemon_dir / "trace2.sock"
         daemon_dir.mkdir(parents=True, exist_ok=True)
+        env["GIT_AI_DAEMON_CONTROL_SOCKET"] = str(control_socket)
+        env["GIT_AI_DAEMON_TRACE_SOCKET"] = str(trace_socket)
         daemon_proc = subprocess.Popen(
             [str(variant.binary), "daemon", "run"],
             cwd=str(runtime_root),
@@ -244,7 +255,6 @@ def setup_variant_runtime(
             "0",
         )
         env["GIT_AI_DAEMON_CHECKPOINT_DELEGATE"] = "true"
-        env["GIT_AI_DAEMON_CONTROL_SOCKET"] = str(control_socket)
 
     git_bin = wrapper_git if variant.mode == "wrapper" else real_git
     return env, git_bin, daemon_proc, home_dir

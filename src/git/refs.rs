@@ -231,7 +231,7 @@ pub(in crate::git) fn note_blob_oids_for_commits(
 ///
 /// Returns a map of commit SHA -> raw note content for commits that currently
 /// have notes in `refs/notes/ai`.
-pub(in crate::git) fn notes_for_commits(
+pub(crate) fn notes_for_commits(
     repo: &Repository,
     commit_shas: &[String],
 ) -> Result<HashMap<String, String>, GitAiError> {

@@ -30,6 +30,55 @@ fn range_stats_from_args_with_env(
     serde_json::from_str(&json).expect("valid range stats json")
 }
 
+#[test]
+fn test_stats_commits_stdin_reports_only_commits_with_notes() {
+    let repo = TestRepo::new();
+    let mut mixed = repo.filename("mixed.txt");
+    let mixed_lines = crate::lines!["Known human".human(), "AI in root".ai()];
+    mixed.set_contents(mixed_lines.clone());
+    let mut unknown = repo.filename("unknown.txt");
+    fs::write(repo.path().join("unknown.txt"), "Unknown\n").unwrap();
+    let root = repo.stage_all_and_commit("Mixed root commit").unwrap();
+    mixed.assert_committed_lines(mixed_lines);
+    unknown.assert_committed_lines(crate::lines!["Unknown".unattributed_human()]);
+
+    let mut added = repo.filename("added.txt");
+    let added_lines = crate::lines!["AI after root".ai()];
+    added.set_contents(added_lines.clone());
+    let second = repo.stage_all_and_commit("Add another AI line").unwrap();
+    added.assert_committed_lines(added_lines);
+
+    fs::write(
+        repo.path().join("unknown.txt"),
+        "Unknown\nUntracked addition\n",
+    )
+    .unwrap();
+    let missing = repo
+        .stage_all_and_commit("Remove this commit's note")
+        .unwrap();
+    unknown.assert_committed_lines(crate::lines![
+        "Unknown".unattributed_human(),
+        "Untracked addition".unattributed_human(),
+    ]);
+    repo.git_og(&["notes", "--ref=ai", "remove", &missing.commit_sha])
+        .unwrap();
+
+    let input = format!(
+        "{}\n{}\n{}\n",
+        second.commit_sha, missing.commit_sha, root.commit_sha
+    );
+    let output = repo
+        .git_ai_with_stdin(&["stats", "--commits-stdin", "--json"], input.as_bytes())
+        .expect("git-ai should report native commit summaries");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&output).expect("valid JSON array"),
+        serde_json::json!([
+            {"commit_hash": second.commit_sha, "ai_lines_added": 1, "git_lines_added": 1},
+            {"commit_hash": root.commit_sha, "ai_lines_added": 1, "git_lines_added": 3}
+        ])
+    );
+}
+
 fn stats_while_restoring_authorship_note(
     repo: &TestRepo,
     commit_sha: &str,
@@ -639,6 +688,57 @@ fn test_markdown_stats_formatting() {
     let markdown = write_stats_to_markdown(&stats);
     println!("{}", markdown);
     assert_debug_snapshot!(markdown);
+}
+
+#[test]
+fn test_stats_counts_source_in_build_directories_and_ignores_marked_outputs() {
+    let repo = TestRepo::new();
+    let sources = [
+        "scripts/build/main.rs",
+        "src/out/main.rs",
+        "src/target/main.rs",
+    ];
+    for path in sources {
+        repo.filename(path)
+            .set_contents_no_stage(crate::lines!["fn main() {}".ai()]);
+    }
+    let generated = [
+        "dist/output.rs",
+        "nested/build/output.rs",
+        "coverage/output.rs",
+        "nested/__pycache__/output.rs",
+        ".next/output.rs",
+        "nested/.nuxt/output.rs",
+        "out/output.rs",
+        "nested/target/output.rs",
+    ];
+    fs::write(
+        repo.path().join(".git-ai-ignore"),
+        "nested/build/output.rs\nout/output.rs\nnested/target/output.rs\n",
+    )
+    .unwrap();
+    for path in generated {
+        repo.filename(path)
+            .set_contents_no_stage(crate::lines!["generated".unattributed_human()]);
+    }
+    let stage: Vec<_> = ["add", "--"]
+        .into_iter()
+        .chain(sources)
+        .chain(generated)
+        .collect();
+    repo.git(&stage).unwrap();
+    repo.commit("Add source and build outputs").unwrap();
+    for path in sources {
+        repo.filename(path)
+            .assert_committed_lines(crate::lines!["fn main() {}".ai()]);
+    }
+    for path in generated {
+        repo.filename(path)
+            .assert_committed_lines(crate::lines!["generated".unattributed_human()]);
+    }
+
+    let stats = stats_from_args(&repo, &["stats", "HEAD", "--json"]);
+    assert_eq!((stats.git_diff_added_lines, stats.ai_additions), (3, 3));
 }
 
 #[test]

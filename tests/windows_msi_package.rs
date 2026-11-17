@@ -10,29 +10,29 @@ fn wix_source() -> String {
 }
 
 #[test]
-fn msi_enables_wsl_installation_by_default() {
+fn msi_does_not_expose_wsl_installation() {
     let wix = wix_source();
 
-    assert!(
-        wix.contains(r#"<Property Id="INSTALL_WSL" Value="1" Secure="yes" />"#),
-        "MSI should define INSTALL_WSL=1 as a secure public property"
-    );
-    assert!(
-        wix.contains(r#"Value="--wsl""#),
-        "MSI should translate the enabled property into the CLI flag"
-    );
-    assert!(
-        wix.contains(r#"INSTALL_WSL = &quot;1&quot;"#),
-        "MSI should only add --wsl when INSTALL_WSL is enabled"
-    );
+    for setting in ["INSTALL_WSL", "WslInstallArgument", "--wsl"] {
+        assert!(
+            !wix.contains(setting),
+            "MSI should not expose the WSL setting {setting}"
+        );
+    }
 }
 
 #[test]
-fn msi_passes_the_conditional_wsl_argument_to_install_hooks() {
+fn msi_configures_windows_install_hooks() {
     let wix = wix_source();
 
     assert!(
-        wix.contains("install-hooks --env [WslInstallArgument] --api-base"),
-        "MSI configure action should include the conditional WSL argument"
+        wix.contains(
+            r#"Value="install-hooks --env --api-base &quot;[API_BASE]&quot; --api-key &quot;[API_KEY]&quot;""#
+        ),
+        "MSI should configure the Windows environment and pass the API settings"
+    );
+    assert!(
+        wix.contains(r#"ExeCommand="[ConfigureGitAi]""#),
+        "MSI should run the configured install-hooks command"
     );
 }

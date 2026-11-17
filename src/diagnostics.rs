@@ -331,6 +331,12 @@ pub fn check_trace2_global_config(target: &GitDiagnosticTarget) -> DiagnosticChe
 }
 
 pub fn run_attribution_self_check(target: &GitDiagnosticTarget) -> DiagnosticCheckResult {
+    if !Config::fresh().is_allowed_repository_url(Some(DEBUG_SELF_CHECK_REMOTE_URL)) {
+        return DiagnosticCheckResult::skipped(
+            "attribution self-check skipped by repository filters",
+            vec![],
+        );
+    }
     let mut commands = Vec::new();
     let repo_path = debug_self_check_root().join(format!(
         "{}-{}",
@@ -441,10 +447,8 @@ pub fn run_attribution_self_check(target: &GitDiagnosticTarget) -> DiagnosticChe
 pub fn run_trace2_file_self_check(target: &GitDiagnosticTarget) -> DiagnosticCheckResult {
     let mut commands = Vec::new();
     let deadline = Instant::now() + DEBUG_CHECK_TIMEOUT;
-    let trace_dir = crate::mdm::utils::home_dir()
-        .join(".git-ai")
-        .join("internal")
-        .join("daemon");
+    let trace_dir =
+        crate::config::internal_dir_for_home(&crate::mdm::utils::home_dir()).join("daemon");
     let trace_path = trace_dir.join(format!(
         "trace2-debug-check-{}-{}.json",
         sanitize_label(&target.label),
@@ -1385,11 +1389,13 @@ mod tests {
     #[cfg(windows)]
     fn stdout_stderr_sleep_command() -> (&'static str, Vec<&'static str>) {
         (
-            "powershell.exe",
+            "cmd.exe",
             vec![
-                "-NoProfile",
-                "-Command",
-                "[Console]::Out.Write('out'); [Console]::Error.Write('err'); Start-Sleep -Seconds 60",
+                "/D",
+                "/S",
+                "/C",
+                // Redirect the delay command so it cannot keep the output pipes open.
+                "echo out & echo err 1>&2 & ping.exe /n 10 127.0.0.1 >NUL 2>&1",
             ],
         )
     }
@@ -1455,8 +1461,8 @@ mod tests {
     #[test]
     fn test_run_logged_command_with_timeout_reports_partial_output() {
         let (program, args) = stdout_stderr_sleep_command();
-        let record =
-            run_logged_command_with_timeout(program, &args, None, Duration::from_millis(300));
+        let timeout = Duration::from_secs(3);
+        let record = run_logged_command_with_timeout(program, &args, None, timeout);
 
         assert!(record.timed_out, "{record:?}");
         assert_eq!(record.stdout, "out");

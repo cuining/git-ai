@@ -215,6 +215,11 @@ fi
 # Install into the user's bin directory ~/.git-ai/bin
 INSTALL_DIR="$HOME/.git-ai/bin"
 
+if [ "${GIT_AI_NPM_UPGRADE:-}" = "1" ]; then
+    BINARY_NAME="git-ai"
+    [ -n "${GIT_AI_LOCAL_BINARY:-}" ] || error "npm upgrade requires a verified local binary"
+fi
+
 # Create directory if it doesn't exist
 mkdir -p "$INSTALL_DIR"
 
@@ -243,10 +248,22 @@ fi
 # Verify checksum if embedded (release builds only)
 verify_checksum "$TMP_FILE" "$BINARY_NAME"
 
+chmod +x "$TMP_FILE"
 mv -f "$TMP_FILE" "${INSTALL_DIR}/git-ai"
 
-# Make executable
-chmod +x "${INSTALL_DIR}/git-ai"
+# The upgrade caller owns the daemon restart. First-install actions stay below.
+if [ "${GIT_AI_NPM_UPGRADE:-}" = "1" ]; then
+    if [ "$OS" = "macos" ]; then
+        refresh_logs="$HOME/.git-ai/upgrade-logs"
+        if mkdir -p "$refresh_logs"; then
+            nohup "${INSTALL_DIR}/git-ai" install-hooks --refresh-managed-deepseek \
+                </dev/null >>"$refresh_logs/deepseek-hooks.log" 2>&1 &
+        else
+            warn "Could not create DeepSeek Harness hook refresh log directory: $refresh_logs"
+        fi
+    fi
+    exit 0
+fi
 
 # Remove quarantine attribute on macOS
 if [ "$OS" = "macos" ]; then

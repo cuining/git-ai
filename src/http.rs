@@ -14,6 +14,13 @@ use ureq::typestate::{WithBody, WithoutBody};
 /// Proxy configuration is read from `ALL_PROXY`, `HTTPS_PROXY`, `HTTP_PROXY`,
 /// and their lowercase variants. `NO_PROXY`/`no_proxy` bypasses matching hosts.
 pub fn build_agent(timeout_secs: Option<u64>) -> ureq::Agent {
+    build_agent_with_redirects(timeout_secs, None)
+}
+
+pub(crate) fn build_agent_with_redirects(
+    timeout_secs: Option<u64>,
+    max_redirects: Option<u32>,
+) -> ureq::Agent {
     let mut builder = Config::builder().http_status_as_error(false).tls_config(
         TlsConfig::builder()
             .provider(TlsProvider::NativeTls)
@@ -23,6 +30,10 @@ pub fn build_agent(timeout_secs: Option<u64>) -> ureq::Agent {
 
     if let Some(secs) = timeout_secs {
         builder = builder.timeout_global(Some(Duration::from_secs(secs)));
+    }
+
+    if let Some(max_redirects) = max_redirects {
+        builder = builder.max_redirects(max_redirects);
     }
 
     builder.build().new_agent()

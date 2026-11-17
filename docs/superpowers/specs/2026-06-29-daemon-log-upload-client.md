@@ -22,8 +22,8 @@ This document describes the Git AI client-side daemon diagnostics upload path.
   oldest events are dropped.
 - Events are dropped without retry when upload is disabled, the current API
   auth/configuration does not permit upload, or a dispatched upload fails.
-- `feature_flags.daemon_log_upload` disables capture and upload when set to
-  `false`. The flag defaults to enabled in debug and release builds.
+- `feature_flags.daemon_log_upload` controls capture and upload of daemon logs.
+  It defaults to `false` in DCC builds and `true` in builds with `OSS_BUILD=1`.
 - Each event keeps at most 64 structured fields. Field names and string values
   are bounded, secret-redacted, and length-limited before buffering.
 

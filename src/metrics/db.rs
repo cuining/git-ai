@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
 /// Current schema version (must match MIGRATIONS.len())
-const SCHEMA_VERSION: usize = 5;
+const SCHEMA_VERSION: usize = 6;
 
 // This value is part of the metrics retry index schema. Changing it requires a
 // migration that rebuilds `metrics_retryable` with the same literal used by
@@ -89,6 +89,10 @@ const MIGRATIONS: &[&str] = &[
             AND attempts < 6;
 
     DROP INDEX IF EXISTS metrics_pending_retry;
+    "#,
+    // Migration 5 -> 6: Find history rows before reading their JSON payloads.
+    r#"
+    CREATE INDEX IF NOT EXISTS metrics_history_kind_ts ON metrics (event_kind, event_ts);
     "#,
 ];
 
@@ -281,7 +285,7 @@ impl MetricsDatabase {
 
         let home = dirs::home_dir()
             .ok_or_else(|| GitAiError::Generic("Could not determine home directory".to_string()))?;
-        Ok(home.join(".git-ai").join("internal").join("metrics-db"))
+        Ok(crate::config::internal_dir_for_home(&home).join("metrics-db"))
     }
 
     /// Initialize schema and handle migrations
@@ -991,27 +995,30 @@ impl MetricsDatabase {
         repo_filter: Option<&str>,
         event_ids: &[u16],
     ) -> Result<Vec<MetricHistoryRecord>, GitAiError> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT event_json, event_ts, event_kind FROM metrics WHERE event_ts IS NULL OR event_ts >= ?1 ORDER BY id ASC")?;
-        let rows = stmt.query_map(params![since_ts as i64], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, Option<i64>>(1)?,
-                row.get::<_, Option<i64>>(2)?,
-            ))
-        })?;
+        if event_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let placeholders = std::iter::repeat_n("?", event_ids.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        // Use the covering index for candidate IDs, including rows with legacy metadata.
+        // Sorting the matching IDs preserves the insertion order without scanning JSON rows.
+        let sql = format!(
+            "SELECT event_json FROM metrics WHERE id IN (
+                SELECT id FROM metrics INDEXED BY metrics_history_kind_ts
+                WHERE (event_ts IS NULL OR event_ts >= ?1)
+                  AND (event_kind IN ({placeholders}) OR event_kind IS NULL
+                       OR event_kind < 0 OR event_kind > 65535)
+            ) ORDER BY id ASC"
+        );
+        let bindings =
+            std::iter::once(i64::from(since_ts)).chain(event_ids.iter().copied().map(i64::from));
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(params_from_iter(bindings), |row| row.get::<_, String>(0))?;
 
         let mut records = Vec::new();
         for row in rows {
-            let (event_json, _cached_ts, cached_kind) = row?;
-            if let Some(kind) = cached_kind
-                && (0..=u16::MAX as i64).contains(&kind)
-                && !event_ids.contains(&(kind as u16))
-            {
-                continue;
-            }
-
+            let event_json = row?;
             let Ok(event) = serde_json::from_str::<MetricEvent>(&event_json) else {
                 continue;
             };
@@ -1752,7 +1759,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(version, "5");
+        assert_eq!(version, SCHEMA_VERSION.to_string());
 
         for column in [
             "delivered_ts",
@@ -1789,6 +1796,7 @@ mod tests {
             "metrics_event_ts_kind",
             "metrics_session_kind_ts",
             "metrics_parent_session_kind_ts",
+            "metrics_history_kind_ts",
         ] {
             assert_metric_index_exists(&db, index);
         }
@@ -1848,7 +1856,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(version, "5");
+        assert_eq!(version, SCHEMA_VERSION.to_string());
     }
 
     #[test]
@@ -1887,7 +1895,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(version, "5");
+        assert_eq!(version, SCHEMA_VERSION.to_string());
         assert_eq!(db.count().unwrap(), 1);
         assert_eq!(db.count_retryable().unwrap(), 1);
     }
@@ -1930,7 +1938,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(version, "5");
+        assert_eq!(version, SCHEMA_VERSION.to_string());
 
         for column in [
             "delivered_ts",
@@ -1999,13 +2007,14 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(version, "5");
+        assert_eq!(version, SCHEMA_VERSION.to_string());
         assert!(db.column_exists("metrics", "event_ts").unwrap());
         assert!(db.column_exists("metrics", "event_kind").unwrap());
         for index in [
             "metrics_event_ts_kind",
             "metrics_session_kind_ts",
             "metrics_parent_session_kind_ts",
+            "metrics_history_kind_ts",
         ] {
             assert_metric_index_exists(&db, index);
         }
@@ -2058,7 +2067,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(version, "5");
+        assert_eq!(version, SCHEMA_VERSION.to_string());
         assert_metric_index_exists(&db, "metrics_retryable");
         assert_metric_index_missing(&db, "metrics_pending_retry");
         assert_eq!(db.count().unwrap(), 1);
@@ -3136,6 +3145,22 @@ mod tests {
     }
 
     #[test]
+    fn test_get_metric_history_skips_unrequested_payloads_before_reading_them() {
+        let (mut db, _temp_dir) = create_test_db();
+        let ts = days_ago(1);
+        db.insert_events(&[event_json(ts)]).unwrap();
+        db.conn
+            .execute(
+                "INSERT INTO metrics (event_json, event_ts, event_kind) VALUES (x'FF', ?1, 5)",
+                [ts],
+            )
+            .unwrap();
+        let records = db.get_metric_history(0, None, &[1, 7]).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].event_id, 1);
+    }
+
+    #[test]
     fn test_prunes_metric_rows_older_than_retention_by_event_timestamp() {
         let (mut db, _temp_dir) = create_test_db();
 
@@ -3276,7 +3301,7 @@ mod tests {
     #[test]
     fn test_database_path() {
         let path = MetricsDatabase::database_path().unwrap();
-        assert!(path.to_string_lossy().contains(".git-ai"));
+        assert!(path.components().any(|part| part.as_os_str() == ".git-ai"));
         assert!(path.to_string_lossy().contains("internal"));
         assert!(path.to_string_lossy().ends_with("metrics-db"));
     }

@@ -7,7 +7,11 @@ use crate::commands::blame::GitAiBlameOptions;
 use crate::commands::revision::normalize_head_rev;
 use crate::error::GitAiError;
 use crate::git::notes_api::{read_authorship, read_note};
-use crate::git::repository::{InternalGitProfile, Repository, exec_git_with_profile};
+use crate::git::repo_state::is_valid_git_oid;
+use crate::git::repository::{
+    InternalGitProfile, Repository, args_with_internal_git_profile, exec_git_stdin_streaming,
+    exec_git_with_profile,
+};
 use serde::{Deserialize, Serialize, Serializer};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -481,6 +485,59 @@ pub fn get_diff_with_line_numbers(
     parse_diff_hunks(&diff_text)
 }
 
+const FIND_RENAMES: &str = "--find-renames=1%";
+
+/// Stream each requested root or single-parent commit's patch from one Git process.
+pub(crate) fn for_each_non_merge_commit_diff(
+    repo: &Repository,
+    commits: &[&str],
+    mut on_commit: impl FnMut(&str, Result<Vec<DiffHunk>, GitAiError>),
+) -> Result<(), GitAiError> {
+    const HEADER: &str = "git-ai-summary ";
+    let mut args = repo.global_args_for_exec();
+    args.extend(
+        [
+            "diff-tree",
+            "--stdin",
+            "--root",
+            "--always",
+            "--no-notes",
+            "--no-show-signature",
+            "--format=git-ai-summary %H %P",
+            "-r",
+            "-p",
+            "-U0",
+            FIND_RENAMES,
+        ]
+        .map(str::to_string),
+    );
+    let args = args_with_internal_git_profile(&args, InternalGitProfile::PatchParse);
+    let input = commits.join("\n") + "\n";
+    let mut current = None::<String>;
+    let mut patch = String::new();
+    let mut finish = |commit: Option<&str>, patch: &mut String| {
+        if let Some(commit) = commit {
+            on_commit(commit, parse_diff_hunks(patch));
+        }
+        patch.clear();
+    };
+    exec_git_stdin_streaming(&args, input.as_bytes(), |line| {
+        if let Some(header) = line.strip_prefix(HEADER) {
+            finish(current.as_deref(), &mut patch);
+            let mut fields = header.split_ascii_whitespace();
+            current = fields
+                .next()
+                .filter(|sha| is_valid_git_oid(sha) && fields.count() <= 1)
+                .map(str::to_string);
+        } else if current.is_some() {
+            patch.push_str(line);
+            patch.push('\n');
+        }
+    })?;
+    finish(current.as_deref(), &mut patch);
+    Ok(())
+}
+
 fn get_diff_text(
     repo: &Repository,
     from: &str,
@@ -494,7 +551,7 @@ fn get_diff_text(
     }
     // Use permissive rename detection so rename+edit commits are represented
     // as renames with edit hunks instead of delete/add file pairs.
-    args.push("--find-renames=1%".to_string());
+    args.push(FIND_RENAMES.to_string());
     args.push("--no-color".to_string());
     args.push(from.to_string());
     args.push(to.to_string());

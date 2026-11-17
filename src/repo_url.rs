@@ -1,16 +1,12 @@
 use url::Url;
 
 /// Normalize repo URL to canonical HTTPS format
-/// Accepts: HTTPS, HTTP, SSH (scp-like user@host:path or ssh://), git:// URLs
+/// Accepts: HTTPS, HTTP, SSH (scp-like `[user@]host:path` or ssh://), git:// URLs
 /// Returns: Canonical HTTPS URL without credentials, .git suffix, or trailing slash
 pub fn normalize_repo_url(url_str: &str) -> Result<String, String> {
     let url_str = url_str.trim();
 
-    // Handle SSH scp-like format: user@host:path
-    if !url_str.contains("://")
-        && let Some((user_host, path)) = url_str.split_once(':')
-        && let Some((_, host)) = user_host.rsplit_once('@')
-    {
+    if let Some((host, path)) = scp_remote_parts(url_str) {
         return normalize_ssh_url(host, path);
     }
 
@@ -19,7 +15,7 @@ pub fn normalize_repo_url(url_str: &str) -> Result<String, String> {
 
     // Validate scheme
     let scheme = url.scheme();
-    if !["https", "http", "git", "ssh"].contains(&scheme) {
+    if !is_git_network_scheme(scheme) {
         return Err(format!("Unsupported URL scheme: {}", scheme));
     }
 
@@ -36,6 +32,26 @@ pub fn normalize_repo_url(url_str: &str) -> Result<String, String> {
     validate_normalized_url(&canonical)?;
 
     Ok(canonical)
+}
+
+pub(crate) fn is_git_network_scheme(scheme: &str) -> bool {
+    matches!(scheme, "https" | "http" | "git" | "ssh")
+}
+
+pub(crate) fn scp_remote_parts(value: &str) -> Option<(&str, &str)> {
+    let (authority, path) = value.split_once(':')?;
+    if authority.contains(['/', '\\'])
+        || authority.chars().any(char::is_whitespace)
+        || path.starts_with(':')
+        || value.contains("://")
+        || (authority.len() == 1 && authority.as_bytes()[0].is_ascii_alphabetic())
+    {
+        return None;
+    }
+    let host = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    (!host.is_empty() && !path.is_empty()).then_some((host, path))
 }
 
 /// Validate that normalized URL is a proper HTTPS URL
@@ -83,10 +99,9 @@ fn normalize_ssh_url(host: &str, path: &str) -> Result<String, String> {
 /// Finds the default remote and normalizes its URL to canonical HTTPS format.
 /// Returns None if there is no remote or the URL cannot be normalized.
 pub fn resolve_repo_url_from_repo(repo: &crate::git::repository::Repository) -> Option<String> {
-    let remote_name = repo.get_default_remote().ok()??;
-    let remotes = repo.remotes_with_urls().ok()?;
-    let (_, url) = remotes.into_iter().find(|(n, _)| n == &remote_name)?;
-    normalize_repo_url(&url).ok()
+    let remotes = repo.fetch_remotes().ok()?;
+    let (_, url) = crate::git::repository::default_remote(&remotes)?;
+    normalize_repo_url(url).ok()
 }
 
 /// Resolve a normalized repo URL from a filesystem path.
@@ -96,8 +111,9 @@ pub fn resolve_repo_url_from_repo(repo: &crate::git::repository::Repository) -> 
 /// Returns None if the path is not in a git repo, has no remote, or the URL
 /// cannot be normalized.
 pub fn resolve_repo_url_from_path(work_dir: &std::path::Path) -> Option<String> {
-    let repo = crate::git::repository::discover_repository_in_path_no_git_exec(work_dir).ok()?;
-    resolve_repo_url_from_repo(&repo)
+    let remotes = crate::git::repository::remotes_for_path(work_dir).ok()?;
+    let (_, url) = crate::git::repository::default_remote(&remotes)?;
+    normalize_repo_url(url).ok()
 }
 
 #[cfg(test)]

@@ -2,6 +2,8 @@
 
 use super::pos_encoded::{PosEncoded, PosField, sparse_get_string, sparse_set, string_to_json};
 use super::types::SparseArray;
+use crate::git::repository::Repository;
+use sha2::{Digest, Sha256};
 
 /// Attribute positions (shared across all events).
 pub mod attr_pos {
@@ -22,6 +24,7 @@ pub mod attr_pos {
     pub const EXTERNAL_PARENT_SESSION_ID: usize = 27;
     pub const CUSTOM_ATTRIBUTES: usize = 30;
     pub const PRICING_CATALOG: usize = 31;
+    pub const LOCAL_REPO_ID: usize = 32;
 }
 
 /// Common attributes for all events.
@@ -44,6 +47,7 @@ pub mod attr_pos {
 /// | 27 | external_parent_session_id | String | No (nullable) |
 /// | 30 | custom_attributes | String (JSON) | No (nullable) |
 /// | 31 | pricing_catalog | String | No (nullable) |
+/// | 32 | local_repo_id | String | No (nullable) |
 #[derive(Debug, Clone, Default)]
 pub struct EventAttributes {
     pub git_ai_version: PosField<String>,
@@ -66,6 +70,38 @@ pub struct EventAttributes {
     /// slot: custom_attributes stays reserved for the org-configured
     /// attribute map every event type carries.
     pub pricing_catalog: PosField<String>,
+    /// Opaque identity for a local repository without a canonical remote URL.
+    pub local_repo_id: PosField<String>,
+}
+
+pub(crate) enum MetricRepositoryIdentity {
+    Remote(String),
+    Local(String),
+    Unknown,
+}
+
+impl MetricRepositoryIdentity {
+    pub(crate) fn from_repo(repo: &Repository) -> Self {
+        if let Some(url) = crate::repo_url::resolve_repo_url_from_repo(repo) {
+            return Self::Remote(url);
+        }
+
+        // Linked worktrees share this cached directory. Normalize aliases
+        // here on the metrics emission path before hashing it.
+        let Ok(common_dir) = repo.common_dir().canonicalize() else {
+            return Self::Unknown;
+        };
+        let digest = Sha256::digest(common_dir.as_os_str().as_encoded_bytes());
+        Self::Local(format!("{digest:x}"))
+    }
+
+    pub(crate) fn apply_to(&self, attrs: EventAttributes) -> EventAttributes {
+        match self {
+            Self::Remote(url) => attrs.repo_url(url.as_str()),
+            Self::Local(id) => attrs.local_repo_id(id.as_str()),
+            Self::Unknown => attrs,
+        }
+    }
 }
 
 impl EventAttributes {
@@ -104,6 +140,11 @@ impl EventAttributes {
     #[allow(dead_code)]
     pub fn repo_url_null(mut self) -> Self {
         self.repo_url = Some(None);
+        self
+    }
+
+    pub fn local_repo_id(mut self, value: impl Into<String>) -> Self {
+        self.local_repo_id = Some(Some(value.into()));
         self
     }
 
@@ -341,6 +382,11 @@ impl PosEncoded for EventAttributes {
             attr_pos::PRICING_CATALOG,
             string_to_json(&self.pricing_catalog),
         );
+        sparse_set(
+            &mut map,
+            attr_pos::LOCAL_REPO_ID,
+            string_to_json(&self.local_repo_id),
+        );
         map
     }
 
@@ -365,6 +411,7 @@ impl PosEncoded for EventAttributes {
             ),
             custom_attributes: sparse_get_string(arr, attr_pos::CUSTOM_ATTRIBUTES),
             pricing_catalog: sparse_get_string(arr, attr_pos::PRICING_CATALOG),
+            local_repo_id: sparse_get_string(arr, attr_pos::LOCAL_REPO_ID),
         }
     }
 }
@@ -596,6 +643,52 @@ mod tests {
     fn test_event_attributes_git_ai_version_builder() {
         let attrs = EventAttributes::new().git_ai_version("4.0.0");
         assert_eq!(attrs.git_ai_version, Some(Some("4.0.0".to_string())));
+    }
+
+    #[test]
+    fn local_repo_identity_round_trips_at_optional_sparse_position() {
+        let mut wire = EventAttributes::with_version("1.0.0").to_sparse();
+        wire.insert("32".to_string(), serde_json::json!("opaque-repository-id"));
+
+        assert_eq!(EventAttributes::from_sparse(&wire).to_sparse(), wire);
+
+        wire.remove("32");
+        assert_eq!(EventAttributes::from_sparse(&wire).to_sparse(), wire);
+    }
+
+    #[test]
+    fn local_repo_identity_matches_a_relative_linked_worktree() {
+        let root = tempfile::tempdir().unwrap();
+        let main = root.path().join("main");
+        let linked = root.path().join("linked");
+        let common_dir = main.join(".git");
+        let linked_git_dir = common_dir.join("worktrees").join("linked");
+        std::fs::create_dir_all(&linked_git_dir).unwrap();
+        std::fs::create_dir_all(&linked).unwrap();
+        std::fs::write(common_dir.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+        std::fs::write(linked_git_dir.join("HEAD"), "ref: refs/heads/linked\n").unwrap();
+        std::fs::write(
+            linked.join(".git"),
+            "gitdir: ../main/.git/worktrees/linked\n",
+        )
+        .unwrap();
+
+        let main = crate::git::repository::discover_repository_in_path_no_git_exec(&main).unwrap();
+        let linked =
+            crate::git::repository::discover_repository_in_path_no_git_exec(&linked).unwrap();
+        let main = MetricRepositoryIdentity::from_repo(&main).apply_to(EventAttributes::new());
+        let linked = MetricRepositoryIdentity::from_repo(&linked).apply_to(EventAttributes::new());
+
+        let id = main
+            .local_repo_id
+            .as_ref()
+            .and_then(Option::as_ref)
+            .unwrap();
+        assert_eq!(id.len(), 64);
+        assert!(id.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        assert_eq!(main.local_repo_id, linked.local_repo_id);
+        assert!(main.repo_url.is_none());
+        assert!(linked.repo_url.is_none());
     }
 
     #[test]

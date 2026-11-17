@@ -1,6 +1,6 @@
 [package]
 name = "git-ai"
-version = "1.7.7"
+version = "1.7.7-dcc.19"
 edition = "2024"
 default-run = "git-ai"
 
@@ -10,6 +10,9 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_json_canonicalizer = "0.3"
 sha2 = "0.10"
+base64 = "0.22"
+semver = "1.0"
+tar = { version = "0.4", default-features = false }
 imara-diff = "0.2"
 chrono = { version = "0.4.44", default-features = false, features = ["serde", "clock", "std"] }
 indicatif = "0.18"
@@ -38,7 +41,11 @@ rand = "0.10"
 regex = "1.12"
 toml = "0.9"
 unicode-normalization = "0.1"
-tempfile = { version = "3.27", optional = true }
+tempfile = "3.27"
+same-file = "1.0"
+
+[target.'cfg(unix)'.dependencies]
+tokio = { version = "1.52", features = ["net", "io-util", "fs"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 openssl = { version = "0.10", features = ["vendored"] }
@@ -49,12 +56,11 @@ winreg = "0.55"
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Environment", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
 
 [features]
-test-support = ["dep:tempfile"]
+test-support = []
 keyring = ["dep:keyring"]
 
 [dev-dependencies]
 git-ai = { path = ".", features = ["test-support"] }
-tempfile = "3.27"
 insta = "1.47"
 regex = "1.12"
 filetime = "0.2"

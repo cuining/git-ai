@@ -192,9 +192,7 @@ impl DaemonProcess {
     ) -> Self {
         let control_socket_path = Self::control_socket_path_for_home(test_home);
         let trace_socket_path = Self::trace_socket_path_for_home(test_home);
-        let stderr_log_path = test_home
-            .join(".git-ai")
-            .join("internal")
+        let stderr_log_path = git_ai::config::internal_dir_for_home(test_home)
             .join("daemon")
             .join("daemon.test.stderr.log");
         fs::create_dir_all(
@@ -513,7 +511,7 @@ fn configure_test_home_env(command: &mut Command, test_home: &Path) {
     {
         command.env(
             "GIT_AI_TEST_NOTES_DB_PATH",
-            test_home.join(".git-ai").join("internal").join("notes-db"),
+            git_ai::config::internal_dir_for_home(test_home).join("notes-db"),
         );
     }
     command.env("GIT_CONFIG_GLOBAL", test_home.join(".gitconfig"));
@@ -1217,6 +1215,10 @@ impl TestRepo {
             );
         }
 
+        if let Some(allow) = &patch.allow_repositories {
+            config.insert("allow_repositories".to_string(), serde_json::json!(allow));
+        }
+
         if let Some(exclude) = &patch.exclude_prompts_in_repositories {
             let values = exclude
                 .iter()
@@ -1296,7 +1298,14 @@ impl TestRepo {
             );
         }
 
-        let config_dir = home.join(".git-ai");
+        if let Some(backend) = &patch.notes_backend {
+            config.insert(
+                "notes_backend".to_string(),
+                serde_json::to_value(backend).expect("failed to serialize test notes backend"),
+            );
+        }
+
+        let config_dir = git_ai::config::git_ai_dir_for_home(home);
         fs::create_dir_all(&config_dir).expect("failed to create test HOME config directory");
         let config_path = config_dir.join("config.json");
         let serialized = serde_json::to_string(&config).expect("failed to serialize test config");
@@ -1983,7 +1992,19 @@ impl TestRepo {
         let Some(daemon) = self.daemon_process.as_ref() else {
             return String::new();
         };
-        fs::read_to_string(&daemon.stderr_log_path).unwrap_or_default()
+        let stderr = fs::read_to_string(&daemon.stderr_log_path).unwrap_or_default();
+        // Windows redirects stderr to the per-process log even in test mode.
+        #[cfg(windows)]
+        {
+            let runtime_log = git_ai::config::internal_dir_for_home(&daemon.daemon_home)
+                .join("daemon")
+                .join("logs")
+                .join(format!("{}.log", daemon.pid));
+            if let Ok(log) = fs::read_to_string(runtime_log) {
+                return stderr + &log;
+            }
+        }
+        stderr
     }
 
     fn daemon_completion_entries_for_family(
@@ -3652,7 +3673,7 @@ fn ensure_isolated_process_home() {
         let real_git = find_real_git_by_probe();
 
         // Minimal ~/.git-ai/config.json: real git_path
-        let git_ai_dir = home.join(".git-ai");
+        let git_ai_dir = git_ai::config::git_ai_dir_for_home(&home);
         fs::create_dir_all(&git_ai_dir).expect("create .git-ai dir");
         // Escape backslashes for JSON (relevant on Windows)
         let real_git_json = real_git.replace('\\', "\\\\");
@@ -4061,7 +4082,7 @@ mod tests {
             .map(PathBuf::from);
         assert_eq!(
             notes_db_path,
-            Some(test_home.join(".git-ai").join("internal").join("notes-db"))
+            Some(git_ai::config::internal_dir_for_home(&test_home).join("notes-db"))
         );
     }
 
@@ -4150,7 +4171,7 @@ mod tests {
 
         assert_eq!(
             git_ai::config::internal_dir_path().expect("internal dir should resolve"),
-            home.join(".git-ai").join("internal"),
+            git_ai::config::internal_dir_for_home(&home),
             "in-process git-ai config lookup must use the isolated test home"
         );
     }

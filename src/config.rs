@@ -16,8 +16,9 @@ use crate::mdm::utils::home_dir;
 #[cfg(any(test, feature = "test-support"))]
 use std::sync::RwLock;
 
-/// Default API base URL for comparison
-pub const DEFAULT_API_BASE_URL: &str = "https://usegitai.com";
+/// Default API base URL for DCC AI Tracking.
+pub const DEFAULT_API_BASE_URL: &str =
+    "https://dcc-service.intra.xiaojukeji.com/api/v1/ai-tracking";
 pub const DEFAULT_MAX_CHECKPOINT_FILE_SIZE_BYTES: usize = 3 * 1024 * 1024;
 pub const DEFAULT_MAX_CHECKPOINT_TOTAL_SIZE_BYTES: usize = 32 * 1024 * 1024;
 pub const DEFAULT_MAX_CHECKPOINT_TOTAL_LINES: usize = 500_000;
@@ -326,6 +327,8 @@ pub struct ConfigPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allow_repositories: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exclude_prompts_in_repositories: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub untraced_fixup_ignored_paths: Option<Vec<String>>,
@@ -434,53 +437,46 @@ impl Config {
     }
 
     pub fn is_allowed_repository(&self, repository: &Option<Repository>) -> bool {
-        // Fetch remotes once and reuse for both exclude and allow checks
-        let remotes = repository
-            .as_ref()
-            .and_then(|repo| repo.remotes_with_urls().ok());
-
-        self.is_allowed_repository_with_remotes(remotes.as_ref())
+        self.is_allowed_repository_ref(repository.as_ref())
     }
 
-    /// Helper that accepts pre-fetched remotes to avoid multiple git operations
-    #[cfg_attr(test, allow(dead_code))]
+    pub(crate) fn is_allowed_repository_ref(&self, repository: Option<&Repository>) -> bool {
+        if !self.has_repository_filters() {
+            return true;
+        }
+        let remotes = repository.and_then(|repo| repo.fetch_remotes().ok());
+        self.is_allowed_repository_with_remotes(remotes.as_deref())
+    }
+
+    pub(crate) fn is_allowed_repository_at_path(&self, worktree: Option<&Path>) -> bool {
+        if !self.has_repository_filters() {
+            return true;
+        }
+        let remotes = worktree.and_then(|path| crate::git::repository::remotes_for_path(path).ok());
+        self.is_allowed_repository_with_remotes(remotes.as_deref())
+    }
+
+    pub(crate) fn is_allowed_repository_url(&self, url: Option<&str>) -> bool {
+        (self.allow_repositories.is_empty()
+            || url.is_some_and(|url| remote_matches_patterns(&self.allow_repositories, url)))
+            && (self.exclude_repositories.is_empty()
+                || !url.is_some_and(|url| remote_matches_patterns(&self.exclude_repositories, url)))
+    }
+
+    /// Allow by the remote that identifies the repository in metrics and sessions.
+    /// Exclusions on any configured remote still take precedence.
     pub(crate) fn is_allowed_repository_with_remotes(
         &self,
-        remotes: Option<&Vec<(String, String)>>,
+        remotes: Option<&[(String, String)]>,
     ) -> bool {
-        if remotes.is_some_and(|remotes| {
-            remotes.iter().any(|(_, remote_url)| {
-                crate::diagnostic_sentinels::is_debug_self_check_remote_url(remote_url)
-            })
-        }) {
-            return true;
-        }
-
-        // First check if repository is in exclusion list - exclusions take precedence
-        if !self.exclude_repositories.is_empty()
-            && let Some(remotes) = remotes
-        {
-            // If any remote matches the exclusion patterns, deny access
-            if remotes
-                .iter()
-                .any(|remote| remote_matches_patterns(&self.exclude_repositories, &remote.1))
-            {
-                return false;
-            }
-        }
-
-        // If allowlist is empty, allow everything (unless excluded above)
-        if self.allow_repositories.is_empty() {
-            return true;
-        }
-
-        // If allowlist is defined, only allow repos whose remotes match the patterns
-        match remotes {
-            Some(remotes) => remotes
-                .iter()
-                .any(|remote| remote_matches_patterns(&self.allow_repositories, &remote.1)),
-            None => false, // Can't verify, deny by default when allowlist is active
-        }
+        let remotes = remotes.unwrap_or_default();
+        let default_url =
+            crate::git::repository::default_remote(remotes).map(|(_, url)| url.as_str());
+        self.is_allowed_repository_url(default_url)
+            && (self.exclude_repositories.is_empty()
+                || !remotes
+                    .iter()
+                    .any(|(_, url)| remote_matches_patterns(&self.exclude_repositories, url)))
     }
 
     /// Returns true if prompts should be excluded (not shared) for the given repository.
@@ -563,7 +559,7 @@ impl Config {
         &self.feature_flags
     }
 
-    /// Returns the API base URL
+    /// Returns the API base URL.
     pub fn api_base_url(&self) -> &str {
         &self.api_base_url
     }
@@ -780,65 +776,53 @@ where
 }
 
 fn remote_matches_patterns(patterns: &[Pattern], remote_url: &str) -> bool {
-    let remote_candidates = repo_remote_match_candidates(remote_url);
+    let remote_url = remote_url.trim();
+    let remote_parts = repo_match_parts(remote_url);
     patterns.iter().any(|pattern| {
-        repo_pattern_match_candidates(pattern.as_str())
-            .iter()
-            .filter_map(|candidate| Pattern::new(candidate).ok())
-            .any(|candidate_pattern| {
-                remote_candidates
-                    .iter()
-                    .any(|candidate| candidate_pattern.matches(candidate))
-            })
+        let Ok(pattern) = Pattern::new(pattern.as_str().trim()) else {
+            return false;
+        };
+        let Some((host_pattern, path_patterns)) = repo_match_parts(pattern.as_str()) else {
+            return pattern.matches(remote_url)
+                || remote_parts.as_ref().is_some_and(|(host, paths)| {
+                    paths.iter().any(|path| {
+                        pattern.matches(path) || pattern.matches(&format!("{host}/{path}"))
+                    })
+                });
+        };
+        let Some((host, paths)) = &remote_parts else {
+            return false;
+        };
+        Pattern::new(&host_pattern).is_ok_and(|pattern| pattern.matches(host))
+            && (pattern.matches(remote_url)
+                || path_patterns.iter().any(|pattern| {
+                    Pattern::new(pattern)
+                        .is_ok_and(|pattern| paths.iter().any(|path| pattern.matches(path)))
+                }))
     })
-}
-
-fn repo_pattern_match_candidates(value: &str) -> Vec<String> {
-    let mut candidates = vec![value.trim().to_string()];
-
-    if let Some((host, path_variants)) = repo_match_parts(value) {
-        for path in path_variants {
-            candidates.push(format!("{}/{}", host, path));
-        }
-    }
-
-    candidates.sort();
-    candidates.dedup();
-    candidates
-}
-
-fn repo_remote_match_candidates(value: &str) -> Vec<String> {
-    let mut candidates = vec![value.trim().to_string()];
-
-    if let Some((host, path_variants)) = repo_match_parts(value) {
-        for path in path_variants {
-            candidates.push(format!("{}/{}", host, path));
-            candidates.push(path);
-        }
-    }
-
-    candidates.sort();
-    candidates.dedup();
-    candidates
 }
 
 fn repo_match_parts(value: &str) -> Option<(String, Vec<String>)> {
     let value = value.trim();
 
-    if let Some((_, rest)) = value.split_once("://") {
+    if value.chars().any(char::is_control) {
+        return None;
+    }
+    if let Some((scheme, rest)) = value.split_once("://") {
+        if !crate::repo_url::is_git_network_scheme(scheme) {
+            return None;
+        }
         let (authority, path) = rest.split_once('/')?;
+        if authority.contains('\\') {
+            return None;
+        }
         return Some((
             normalize_repo_authority(authority)?,
             normalize_repo_path_variants(path)?,
         ));
     }
 
-    let (user_host, path) = value.split_once(':')?;
-    if value.starts_with('/') || !user_host.contains('@') || path.is_empty() {
-        return None;
-    }
-
-    let (_, host) = user_host.rsplit_once('@')?;
+    let (host, path) = crate::repo_url::scp_remote_parts(value)?;
     Some((
         normalize_repo_host(host)?,
         normalize_repo_path_variants(path)?,
@@ -1049,17 +1033,17 @@ fn build_config() -> Config {
     );
     let telemetry_oss_disabled = file_cfg
         .as_ref()
-        .and_then(|c| c.telemetry_oss.clone())
-        .filter(|s| s == "off")
-        .is_some();
+        .and_then(|c| c.telemetry_oss.as_deref())
+        .map_or(option_env!("OSS_BUILD") != Some("1"), |value| {
+            value == "off"
+        });
     let telemetry_enterprise_dsn = file_cfg
         .as_ref()
         .and_then(|c| c.telemetry_enterprise_dsn.clone())
         .filter(|s| !s.is_empty());
 
-    // Default to disabled (true) unless this is an OSS build
-    // OSS builds set OSS_BUILD env var at compile time to "1", which enables auto-updates by default
-    let auto_update_flags_default_disabled = option_env!("OSS_BUILD") != Some("1");
+    // Enable updates by default in packaged enterprise and OSS builds.
+    let auto_update_flags_default_disabled = !matches!(option_env!("OSS_BUILD"), Some("0" | "1"));
 
     let disable_version_checks = file_cfg
         .as_ref()
@@ -1529,11 +1513,11 @@ fn parse_file_config_bytes(data: &[u8]) -> Result<FileConfig, serde_json::Error>
     // Windows PowerShell 5.1 writes UTF-8 with BOM by default for `Out-File -Encoding UTF8`.
     // Tolerate BOM-prefixed config files so upgrades/installers don't brick config parsing.
     let data = data.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(data);
-    serde_json::from_slice::<FileConfig>(data)
+    serde_json::from_slice(data)
 }
 
 fn config_file_path() -> Option<PathBuf> {
-    Some(home_dir().join(".git-ai").join("config.json"))
+    git_ai_dir_path().map(|dir| dir.join("config.json"))
 }
 
 /// Public accessor for config file path
@@ -1544,7 +1528,17 @@ pub fn config_file_path_public() -> Option<PathBuf> {
 
 /// Returns the path to the git-ai base directory (~/.git-ai)
 pub fn git_ai_dir_path() -> Option<PathBuf> {
-    Some(home_dir().join(".git-ai"))
+    Some(git_ai_dir_for_home(&home_dir()))
+}
+
+/// Resolve git-ai's storage directory for an explicit home (including daemon/test homes).
+pub fn git_ai_dir_for_home(home: &Path) -> PathBuf {
+    home.join(".git-ai")
+}
+
+/// Resolve internal state for the same home used by the caller.
+pub fn internal_dir_for_home(home: &Path) -> PathBuf {
+    git_ai_dir_for_home(home).join("internal")
 }
 
 /// Returns the path to the internal state directory (~/.git-ai/internal)
@@ -1626,6 +1620,9 @@ pub fn load_file_config_public() -> Result<FileConfig, String> {
 
 /// Save the file config
 pub fn save_file_config(config: &FileConfig) -> Result<(), String> {
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+
     let path =
         config_file_path().ok_or_else(|| "Could not determine config file path".to_string())?;
 
@@ -1633,12 +1630,22 @@ pub fn save_file_config(config: &FileConfig) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(|e| format!("Failed to create config directory: {}", e))?;
+        #[cfg(unix)]
+        fs::set_permissions(parent, fs::Permissions::from_mode(0o700))
+            .map_err(|e| format!("Failed to protect config directory: {}", e))?;
     }
 
     let json = serde_json::to_string_pretty(config)
         .map_err(|e| format!("Failed to serialize config: {}", e))?;
 
-    fs::write(&path, json).map_err(|e| format!("Failed to write config file: {}", e))
+    // Readers (including the daemon's remote policy) must never see a truncated
+    // document and fall back to defaults while another command saves a field.
+    crate::mdm::utils::write_atomic(&path, json.as_bytes())
+        .map_err(|e| format!("Failed to write config file: {}", e))?;
+    #[cfg(unix)]
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
+        .map_err(|e| format!("Failed to protect config file: {}", e))?;
+    Ok(())
 }
 
 fn is_executable(path: &Path) -> bool {
@@ -2624,7 +2631,8 @@ mod tests {
         let mut data = vec![0xEF, 0xBB, 0xBF];
         data.extend_from_slice(br#"{"git_path":"C:\\Program Files\\Git\\cmd\\git.exe"}"#);
 
-        let parsed = parse_file_config_bytes(&data).expect("BOM-prefixed config should parse");
+        let parsed: FileConfig =
+            parse_file_config_bytes(&data).expect("BOM-prefixed config should parse");
         assert_eq!(
             parsed.git_path.as_deref(),
             Some(r"C:\Program Files\Git\cmd\git.exe")
@@ -2635,7 +2643,8 @@ mod tests {
     fn test_parse_file_config_bytes_without_bom_still_parses() {
         let data = br#"{"git_path":"/usr/bin/git"}"#;
 
-        let parsed = parse_file_config_bytes(data).expect("regular config should parse");
+        let parsed: FileConfig =
+            parse_file_config_bytes(data).expect("regular config should parse");
         assert_eq!(parsed.git_path.as_deref(), Some("/usr/bin/git"));
     }
 

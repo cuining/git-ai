@@ -1,0 +1,14 @@
+{
+  "name": "dsh-git-ai-attribution",
+  "version": "0.1.2",
+  "private": true,
+  "description": "Capture DeepSeek Harness file edits for git-ai attribution",
+  "type": "module",
+  "main": "./git-ai.mjs",
+  "files": ["git-ai.mjs", "git-ai.cordis.yml"],
+  "dsh": {
+    "bundle": {
+      "patch": "./git-ai.cordis.yml"
+    }
+  }
+}

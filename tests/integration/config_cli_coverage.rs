@@ -5,7 +5,7 @@
 //! These run the real binary against an isolated test HOME, so `config set`
 //! writes land in the sandboxed `~/.git-ai/config.json` rather than the user's.
 
-use crate::repos::test_repo::TestRepo;
+use crate::repos::test_repo::{DaemonTestScope, TestRepo, get_binary_path};
 use git_ai::config::{AuthorConfig, FileConfig, NotesBackendConfig};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -14,6 +14,110 @@ fn run_config(repo: &TestRepo, args: &[&str]) -> std::process::Output {
     repo.git_ai_command_without_pre_sync_for_test(args, &[])
         .output()
         .unwrap_or_else(|e| panic!("git-ai {args:?} failed to run: {e}"))
+}
+
+#[test]
+fn test_enterprise_binary_name_dispatches_direct_commands() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let expected = if cfg!(windows) {
+        "git-ai.exe"
+    } else {
+        "git-ai"
+    };
+    assert_eq!(get_binary_path().file_name().unwrap(), expected);
+
+    let version = run_config(&repo, &["--version"]);
+    assert!(version.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&version.stdout)
+            .split_whitespace()
+            .next(),
+        Some(env!("CARGO_PKG_VERSION"))
+    );
+
+    let help = run_config(&repo, &["--help"]);
+    assert!(help.status.success());
+    assert!(String::from_utf8_lossy(&help.stderr).contains("Usage: git-ai"));
+}
+
+#[test]
+fn test_unsupported_binary_name_is_rejected() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let unsupported_path = repo.path().join(if cfg!(windows) {
+        "git-ai-unsupported.exe"
+    } else {
+        "git-ai-unsupported"
+    });
+    let binary = get_binary_path();
+    std::fs::hard_link(binary, &unsupported_path)
+        .or_else(|_| std::fs::copy(binary, &unsupported_path).map(|_| ()))
+        .expect("stage the current binary under an unsupported executable name");
+
+    let output = std::process::Command::new(unsupported_path)
+        .current_dir(repo.path())
+        .env_remove("GIT_AI")
+        .arg("--version")
+        .output()
+        .expect("invoke the executable under an unsupported name");
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Use git-ai"));
+}
+
+#[cfg(unix)]
+#[test]
+fn test_mixed_case_git_binary_name_dispatches_git() {
+    use std::os::unix::process::CommandExt;
+
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let expected = repo.git_og(&["--version"]).expect("run real Git");
+    let output = repo
+        .git_ai_command_without_pre_sync_for_test(&["--version"], &[])
+        .env_remove("GIT_AI")
+        .arg0("Git")
+        .output()
+        .expect("invoke the proxy with a mixed-case executable name");
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        expected.trim()
+    );
+}
+
+#[test]
+fn test_config_uses_git_ai_directory() {
+    let repo = TestRepo::new();
+    repo.git_ai(&["config", "set", "custom_attributes.team", "platform"])
+        .expect("set config in the default directory");
+
+    let config_path = repo.test_home_path().join(".git-ai/config.json");
+    let contents = std::fs::read_to_string(config_path).expect("config in .git-ai");
+    let config: Value = serde_json::from_str(&contents).unwrap();
+    assert_eq!(config["custom_attributes"]["team"], "platform");
+}
+
+#[test]
+fn test_config_save_does_not_use_a_shared_temporary_file() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let config_dir = repo.test_home_path().join(".git-ai");
+    let occupied_path = config_dir.join("config.tmp");
+    std::fs::create_dir_all(&occupied_path).unwrap();
+
+    let output = run_config(&repo, &["config", "set", "quiet", "true"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let contents = std::fs::read_to_string(config_dir.join("config.json")).unwrap();
+    let config: Value = serde_json::from_str(&contents).unwrap();
+    assert_eq!(config["quiet"], true);
+    assert!(occupied_path.is_dir());
 }
 
 #[test]
@@ -50,6 +154,80 @@ fn test_config_set_and_get_normal_output_uses_stdout() {
             String::from_utf8_lossy(&output.stderr)
         );
     }
+}
+
+#[test]
+fn test_config_tracking_feature_defaults() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let flags = get_json(&repo, "feature_flags");
+
+    assert_eq!(flags["rewrite_metrics_events"], true);
+    assert_eq!(flags["transcript_upload"], false);
+    assert_eq!(flags["token_usage_metrics"], false);
+    assert_eq!(
+        flags["daemon_log_upload"],
+        option_env!("OSS_BUILD") == Some("1")
+    );
+}
+
+#[test]
+fn test_config_update_defaults_and_overrides() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let default_disabled = !matches!(option_env!("OSS_BUILD"), Some("0" | "1"));
+    let override_disabled = !default_disabled;
+
+    for key in ["disable_version_checks", "disable_auto_updates"] {
+        assert_eq!(get_json(&repo, key), default_disabled, "default for {key}");
+
+        repo.git_ai(&["config", "set", key, &override_disabled.to_string()])
+            .unwrap();
+        assert_eq!(
+            get_json(&repo, key),
+            override_disabled,
+            "override for {key}"
+        );
+
+        repo.git_ai(&["config", "unset", key]).unwrap();
+        assert_eq!(get_json(&repo, key), default_disabled, "unset {key}");
+    }
+}
+
+#[test]
+fn test_config_oss_telemetry_default_and_overrides() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let key = "telemetry_oss_disabled";
+    let default_disabled = option_env!("OSS_BUILD") != Some("1");
+
+    assert_eq!(get_json(&repo, key), default_disabled);
+
+    repo.git_ai(&["config", "set", "telemetry_oss", "on"])
+        .unwrap();
+    assert_eq!(get_json(&repo, key), false);
+
+    repo.git_ai(&["config", "set", "telemetry_oss", "off"])
+        .unwrap();
+    assert_eq!(get_json(&repo, key), true);
+
+    repo.git_ai(&["config", "unset", "telemetry_oss"]).unwrap();
+    assert_eq!(get_json(&repo, key), default_disabled);
+}
+
+#[test]
+fn test_config_api_base_url_defaults_to_dcc_service() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let expected_url = "https://dcc-service.intra.xiaojukeji.com/api/v1/ai-tracking";
+    let output = repo
+        .git_ai_command_without_pre_sync_for_test(&["config", "api_base_url"], &[])
+        .env_remove("GIT_AI_API_BASE_URL")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let actual_url: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(actual_url, expected_url);
+
+    let help = run_config(&repo, &["config", "--help"]);
+    assert!(help.status.success(), "{help:?}");
+    assert!(String::from_utf8_lossy(&help.stdout).contains(expected_url));
 }
 
 /// Parse the JSON emitted by `git-ai config <key>` into a serde value.
@@ -555,4 +733,25 @@ fn test_every_file_config_field_has_cli_unset_coverage() {
          (add them to set_config_value and unset_config_value, or document them \
          in is_nested_only_for_mutation): {unknown_to_unset:?}"
     );
+}
+
+#[test]
+fn test_legacy_remote_api_enabled_is_ignored() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let config_path = repo.test_home_path().join(".git-ai/config.json");
+    std::fs::write(
+        config_path,
+        r#"{"remote_api_enabled":false,"notes_backend":{"kind":"http"}}"#,
+    )
+    .unwrap();
+
+    let output = repo
+        .git_ai_command_without_pre_sync_for_test(&["config"], &[])
+        .env_remove("GIT_AI_NOTES_BACKEND_KIND")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let config: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(config["notes_backend"]["kind"], "http");
+    assert!(config.get("remote_api_enabled").is_none());
 }

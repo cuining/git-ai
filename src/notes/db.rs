@@ -11,13 +11,13 @@
 //! or migrations to `internal_db` for this feature is explicitly not what we do here.
 
 use crate::error::GitAiError;
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
 /// Current schema version (must equal MIGRATIONS.len()).
-const SCHEMA_VERSION: usize = 1;
+const SCHEMA_VERSION: usize = 2;
 
 /// Database migrations — each entry upgrades the schema by one version.
 const MIGRATIONS: &[&str] = &[
@@ -39,7 +39,21 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX IF NOT EXISTS idx_notes_pending
         ON notes(synced, next_retry_at) WHERE synced = 0;
     "#,
+    // Migration 1 → 2: older notes have no known repository.
+    "ALTER TABLE notes ADD COLUMN repo_url TEXT;",
 ];
+
+const UPSERT_NOTE: &str = r#"
+    INSERT INTO notes (commit_sha, content, synced, created_at, updated_at, next_retry_at, repo_url)
+    VALUES (?1, ?2, 0, ?3, ?3, ?3, ?4)
+    ON CONFLICT(commit_sha) DO UPDATE SET
+        content        = excluded.content,
+        synced         = CASE WHEN notes.content = excluded.content THEN notes.synced ELSE 0 END,
+        attempts       = CASE WHEN notes.content = excluded.content THEN notes.attempts ELSE 0 END,
+        next_retry_at  = CASE WHEN notes.content = excluded.content THEN notes.next_retry_at ELSE excluded.next_retry_at END,
+        updated_at     = excluded.updated_at,
+        repo_url       = excluded.repo_url
+"#;
 
 /// Global singleton for the notes database.
 static NOTES_DB: OnceLock<Mutex<NotesDatabase>> = OnceLock::new();
@@ -131,38 +145,27 @@ impl NotesDatabase {
 
         let home = dirs::home_dir()
             .ok_or_else(|| GitAiError::Generic("Could not determine home directory".to_string()))?;
-        Ok(home.join(".git-ai").join("internal").join("notes-db"))
+        Ok(crate::config::internal_dir_for_home(&home).join("notes-db"))
     }
 
     /// Apply schema migrations until the DB is at `SCHEMA_VERSION`.
     fn initialize_schema(&mut self) -> Result<(), GitAiError> {
-        // Fast path: if the metadata table and version already match, skip migrations.
-        let version_check: Result<usize, _> = self.conn.query_row(
-            "SELECT value FROM schema_metadata WHERE key = 'version'",
-            [],
-            |row| {
-                let version_str: String = row.get(0)?;
-                version_str
-                    .parse::<usize>()
-                    .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))
-            },
-        );
-
-        if let Ok(current_version) = version_check {
-            if current_version == SCHEMA_VERSION {
-                return Ok(());
-            }
-            if current_version > SCHEMA_VERSION {
-                return Err(GitAiError::Generic(format!(
-                    "Notes database schema version {} is newer than supported version {}. \
-                     Please upgrade git-ai.",
-                    current_version, SCHEMA_VERSION
-                )));
-            }
+        const READ_VERSION: &str =
+            "SELECT CAST(value AS INTEGER) FROM schema_metadata WHERE key = 'version'";
+        if self
+            .conn
+            .query_row(READ_VERSION, [], |row| row.get::<_, usize>(0))
+            .ok()
+            == Some(SCHEMA_VERSION)
+        {
+            return Ok(());
         }
 
-        // Ensure schema_metadata table exists.
-        self.conn.execute_batch(
+        // Keep schema changes and the version marker atomic across daemon and CLI opens.
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        tx.execute_batch(
             r#"
             CREATE TABLE IF NOT EXISTS schema_metadata (
                 key   TEXT PRIMARY KEY NOT NULL,
@@ -171,55 +174,24 @@ impl NotesDatabase {
             "#,
         )?;
 
-        // Read current version (0 for a brand-new database).
-        let current_version: usize = self
-            .conn
-            .query_row(
-                "SELECT value FROM schema_metadata WHERE key = 'version'",
-                [],
-                |row| {
-                    let version_str: String = row.get(0)?;
-                    version_str
-                        .parse::<usize>()
-                        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))
-                },
-            )
+        let current_version: usize = tx
+            .query_row(READ_VERSION, [], |row| row.get(0))
+            .optional()?
             .unwrap_or(0);
-
-        // Apply each missing migration in sequence.
-        for target_version in current_version..SCHEMA_VERSION {
-            self.apply_migration(target_version)?;
-
-            // Use an upsert so concurrent initializers do not race on the version row.
-            self.conn.execute(
-                r#"
-                INSERT INTO schema_metadata (key, value)
-                VALUES ('version', ?1)
-                ON CONFLICT(key) DO UPDATE SET
-                    value = excluded.value
-                WHERE CAST(schema_metadata.value AS INTEGER) < CAST(excluded.value AS INTEGER)
-                "#,
-                params![(target_version + 1).to_string()],
-            )?;
-        }
-
-        Ok(())
-    }
-
-    fn apply_migration(&mut self, from_version: usize) -> Result<(), GitAiError> {
-        if from_version >= MIGRATIONS.len() {
+        if current_version > SCHEMA_VERSION {
             return Err(GitAiError::Generic(format!(
-                "No migration defined for version {} -> {}",
-                from_version,
-                from_version + 1
+                "Notes database schema version {current_version} is newer than supported version {SCHEMA_VERSION}. Please upgrade git-ai."
             )));
         }
-
-        let migration_sql = MIGRATIONS[from_version];
-        let tx = self.conn.transaction()?;
-        tx.execute_batch(migration_sql)?;
+        for migration in &MIGRATIONS[current_version..] {
+            tx.execute_batch(migration)?;
+        }
+        tx.execute(
+            "INSERT INTO schema_metadata (key, value) VALUES ('version', ?1)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![SCHEMA_VERSION.to_string()],
+        )?;
         tx.commit()?;
-
         Ok(())
     }
 
@@ -233,45 +205,41 @@ impl NotesDatabase {
     /// - If the content changed, `synced` and `attempts` are reset to 0 so the
     ///   updated note is queued for re-upload.
     pub fn upsert_note(&mut self, commit_sha: &str, content: &str) -> Result<(), GitAiError> {
-        let now = unix_now();
+        self.upsert_note_for_repo(commit_sha, content, None)
+    }
+
+    pub(crate) fn upsert_note_for_repo(
+        &mut self,
+        commit_sha: &str,
+        content: &str,
+        repo_url: Option<&str>,
+    ) -> Result<(), GitAiError> {
         self.conn.execute(
-            r#"
-            INSERT INTO notes (commit_sha, content, synced, created_at, updated_at, next_retry_at)
-            VALUES (?1, ?2, 0, ?3, ?3, ?3)
-            ON CONFLICT(commit_sha) DO UPDATE SET
-                content        = excluded.content,
-                synced         = CASE WHEN notes.content = excluded.content THEN notes.synced ELSE 0 END,
-                attempts       = CASE WHEN notes.content = excluded.content THEN notes.attempts ELSE 0 END,
-                next_retry_at  = CASE WHEN notes.content = excluded.content THEN notes.next_retry_at ELSE excluded.next_retry_at END,
-                updated_at     = excluded.updated_at
-            "#,
-            params![commit_sha, content, now],
+            UPSERT_NOTE,
+            params![commit_sha, content, unix_now(), repo_url],
         )?;
         Ok(())
     }
 
     /// Upsert a batch of notes inside a single transaction.
     pub fn upsert_notes_batch(&mut self, entries: &[(String, String)]) -> Result<(), GitAiError> {
+        self.upsert_notes_batch_for_repo(entries, None)
+    }
+
+    pub(crate) fn upsert_notes_batch_for_repo(
+        &mut self,
+        entries: &[(String, String)],
+        repo_url: Option<&str>,
+    ) -> Result<(), GitAiError> {
         if entries.is_empty() {
             return Ok(());
         }
         let now = unix_now();
         let tx = self.conn.transaction()?;
         {
-            let mut stmt = tx.prepare_cached(
-                r#"
-                INSERT INTO notes (commit_sha, content, synced, created_at, updated_at, next_retry_at)
-                VALUES (?1, ?2, 0, ?3, ?3, ?3)
-                ON CONFLICT(commit_sha) DO UPDATE SET
-                    content        = excluded.content,
-                    synced         = CASE WHEN notes.content = excluded.content THEN notes.synced ELSE 0 END,
-                    attempts       = CASE WHEN notes.content = excluded.content THEN notes.attempts ELSE 0 END,
-                    next_retry_at  = CASE WHEN notes.content = excluded.content THEN notes.next_retry_at ELSE excluded.next_retry_at END,
-                    updated_at     = excluded.updated_at
-                "#,
-            )?;
+            let mut stmt = tx.prepare_cached(UPSERT_NOTE)?;
             for (sha, content) in entries {
-                stmt.execute(params![sha, content, now])?;
+                stmt.execute(params![sha, content, now, repo_url])?;
             }
         }
         tx.commit()?;
@@ -318,6 +286,14 @@ impl NotesDatabase {
     ///
     /// Rows with `attempts >= 6` are skipped (permanent failure backoff).
     pub fn dequeue_pending(&mut self, batch_size: usize) -> Result<Vec<PendingNote>, GitAiError> {
+        self.dequeue_pending_matching(batch_size, |_| true)
+    }
+
+    pub(crate) fn dequeue_pending_matching(
+        &mut self,
+        batch_size: usize,
+        allows_repo: impl Fn(Option<&str>) -> bool,
+    ) -> Result<Vec<PendingNote>, GitAiError> {
         let now = unix_now();
         let stale_cutoff = now - 600; // 10 minutes
 
@@ -335,18 +311,25 @@ impl NotesDatabase {
         // UPDATE ... RETURNING which requires SQLite 3.35+.
         let shas: Vec<String> = {
             let mut stmt = self.conn.prepare(
-                r#"SELECT commit_sha FROM notes
+                r#"SELECT commit_sha, repo_url FROM notes
                    WHERE synced = 0
                      AND processing_started_at IS NULL
                      AND next_retry_at <= ?1
                      AND attempts < 6
-                   ORDER BY next_retry_at
-                   LIMIT ?2"#,
+                     AND (?2 OR repo_url IS NOT NULL)
+                   ORDER BY next_retry_at"#,
             )?;
-            let rows = stmt.query_map(params![now, batch_size as i64], |row| {
-                row.get::<_, String>(0)
-            })?;
-            rows.filter_map(|r| r.ok()).collect()
+            let mut rows = stmt.query(params![now, allows_repo(None)])?;
+            let mut shas = Vec::new();
+            while shas.len() < batch_size
+                && let Some(row) = rows.next()?
+            {
+                let url: Option<String> = row.get(1)?;
+                if allows_repo(url.as_deref()) {
+                    shas.push(row.get(0)?);
+                }
+            }
+            shas
         };
 
         if shas.is_empty() {
@@ -475,6 +458,30 @@ impl NotesDatabase {
             |row| row.get(0),
         )?;
         Ok(count as usize)
+    }
+
+    pub(crate) fn count_pending_matching(
+        &self,
+        allows_repo: impl Fn(Option<&str>) -> bool,
+    ) -> Result<usize, GitAiError> {
+        let mut stmt = self.conn.prepare(
+            r#"SELECT repo_url, COUNT(*) FROM notes
+               WHERE synced = 0
+                 AND processing_started_at IS NULL
+                 AND next_retry_at <= ?1
+                 AND attempts < 6
+                 AND (?2 OR repo_url IS NOT NULL)
+               GROUP BY repo_url"#,
+        )?;
+        let mut rows = stmt.query(params![unix_now(), allows_repo(None)])?;
+        let mut count = 0;
+        while let Some(row) = rows.next()? {
+            let url: Option<String> = row.get(0)?;
+            if allows_repo(url.as_deref()) {
+                count += row.get::<_, usize>(1)?;
+            }
+        }
+        Ok(count)
     }
 
     /// Retrieve the note content for a single commit SHA.
@@ -655,7 +662,28 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(version, "1");
+        assert_eq!(version, "2");
+    }
+
+    #[test]
+    fn test_upgrade_preserves_pending_notes_without_guessing_their_repo() {
+        let conn = crate::sqlite::open_with_memory_limits(":memory:").unwrap();
+        conn.execute_batch(MIGRATIONS[0]).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE schema_metadata (key TEXT PRIMARY KEY, value TEXT);
+             INSERT INTO schema_metadata VALUES ('version', '1');
+             INSERT INTO notes (commit_sha, content, created_at, updated_at)
+             VALUES ('old', 'historical note', 0, 0);",
+        )
+        .unwrap();
+        let mut db = NotesDatabase { conn };
+        db.initialize_schema().unwrap();
+        assert_eq!(
+            db.get_note("old").unwrap().as_deref(),
+            Some("historical note")
+        );
+        assert_eq!(db.count_pending_matching(|url| url.is_some()).unwrap(), 0);
+        assert_eq!(db.dequeue_pending(1).unwrap()[0].commit_sha, "old");
     }
 
     #[test]
@@ -955,7 +983,7 @@ mod tests {
         let path = NotesDatabase::database_path().unwrap();
         let path_str = path.to_string_lossy();
         assert!(
-            path_str.contains(".git-ai"),
+            path.components().any(|part| part.as_os_str() == ".git-ai"),
             "path should contain .git-ai: {}",
             path_str
         );

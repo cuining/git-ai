@@ -20,7 +20,10 @@ pub use crate::git::refs::CommitAuthorship;
 
 pub fn write_note(repo: &Repository, commit_sha: &str, content: &str) -> Result<(), GitAiError> {
     match Config::get().notes_backend_kind() {
-        NotesBackendKind::Http => http_write_note(commit_sha, content),
+        NotesBackendKind::Http => {
+            let url = crate::repo_url::resolve_repo_url_from_repo(repo);
+            http_write_note(commit_sha, content, url.as_deref())
+        }
         NotesBackendKind::GitNotes => crate::git::refs::notes_add(repo, commit_sha, content),
     }
 }
@@ -33,7 +36,10 @@ pub fn write_notes_batch(
         return Ok(());
     }
     match Config::get().notes_backend_kind() {
-        NotesBackendKind::Http => http_write_batch(entries),
+        NotesBackendKind::Http => {
+            let url = crate::repo_url::resolve_repo_url_from_repo(repo);
+            http_write_batch(entries, url.as_deref())
+        }
         NotesBackendKind::GitNotes => crate::git::refs::notes_add_batch(repo, entries),
     }
 }
@@ -71,7 +77,9 @@ pub fn read_notes_batch(
                 .filter(|sha| !notes.contains_key(*sha))
                 .cloned()
                 .collect();
-            if !missing_after_cache.is_empty() {
+            if !missing_after_cache.is_empty()
+                && Config::fresh().is_allowed_repository_ref(Some(repo))
+            {
                 notes.extend(http_fetch_and_cache_notes(&missing_after_cache));
             }
 
@@ -291,6 +299,10 @@ pub fn materialize_notes_for_display(repo: &Repository, limit: usize) -> Result<
     use crate::git::repository::exec_git;
     use crate::git::repository::exec_git_stdin;
 
+    if !Config::fresh().is_allowed_repository_ref(Some(repo)) {
+        return Ok(0);
+    }
+
     // 1. Get recent commits via rev-list.
     let rev_list_args: Vec<String> = repo
         .global_args_for_exec()
@@ -382,6 +394,10 @@ pub fn materialize_notes_for_display(repo: &Repository, limit: usize) -> Result<
 /// (callers should treat failure as a cache miss, not a hard error).
 pub fn warm_cache_for_remote(repo: &Repository, remote: &str) -> Result<(), GitAiError> {
     use crate::git::repository::exec_git;
+
+    if !crate::git::sync_authorship::notes_fetch_allowed(repo, remote) {
+        return Ok(());
+    }
 
     // 1. Walk recent history. Prefer the remote's default branch; fall back to HEAD.
     let remote_head = format!("refs/remotes/{}/HEAD", remote);
@@ -514,23 +530,30 @@ fn cached_note_shas(shas: &[String]) -> std::collections::HashSet<String> {
 
 // --- HTTP backend helpers (private) ---
 
-fn http_write_note(commit_sha: &str, content: &str) -> Result<(), GitAiError> {
+fn http_write_note(
+    commit_sha: &str,
+    content: &str,
+    repo_url: Option<&str>,
+) -> Result<(), GitAiError> {
     let db = crate::notes::db::NotesDatabase::global()?;
     let mut db_lock = db
         .lock()
         .map_err(|e| GitAiError::Generic(format!("notes-db lock: {}", e)))?;
-    db_lock.upsert_note(commit_sha, content)?;
+    db_lock.upsert_note_for_repo(commit_sha, content, repo_url)?;
     drop(db_lock);
     crate::daemon::telemetry_handle::submit_notes();
     Ok(())
 }
 
-fn http_write_batch(entries: &[(String, String)]) -> Result<(), GitAiError> {
+fn http_write_batch(
+    entries: &[(String, String)],
+    repo_url: Option<&str>,
+) -> Result<(), GitAiError> {
     let db = crate::notes::db::NotesDatabase::global()?;
     let mut db_lock = db
         .lock()
         .map_err(|e| GitAiError::Generic(format!("notes-db lock: {}", e)))?;
-    db_lock.upsert_notes_batch(entries)?;
+    db_lock.upsert_notes_batch_for_repo(entries, repo_url)?;
     drop(db_lock);
     crate::daemon::telemetry_handle::submit_notes();
     Ok(())
@@ -621,7 +644,12 @@ mod tests {
         }
 
         // Write directly via http helper (no repo needed).
-        http_write_note("abc123def456abc123def456abc123def456abc1", "test content").expect("write");
+        http_write_note(
+            "abc123def456abc123def456abc123def456abc1",
+            "test content",
+            None,
+        )
+        .expect("write");
 
         // Read back from cache.
         let content = http_read_note("abc123def456abc123def456abc123def456abc1");
@@ -661,8 +689,8 @@ mod tests {
         let sha2 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_string();
         let sha3 = "cccccccccccccccccccccccccccccccccccccccc".to_string();
 
-        http_write_note(&sha1, "content-a").expect("write sha1");
-        http_write_note(&sha2, "content-b").expect("write sha2");
+        http_write_note(&sha1, "content-a", None).expect("write sha1");
+        http_write_note(&sha2, "content-b", None).expect("write sha2");
 
         // sha3 is not written — should not appear in result.
         let result = http_read_notes(&[sha1.clone(), sha2.clone(), sha3.clone()]);
@@ -693,7 +721,7 @@ mod tests {
 
         let tmp = TmpRepo::new().expect("TmpRepo::new");
         let sha = "dddddddddddddddddddddddddddddddddddddddd";
-        http_write_note(sha, r#"{"sessions": {"s_searchable123456": {}}}"#).expect("write");
+        http_write_note(sha, r#"{"sessions": {"s_searchable123456": {}}}"#, None).expect("write");
 
         let matches =
             http_search_notes(tmp.gitai_repo(), "\"s_searchable123456\"").expect("search");
@@ -785,7 +813,7 @@ mod tests {
         let sha = repo.commit_all("msg").expect("commit");
 
         // Write a note for this SHA using the Http helper.
-        http_write_note(&sha, "some-note-content").expect("http write");
+        http_write_note(&sha, "some-note-content", None).expect("http write");
 
         // Confirm it is in notes-db with synced=0.
         let db = crate::notes::db::NotesDatabase::global().expect("global db");
@@ -843,7 +871,7 @@ mod tests {
         let sha = repo.commit_all("test commit").expect("commit");
 
         // Put a note in the cache for this commit.
-        http_write_note(&sha, "display-note-content").expect("write note");
+        http_write_note(&sha, "display-note-content", None).expect("write note");
 
         // Materialize the cache into refs/notes/ai-display.
         let count = materialize_notes_for_display(repo.gitai_repo(), 50).expect("materialize");

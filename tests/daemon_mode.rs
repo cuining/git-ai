@@ -21,7 +21,8 @@ use git_ai::daemon::{
 use git_ai::git::repository::find_repository_in_path;
 use git_ai::metrics::db::MetricsDatabase;
 use git_ai::metrics::{
-    EventAttributes, MetricEvent, PosEncoded, SessionEventValues, TokenUsageValues,
+    AgentUsageValues, CheckpointValues, CommittedValues, EventAttributes, MetricEvent,
+    OtelTraceValues, PosEncoded, RewriteCommittedValues, SessionEventValues, TokenUsageValues,
 };
 use repos::test_file::ExpectedLineExt;
 #[cfg(not(windows))]
@@ -65,6 +66,15 @@ fn daemon_trace_socket_path(repo: &TestRepo) -> PathBuf {
 
 fn daemon_lock_path(repo: &TestRepo) -> PathBuf {
     DaemonConfig::from_home(&repo.daemon_home_path()).lock_path
+}
+
+#[test]
+fn test_daemon_uses_git_ai_directory() {
+    let repo = TestRepo::new();
+    let home = repo.daemon_home_path();
+    let config = DaemonConfig::from_home(&home);
+    assert_eq!(config.internal_dir, home.join(".git-ai/internal"));
+    assert!(config.internal_dir.join("repo-families-db").is_file());
 }
 
 #[cfg(not(windows))]
@@ -218,6 +228,10 @@ impl MockApiServer {
             while !stop_thread.load(Ordering::SeqCst) {
                 match listener.accept() {
                     Ok((stream, _)) => {
+                        // Accepted sockets can inherit the listener's nonblocking mode.
+                        stream
+                            .set_nonblocking(false)
+                            .expect("failed to set blocking mock API stream");
                         handle_http_connection(stream, &tx);
                     }
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
@@ -485,6 +499,8 @@ struct DaemonGuard {
     trace_socket_path: PathBuf,
     repo_working_dir: String,
     stderr_log_path: PathBuf,
+    #[cfg(windows)]
+    runtime_log_path: PathBuf,
 }
 
 impl DaemonGuard {
@@ -535,6 +551,11 @@ impl DaemonGuard {
         loop {
             let child = command.spawn().expect("failed to spawn git-ai subprocess");
             let mut daemon = Self {
+                #[cfg(windows)]
+                runtime_log_path: git_ai::config::internal_dir_for_home(&daemon_home)
+                    .join("daemon")
+                    .join("logs")
+                    .join(format!("{}.log", child.id())),
                 child,
                 control_socket_path: control_socket_path.clone(),
                 trace_socket_path: trace_socket_path.clone(),
@@ -630,7 +651,13 @@ impl DaemonGuard {
     }
 
     fn stderr_contents(&self) -> String {
-        fs::read_to_string(&self.stderr_log_path).unwrap_or_default()
+        let stderr = fs::read_to_string(&self.stderr_log_path).unwrap_or_default();
+        // Windows redirects stderr to the per-process log even in test mode.
+        #[cfg(windows)]
+        if let Ok(runtime_log) = fs::read_to_string(&self.runtime_log_path) {
+            return stderr + &runtime_log;
+        }
+        stderr
     }
 }
 
@@ -2246,12 +2273,12 @@ fn checkpoint_admission_proceeds_while_same_family_side_effects_grind() {
     assert!(response.ok, "checkpoint failed: {response:?}");
 
     // Admission (not processing) must complete well before the 10s grind ends.
+    let receipt = format!("receipt_seq={}", response.seq.unwrap());
     let started = std::time::Instant::now();
     loop {
         let logs = repo.daemon_stderr_contents();
         if logs.lines().any(|line| {
-            line.contains("checkpoint prepared for family admission")
-                && line.contains("same-family-grind-checkpoint")
+            line.contains("checkpoint prepared for family admission") && line.contains(&receipt)
         }) {
             break;
         }
@@ -5240,12 +5267,6 @@ fn daemon_pure_trace_socket_checkout_tracks_success_failure_and_new_branch() {
 #[serial]
 fn daemon_pure_trace_socket_pull_fast_forward_tracks_pull_command() {
     let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
-    let _daemon = DaemonGuard::start(&repo);
-    let trace_socket = daemon_trace_socket_path(&repo);
-    let env = git_trace_env(&trace_socket);
-    let env_refs = [(env[0].0, env[0].1.as_str()), (env[1].0, env[1].1.as_str())];
-    let default_branch = repo.current_branch();
-
     let run_git = |args: &[&str]| -> String {
         let output = Command::new(real_git_executable())
             .args(args)
@@ -5260,12 +5281,6 @@ fn daemon_pure_trace_socket_pull_fast_forward_tracks_pull_command() {
         String::from_utf8_lossy(&output.stdout).trim().to_string()
     };
 
-    fs::write(repo.path().join("pull-case.txt"), "base\n").expect("failed to write base");
-    repo.git_og_with_env(&["add", "pull-case.txt"], &env_refs)
-        .expect("add should succeed");
-    repo.git_og_with_env(&["commit", "-m", "base"], &env_refs)
-        .expect("base commit should succeed");
-
     let remote_root = tempfile::tempdir().expect("remote tempdir should be created");
     let bare_remote = remote_root.path().join("origin.git");
     let remote_clone = remote_root.path().join("origin-work");
@@ -5275,16 +5290,23 @@ fn daemon_pure_trace_socket_pull_fast_forward_tracks_pull_command() {
     let _ = fs::remove_dir_all(&remote_clone);
 
     run_git(&["init", "--bare", bare_remote_str.as_str()]);
-    repo.git_og_with_env(
-        &["remote", "add", "origin", bare_remote_str.as_str()],
-        &env_refs,
-    )
-    .expect("adding origin remote should succeed");
-    repo.git_og_with_env(
-        &["push", "-u", "origin", default_branch.as_str()],
-        &env_refs,
-    )
-    .expect("pushing base branch should succeed");
+    // Finish writing .git/config before the daemon starts reading it.
+    repo.git_og(&["remote", "add", "origin", bare_remote_str.as_str()])
+        .expect("adding origin remote should succeed");
+
+    let _daemon = DaemonGuard::start(&repo);
+    let trace_socket = daemon_trace_socket_path(&repo);
+    let env = git_trace_env(&trace_socket);
+    let env_refs = [(env[0].0, env[0].1.as_str()), (env[1].0, env[1].1.as_str())];
+    let default_branch = repo.current_branch();
+
+    fs::write(repo.path().join("pull-case.txt"), "base\n").expect("failed to write base");
+    repo.git_og_with_env(&["add", "pull-case.txt"], &env_refs)
+        .expect("add should succeed");
+    repo.git_og_with_env(&["commit", "-m", "base"], &env_refs)
+        .expect("base commit should succeed");
+    repo.git_og_with_env(&["push", "origin", default_branch.as_str()], &env_refs)
+        .expect("pushing base branch should succeed");
 
     run_git(&[
         "clone",
@@ -5331,7 +5353,7 @@ fn daemon_pure_trace_socket_pull_fast_forward_tracks_pull_command() {
     )
     .expect("fast-forward pull should succeed");
 
-    wait_for_expected_top_level_completions(&repo, 0, 5);
+    wait_for_expected_top_level_completions(&repo, 0, 4);
 
     let pull_entries = completion_entries_for_command(&repo, "pull");
     let saw_pull_success = pull_entries.iter().any(|entry| entry.exit_code == Some(0));
@@ -6338,6 +6360,7 @@ fn daemon_memory_threshold_logs_uploads_and_aborts_without_draining() {
                 "GIT_AI_TEST_DELAY_CHECKPOINT_ADMISSION",
                 "memory-limit-checkpoint=10000",
             ),
+            ("GIT_AI_DAEMON_LOG_UPLOAD", "true"),
             ("GIT_AI_API_BASE_URL", mock_api.base_url()),
             ("GIT_AI_API_KEY", "test-api-key"),
         ],
@@ -6374,11 +6397,31 @@ fn daemon_memory_threshold_logs_uploads_and_aborts_without_draining() {
         "checkpoint should be accepted before emergency shutdown: {checkpoint_response:?}"
     );
     let started = std::time::Instant::now();
-    let status = daemon.child.wait().expect("wait for emergency daemon stop");
+    let status = loop {
+        if let Some(status) = daemon
+            .child
+            .try_wait()
+            .expect("poll for emergency daemon stop")
+        {
+            break status;
+        }
+        if started.elapsed() >= Duration::from_secs(20) {
+            let _ = daemon.child.kill();
+            let _ = daemon.child.wait();
+            panic!(
+                "daemon did not abort within 20s:\n{}",
+                daemon.stderr_contents()
+            );
+        }
+        thread::sleep(Duration::from_millis(50));
+    };
     assert!(!status.success(), "85% threshold should abort the daemon");
     assert!(
-        started.elapsed() < Duration::from_secs(5),
-        "memory emergency shutdown waited for the delayed checkpoint"
+        repo.current_working_logs()
+            .read_all_checkpoints()
+            .expect("working log should be readable after abort")
+            .is_empty(),
+        "memory emergency shutdown must leave the acknowledged checkpoint unprocessed"
     );
     let logs = daemon.stderr_contents();
     assert!(
@@ -6492,6 +6535,57 @@ fn bg_command_with_env(
 }
 
 use std::process::Output;
+
+#[test]
+#[serial]
+#[cfg(unix)]
+fn npm_managed_shutdown_waits_for_daemon_process_exit() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let mut guard = DaemonGuard::start_with_env(
+        &repo,
+        &[
+            ("GIT_AI_TEST_SHUTDOWN_HANG_SECS", "2"),
+            ("GIT_AI_DAEMON_SHUTDOWN_DEADLINE_SECS", "10"),
+        ],
+    );
+    let output = bg_command(&repo, "shutdown", &[]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        guard.child.try_wait().unwrap().is_some(),
+        "successful shutdown must mean the process has exited"
+    );
+}
+
+#[test]
+#[serial]
+#[cfg(unix)]
+fn daemon_soft_shutdown_allows_daemon_deadline_to_force_exit() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let mut daemon = DaemonGuard::start_with_env(
+        &repo,
+        &[
+            ("GIT_AI_TEST_SHUTDOWN_HANG_SECS", "30"),
+            ("GIT_AI_DAEMON_SHUTDOWN_DEADLINE_SECS", "8"),
+        ],
+    );
+
+    let output = bg_command(&repo, "shutdown", &[]);
+    assert!(
+        output.status.success(),
+        "soft shutdown failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let status = daemon
+        .child
+        .try_wait()
+        .unwrap()
+        .expect("daemon must exit before soft shutdown succeeds");
+    assert_eq!(status.code(), Some(70), "unexpected daemon exit: {status}");
+}
 
 #[test]
 #[serial]
@@ -8385,6 +8479,7 @@ fn daemon_debug_logging_does_not_reupload_ureq_logs() {
     let mut mock_api = MockApiServer::start();
     let repo = TestRepo::new_with_daemon_env(&[
         ("RUST_LOG", "debug"),
+        ("GIT_AI_DAEMON_LOG_UPLOAD", "true"),
         ("GIT_AI_API_BASE_URL", mock_api.base_url()),
         ("GIT_AI_API_KEY", "test-api-key"),
     ]);
@@ -8435,6 +8530,676 @@ fn daemon_debug_logging_does_not_reupload_ureq_logs() {
 }
 
 #[test]
+fn daemon_respects_disabled_metric_upload_flags() {
+    let mut mock_api = MockApiServer::start();
+    let metrics_db_dir = tempfile::tempdir().unwrap();
+    let metrics_db_path = metrics_db_dir.path().join("metrics.db");
+    let repo = TestRepo::new_with_daemon_env(&[
+        ("GIT_AI_API_BASE_URL", mock_api.base_url()),
+        ("GIT_AI_API_KEY", "test-api-key"),
+        (
+            "GIT_AI_TEST_METRICS_DB_PATH",
+            metrics_db_path.to_str().unwrap(),
+        ),
+    ]);
+    fs::write(
+        repo.test_home_path().join(".git-ai/config.json"),
+        r#"{"feature_flags":{"transcript_streaming":true,"transcript_upload":false,"token_usage_metrics":false}}"#,
+    )
+    .unwrap();
+    seed_metric_upload_test_batch(&metrics_db_path);
+
+    repo.git_ai(&["await", "--timeout", "30"]).unwrap();
+    assert_disabled_metrics_stay_local(&mut mock_api, &metrics_db_path);
+
+    repo.git_ai(&["reingest", "--all"]).unwrap();
+    repo.git_ai(&["await", "--timeout", "30"]).unwrap();
+    assert_disabled_metrics_stay_local(&mut mock_api, &metrics_db_path);
+}
+
+#[test]
+fn manual_flush_respects_disabled_metric_upload_flags() {
+    let mut mock_api = MockApiServer::start();
+    let metrics_db_dir = tempfile::tempdir().unwrap();
+    let metrics_db_path = metrics_db_dir.path().join("metrics.db");
+    let repo = TestRepo::new();
+    seed_metric_upload_test_batch(&metrics_db_path);
+
+    repo.git_ai_with_env(
+        &["flush-metrics-db"],
+        &[
+            ("GIT_AI_API_BASE_URL", mock_api.base_url()),
+            ("GIT_AI_API_KEY", "test-api-key"),
+            (
+                "GIT_AI_TEST_METRICS_DB_PATH",
+                metrics_db_path.to_str().unwrap(),
+            ),
+            ("GIT_AI_TRANSCRIPT_UPLOAD", "false"),
+            ("GIT_AI_TOKEN_USAGE_METRICS", "false"),
+        ],
+    )
+    .unwrap();
+    assert_disabled_metrics_stay_local(&mut mock_api, &metrics_db_path);
+}
+
+fn seed_metric_upload_test_batch(metrics_db_path: &Path) {
+    let attrs = EventAttributes::with_version("test")
+        .session_id("local-transcript-session")
+        .tool("codex")
+        .repo_url("https://github.com/acme/public")
+        .to_sparse();
+    let events = [
+        MetricEvent::from_values(CommittedValues::new(), attrs.clone()),
+        MetricEvent::from_values(
+            SessionEventValues::new(json!({"type": "assistant"})),
+            attrs.clone(),
+        ),
+        MetricEvent::from_values(OtelTraceValues::new(json!({"name": "tool"})), attrs.clone()),
+        MetricEvent::from_values(RewriteCommittedValues::new(), attrs.clone()),
+        MetricEvent::from_values(
+            TokenUsageValues::new().input_tokens(10).total_tokens(10),
+            attrs,
+        ),
+    ];
+    let serialized_events = events
+        .iter()
+        .map(serde_json::to_string)
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    MetricsDatabase::open_at_path(metrics_db_path)
+        .unwrap()
+        .insert_events(&serialized_events)
+        .unwrap();
+}
+
+fn assert_disabled_metrics_stay_local(mock_api: &mut MockApiServer, metrics_db_path: &Path) {
+    let mut uploaded_ids: Vec<_> = mock_api
+        .collect_requests()
+        .iter()
+        .filter(|request| request["path"] == "/worker/metrics/upload")
+        .flat_map(|request| request["body"]["events"].as_array().unwrap())
+        .map(|event| event["e"].as_u64().unwrap())
+        .collect();
+    uploaded_ids.sort_unstable();
+    assert_eq!(uploaded_ids, [1, 7]);
+
+    let metrics_db = MetricsDatabase::open_at_path(metrics_db_path).unwrap();
+    let local_events = metrics_db.get_metric_history(0, None, &[5, 6, 9]).unwrap();
+    assert_eq!(
+        local_events
+            .iter()
+            .map(|row| row.event_id)
+            .collect::<Vec<_>>(),
+        [5, 6, 9]
+    );
+}
+
+#[test]
+fn daemon_repository_allowlist_covers_attribution_and_metrics() {
+    let mut mock_api = MockApiServer::start();
+    let metrics_dir = tempfile::tempdir().unwrap();
+    let metrics_path = metrics_dir.path().join("metrics.db");
+    let repo = TestRepo::new_with_daemon_env(&[
+        ("GIT_AI_API_BASE_URL", mock_api.base_url()),
+        ("GIT_AI_API_KEY", "test-api-key"),
+        ("GIT_AI_NOTES_BACKEND_KIND", "git_notes"),
+        (
+            "GIT_AI_TEST_METRICS_DB_PATH",
+            metrics_path.to_str().unwrap(),
+        ),
+    ]);
+    repo.git_ai(&[
+        "config",
+        "set",
+        "allow_repositories",
+        "https://git.xiaojukeji.com/*",
+    ])
+    .unwrap();
+
+    let outside = "https://github.com/git.xiaojukeji.com/personal";
+    let company = "https://git.xiaojukeji.com/team/company";
+    repo.git(&["remote", "add", "origin", outside]).unwrap();
+    repo.git(&["remote", "add", "upstream", company]).unwrap();
+    let mut file = repo.filename("example.txt");
+    fs::write(repo.path().join("example.txt"), "First line\n").unwrap();
+    let socket = daemon_control_socket_path(&repo);
+    let checkpoint = CheckpointRequest {
+        trace_id: "outside-checkpoint".into(),
+        checkpoint_kind: CheckpointKind::Human,
+        agent_id: None,
+        files: vec![CheckpointFile {
+            path: "example.txt".into(),
+            content: Some("First line\n".into()),
+            repo_work_dir: repo.path().to_path_buf(),
+            base_commit: BaseCommit::Initial,
+        }],
+        path_role: PreparedPathRole::Edited,
+        stream_source: None,
+        metadata: Default::default(),
+    };
+    assert!(
+        send_checkpoint_request_with_timeout(&socket, &checkpoint, Duration::from_secs(5))
+            .unwrap()
+            .ok
+    );
+    let bash_attempt = ControlRequest::BashHookAttemptStart {
+        original_cwd: repo_workdir_string(&repo),
+        discovered_repo_work_dir: Some(repo_workdir_string(&repo)),
+        repo_discovery_error: None,
+        session_id: "outside-session".into(),
+        tool_use_id: "outside-bash".into(),
+        agent_id: AgentId {
+            tool: "claude".into(),
+            id: "outside-session".into(),
+            model: "test".into(),
+        },
+        metadata: Default::default(),
+        trace_id: "outside-bash-trace".into(),
+        started_at_ns: 1_700_000_000_000_000_000,
+        command: Some("test command".into()),
+    };
+    assert!(send_control_request(&socket, &bash_attempt).unwrap().ok);
+    repo.git_ai(&["await", "--timeout", "30"]).unwrap();
+    let outside_checkpoints = repo
+        .working_logs_for_base_commit("initial")
+        .read_all_checkpoints()
+        .unwrap();
+    let bash_db_path = repo
+        .daemon_home_path()
+        .join(".git-ai/internal/bash-checkpoints-db");
+    let bash_records: i64 = if bash_db_path.exists() {
+        git_ai::sqlite::open_with_flags_and_memory_limits(
+            bash_db_path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .unwrap()
+        .query_row(
+            "SELECT count(*) FROM bash_checkpoint_calls WHERE tool_use_id = 'outside-bash'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap()
+    } else {
+        0
+    };
+    repo.git(&["add", "example.txt"]).unwrap();
+    repo.git(&["commit", "-m", "Outside commit"]).unwrap();
+    let outside_sha = repo.git(&["rev-parse", "HEAD"]).unwrap();
+    assert!(
+        repo.git(&["notes", "--ref=ai", "show", outside_sha.trim()])
+            .is_err(),
+        "outside commit must not acquire an authorship note"
+    );
+    file.assert_committed_lines(lines!["First line".unattributed_human()]);
+    assert!(
+        outside_checkpoints.is_empty(),
+        "outside checkpoint must not write working logs"
+    );
+    assert_eq!(bash_records, 0, "outside Bash history must not persist");
+
+    repo.git(&[
+        "remote",
+        "set-url",
+        "origin",
+        "git@git.xiaojukeji.com:team/company.git",
+    ])
+    .unwrap();
+    fs::write(repo.path().join("example.txt"), "First line\nSecond line\n").unwrap();
+    let company_commit = repo.stage_all_and_commit("Company commit").unwrap();
+    file.assert_committed_lines(lines![
+        "First line".unattributed_human(),
+        "Second line".unattributed_human(),
+    ]);
+
+    let commit_events = |url: &str, sha: &str| {
+        let attrs = EventAttributes::with_version("test")
+            .repo_url(url)
+            .commit_sha(sha)
+            .to_sparse();
+        [
+            MetricEvent::from_values(AgentUsageValues::new(), attrs.clone()),
+            MetricEvent::from_values(
+                CheckpointValues::new().checkpoint_type("recovered_bash"),
+                attrs.clone(),
+            ),
+            MetricEvent::from_values(RewriteCommittedValues::new(), attrs.clone()),
+            MetricEvent::from_values(
+                SessionEventValues::new(json!({ "marker": "repo-session" })),
+                attrs.clone(),
+            ),
+            MetricEvent::from_values(OtelTraceValues::new(json!({"name": "tool"})), attrs.clone()),
+            MetricEvent::from_values(
+                TokenUsageValues::new().input_tokens(1).total_tokens(1),
+                attrs,
+            ),
+        ]
+    };
+    let response = send_control_request(
+        &daemon_control_socket_path(&repo),
+        &ControlRequest::SubmitTelemetry {
+            envelopes: vec![git_ai::daemon::TelemetryEnvelope::Metrics {
+                events: [
+                    commit_events(outside, outside_sha.trim()),
+                    commit_events(company, &company_commit.commit_sha),
+                ]
+                .into_iter()
+                .flatten()
+                .collect(),
+            }],
+        },
+    )
+    .unwrap();
+    assert!(response.ok, "daemon rejected telemetry: {response:?}");
+    repo.git_ai(&["await", "--timeout", "30"]).unwrap();
+
+    let history = MetricsDatabase::open_at_path(&metrics_path)
+        .unwrap()
+        .get_metric_history(0, None, &[1, 2, 4, 5, 6, 7, 9])
+        .unwrap();
+    let mut persisted: Vec<_> = history
+        .iter()
+        .map(|row| (row.event_id, row.repo_url.as_deref()))
+        .collect();
+    persisted.sort_unstable();
+    assert_eq!(
+        persisted,
+        [
+            (1, Some(company)),
+            (2, Some(company)),
+            (4, Some(company)),
+            (5, Some(company)),
+            (6, Some(company)),
+            (7, Some(company)),
+            (9, Some(company))
+        ]
+    );
+
+    let requests = mock_api.collect_requests();
+    let repo_url_pos = git_ai::metrics::attrs::attr_pos::REPO_URL.to_string();
+    let mut uploaded: Vec<_> = requests
+        .iter()
+        .filter(|request| request["path"] == "/worker/metrics/upload")
+        .flat_map(|request| request["body"]["events"].as_array().unwrap())
+        .filter_map(|event| {
+            let id = event["e"].as_u64()?;
+            matches!(id, 1 | 2 | 4 | 7).then(|| (id, event["a"][&repo_url_pos].as_str()))
+        })
+        .collect();
+    uploaded.sort_unstable();
+    assert_eq!(
+        uploaded,
+        [
+            (1, Some(company)),
+            (2, Some(company)),
+            (4, Some(company)),
+            (7, Some(company))
+        ]
+    );
+}
+
+#[test]
+fn daemon_repository_allowlist_blocks_outside_transcript_sweep_records() {
+    let mut company = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let outside = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    company
+        .git_og(&[
+            "remote",
+            "add",
+            "origin",
+            "https://git.xiaojukeji.com/team/company",
+        ])
+        .unwrap();
+    outside
+        .git_og(&[
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/acme/personal",
+        ])
+        .unwrap();
+    company.patch_git_ai_config(|patch| {
+        patch.allow_repositories = Some(vec!["https://git.xiaojukeji.com/*".into()]);
+    });
+
+    let claude = tempfile::tempdir().unwrap();
+    let projects = claude.path().join("projects");
+    fs::create_dir(&projects).unwrap();
+    let sessions = [("outside", &outside), ("company", &company)];
+    for (session, repo) in sessions {
+        let entry = json!({
+            "type": "assistant",
+            "cwd": repo.canonical_path(),
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+            "sessionId": session,
+            "requestId": session,
+            "message": {
+                "id": session,
+                "role": "assistant",
+                "model": "claude-sonnet-4-20250514",
+                "usage": {"input_tokens": 10, "output_tokens": 5}
+            }
+        });
+        fs::write(
+            projects.join(format!("{session}.jsonl")),
+            format!("{entry}\n"),
+        )
+        .unwrap();
+    }
+    company.start_dedicated_daemon_with_env_for_test(&[
+        ("CLAUDE_CONFIG_DIR", claude.path().to_str().unwrap()),
+        ("GIT_AI_TRANSCRIPT_STREAMING", "true"),
+        ("GIT_AI_TRANSCRIPT_SWEEP", "true"),
+        ("GIT_AI_TOKEN_USAGE_METRICS", "true"),
+    ]);
+    company.git_ai(&["await", "--timeout", "30"]).unwrap();
+
+    let internal = DaemonConfig::from_home(&company.daemon_home_path()).internal_dir;
+    let streams =
+        git_ai::streams::db::StreamsDatabase::open(internal.join("transcripts-db")).unwrap();
+    for (session, expected) in [("outside", false), ("company", true)] {
+        let stream_path = projects
+            .join(format!("{session}.jsonl"))
+            .canonicalize()
+            .unwrap();
+        let session_id = git_ai::authorship::authorship_log_serialization::generate_session_id(
+            session, "claude",
+        );
+        assert_eq!(
+            streams
+                .get_stream(&session_id, "transcript", stream_path.to_str().unwrap())
+                .unwrap()
+                .is_some(),
+            expected,
+            "transcript record for {session}"
+        );
+    }
+    let tokens =
+        git_ai::token_usage::db::TokenUsageDatabase::open(internal.join("token-usage-db")).unwrap();
+    let tracked = tokens.all_files().unwrap();
+    assert!(
+        tracked
+            .iter()
+            .any(|file| file.external_session_id == "company")
+    );
+    assert!(
+        tracked
+            .iter()
+            .all(|file| file.external_session_id != "outside")
+    );
+}
+
+#[rstest::rstest]
+#[case::local_path(false)]
+#[case::forged_remote_listing(true)]
+fn daemon_repository_allowlist_blocks_notes_to_an_outside_push_url(#[case] forged: bool) {
+    if cfg!(windows) && forged {
+        return;
+    }
+    // Prevent any network fetch, including if the Notes transport check regresses.
+    let repo = TestRepo::new_with_daemon_env(&[("GIT_ALLOW_PROTOCOL", "file")]);
+    let remote_dir = tempfile::tempdir().unwrap();
+    let remote_path = remote_dir.path().join(if forged {
+        "outside\norigin\tgit@git.xiaojukeji.com:fake.git"
+    } else {
+        "outside.git"
+    });
+    let remote_path = remote_path.to_str().unwrap();
+    let company = "https://git.xiaojukeji.com/team/company";
+    repo.git_og(&["init", "--bare", remote_path]).unwrap();
+    repo.git_og(&["remote", "add", "origin", company]).unwrap();
+    repo.git_og(&["remote", "set-url", "--push", "origin", remote_path])
+        .unwrap();
+    repo.git_ai(&[
+        "config",
+        "set",
+        "allow_repositories",
+        "https://git.xiaojukeji.com/*",
+    ])
+    .unwrap();
+    fs::write(repo.path().join("example.txt"), "Company line\n").unwrap();
+    repo.stage_all_and_commit("Company commit").unwrap();
+    repo.filename("example.txt")
+        .assert_committed_lines(lines!["Company line".unattributed_human()]);
+
+    repo.git(&["push", "origin", "HEAD:refs/heads/main"])
+        .unwrap();
+    repo.git_ai(&["await", "--timeout", "30"]).unwrap();
+    let remote_ref_exists = |reference: &str| {
+        Command::new(real_git_executable())
+            .args([
+                "--git-dir",
+                remote_path,
+                "show-ref",
+                "--verify",
+                "--quiet",
+                reference,
+            ])
+            .status()
+            .unwrap()
+            .success()
+    };
+    assert!(remote_ref_exists("refs/heads/main"));
+    assert!(
+        !remote_ref_exists("refs/notes/ai"),
+        "Notes must not follow a push outside the allowlist"
+    );
+}
+
+#[rstest::rstest]
+#[case::first_fetch_url(
+    "https://github.com/acme/outside",
+    Some("https://git.xiaojukeji.com/team/extra"),
+    None,
+    "https://github.com/acme/outside",
+    false
+)]
+#[case::rewritten_outside("https://git.xiaojukeji.com/team/repo", None, Some(("https://github.com/acme/", "https://git.xiaojukeji.com/team/")), "https://github.com/acme/repo", false)]
+#[case::rewritten_inside("work:repo", None, Some(("https://git.xiaojukeji.com/team/", "work:")), "https://git.xiaojukeji.com/team/repo", true)]
+#[case::file_url(
+    "file://git.xiaojukeji.com/tmp/outside.git",
+    None,
+    None,
+    "file://git.xiaojukeji.com/tmp/outside.git",
+    false
+)]
+#[case::ssh_without_user(
+    "git.xiaojukeji.com:team/repo.git",
+    None,
+    None,
+    "git.xiaojukeji.com:team/repo.git",
+    true
+)]
+fn daemon_repository_allowlist_uses_the_actual_fetch_origin(
+    #[case] origin: &str,
+    #[case] second_url: Option<&str>,
+    #[case] rewrite: Option<(&str, &str)>,
+    #[case] expected_url: &str,
+    #[case] expected_note: bool,
+) {
+    let repo = TestRepo::new_dedicated_daemon();
+    repo.git_og(&["remote", "add", "origin", origin]).unwrap();
+    if let Some(url) = second_url {
+        repo.git_og(&["config", "--add", "remote.origin.url", url])
+            .unwrap();
+    }
+    if let Some((replacement, prefix)) = rewrite {
+        repo.git_og(&[
+            "config",
+            "--add",
+            &format!("url.{replacement}.insteadOf"),
+            prefix,
+        ])
+        .unwrap();
+    }
+    assert_eq!(
+        repo.git_og(&["remote", "get-url", "origin"])
+            .unwrap()
+            .trim(),
+        expected_url
+    );
+    repo.git_ai(&[
+        "config",
+        "set",
+        "allow_repositories",
+        "https://git.xiaojukeji.com/*",
+    ])
+    .unwrap();
+    fs::write(repo.path().join("example.txt"), "One line\n").unwrap();
+    repo.git(&["add", "example.txt"]).unwrap();
+    repo.git(&["commit", "-m", "Check origin policy"]).unwrap();
+    repo.git_ai(&["await", "--timeout", "30"]).unwrap();
+
+    assert_eq!(
+        repo.git_og(&["notes", "--ref=ai", "show", "HEAD"]).is_ok(),
+        expected_note
+    );
+    repo.filename("example.txt")
+        .assert_committed_lines(lines!["One line".unattributed_human()]);
+}
+
+#[test]
+fn daemon_repository_allowlist_blocks_external_sessions_editing_company_files() {
+    let company = TestRepo::new_dedicated_daemon();
+    let outside = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    company
+        .git_og(&[
+            "remote",
+            "add",
+            "origin",
+            "https://git.xiaojukeji.com/team/company",
+        ])
+        .unwrap();
+    outside
+        .git_og(&[
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/acme/personal",
+        ])
+        .unwrap();
+    company
+        .git_ai(&[
+            "config",
+            "set",
+            "allow_repositories",
+            "https://git.xiaojukeji.com/*",
+        ])
+        .unwrap();
+
+    let session_id = "external-session-editing-a-company-file";
+    let transcript_dir = tempfile::tempdir().unwrap();
+    let transcript = transcript_dir.path().join(format!("{session_id}.jsonl"));
+    let entry = json!({
+        "type": "assistant",
+        "cwd": outside.canonical_path(),
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "sessionId": session_id,
+        "message": {"id": "one-message", "role": "assistant", "model": "claude-sonnet-4-20250514"}
+    });
+    fs::write(&transcript, format!("{entry}\n")).unwrap();
+    let file = company.canonical_path().join("example.txt");
+    for hook_name in ["PreToolUse", "PostToolUse"] {
+        let payload = json!({
+            "cwd": outside.canonical_path(),
+            "hook_event_name": hook_name,
+            "tool_name": "Write",
+            "tool_use_id": "cross-repo-edit",
+            "session_id": session_id,
+            "transcript_path": transcript,
+            "tool_input": {"file_path": file}
+        });
+        company
+            .git_ai(&["checkpoint", "claude", "--hook-input", &payload.to_string()])
+            .unwrap();
+        if hook_name == "PreToolUse" {
+            fs::write(&file, "Company line\n").unwrap();
+        }
+    }
+    company.stage_all_and_commit("Edit company file").unwrap();
+    company
+        .filename("example.txt")
+        .assert_committed_lines(lines!["Company line".ai()]);
+    company.git_ai(&["await", "--timeout", "30"]).unwrap();
+
+    let internal = DaemonConfig::from_home(&company.daemon_home_path()).internal_dir;
+    let db = git_ai::streams::db::StreamsDatabase::open(internal.join("transcripts-db")).unwrap();
+    assert!(
+        db.all_streams()
+            .unwrap()
+            .iter()
+            .all(|stream| stream.external_session_id != session_id),
+        "an external session must not be recorded under the edited repository"
+    );
+}
+
+#[test]
+fn daemon_repository_allowlist_filters_pending_and_manual_http_notes() {
+    let mut mock_api = MockApiServer::start();
+    let mut repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let outside = "https://github.com/acme/personal";
+    let company = "https://git.xiaojukeji.com/team/company";
+    repo.git_og(&["remote", "add", "origin", outside]).unwrap();
+    repo.git_og(&["commit", "--allow-empty", "-m", "Historical outside commit"])
+        .unwrap();
+    let outside_sha = repo.git_og(&["rev-parse", "HEAD"]).unwrap();
+    let outside_sha = outside_sha.trim();
+    repo.git_og(&[
+        "notes",
+        "--ref=ai",
+        "add",
+        "-m",
+        "Historical outside note",
+        outside_sha,
+    ])
+    .unwrap();
+    repo.git_og(&["remote", "set-url", "origin", company])
+        .unwrap();
+    repo.patch_git_ai_config(|patch| {
+        patch.allow_repositories = Some(vec!["https://git.xiaojukeji.com/*".into()]);
+        patch.notes_backend = Some(NotesBackendConfig {
+            kind: NotesBackendKind::Http,
+            backend_url: Some(mock_api.base_url().to_string()),
+        });
+    });
+    let internal = DaemonConfig::from_home(&repo.daemon_home_path()).internal_dir;
+    let mut db =
+        git_ai::notes::db::NotesDatabase::open_at_path(&internal.join("notes-db")).unwrap();
+    db.upsert_note(outside_sha, "Historical note awaiting upload")
+        .unwrap();
+    repo.start_dedicated_daemon_with_env_for_test(&[
+        ("GIT_AI_API_BASE_URL", mock_api.base_url()),
+        ("GIT_AI_API_KEY", "test-api-key"),
+    ]);
+    fs::write(repo.path().join("example.txt"), "Company line\n").unwrap();
+    repo.git(&["add", "example.txt"]).unwrap();
+    repo.git(&["commit", "-m", "New company note"]).unwrap();
+    repo.filename("example.txt")
+        .assert_committed_lines(lines!["Company line".unattributed_human()]);
+    let company_sha = repo.git_og(&["rev-parse", "HEAD"]).unwrap();
+    repo.git_ai(&["await", "--timeout", "30"]).unwrap();
+
+    repo.git_og(&["remote", "set-url", "origin", outside])
+        .unwrap();
+    repo.git_ai_with_env(
+        &["notes", "migrate", "--force"],
+        &[("GIT_AI_API_KEY", "test-api-key")],
+    )
+    .unwrap();
+    let uploaded: Vec<String> = mock_api
+        .collect_requests()
+        .iter()
+        .filter(|request| request["path"] == "/worker/notes/upload")
+        .flat_map(|request| request["body"]["entries"].as_array().unwrap())
+        .map(|entry| entry["commit_sha"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(uploaded, [company_sha.trim()]);
+    assert_eq!(
+        db.get_note(outside_sha).unwrap().as_deref(),
+        Some("Historical note awaiting upload")
+    );
+}
+
+#[test]
 fn daemon_marks_repository_filtered_session_events_delivered_without_uploading_them() {
     let mut mock_api = MockApiServer::start();
     let metrics_db_path = std::env::temp_dir().join(format!(
@@ -8444,6 +9209,7 @@ fn daemon_marks_repository_filtered_session_events_delivered_without_uploading_t
     let repo = TestRepo::new_with_daemon_env(&[
         ("GIT_AI_API_BASE_URL", mock_api.base_url()),
         ("GIT_AI_API_KEY", "test-api-key"),
+        ("GIT_AI_TRANSCRIPT_UPLOAD", "true"),
         (
             "GIT_AI_TEST_METRICS_DB_PATH",
             metrics_db_path.to_str().unwrap(),
@@ -8504,6 +9270,7 @@ fn daemon_marks_repository_filtered_token_usage_events_delivered_without_uploadi
     let repo = TestRepo::new_with_daemon_env(&[
         ("GIT_AI_API_BASE_URL", mock_api.base_url()),
         ("GIT_AI_API_KEY", "test-api-key"),
+        ("GIT_AI_TOKEN_USAGE_METRICS", "true"),
         (
             "GIT_AI_TEST_METRICS_DB_PATH",
             metrics_db_path.to_str().unwrap(),
@@ -8511,7 +9278,7 @@ fn daemon_marks_repository_filtered_token_usage_events_delivered_without_uploadi
     ]);
     fs::write(
         repo.test_home_path().join(".git-ai/config.json"),
-        r#"{"allow_repositories":["https://github.com/acme/*"],"exclude_repositories":["git@github.com:acme/private"]}"#,
+        r#"{"feature_flags":{"transcript_upload":false},"allow_repositories":["https://github.com/acme/*"],"exclude_repositories":["git@github.com:acme/private"]}"#,
     )
     .unwrap();
 
@@ -8566,6 +9333,7 @@ fn reingest_command_redelivers_bounded_and_all_metrics_through_daemon() {
     let repo = TestRepo::new_with_daemon_env(&[
         ("GIT_AI_API_BASE_URL", mock_api.base_url()),
         ("GIT_AI_API_KEY", "test-api-key"),
+        ("GIT_AI_TRANSCRIPT_UPLOAD", "true"),
         (
             "GIT_AI_TEST_METRICS_DB_PATH",
             metrics_db_path.to_str().unwrap(),
@@ -8660,6 +9428,7 @@ fn token_usage_without_repo_url_passes_an_exclude_only_gate() {
     let repo = TestRepo::new_with_daemon_env(&[
         ("GIT_AI_API_BASE_URL", mock_api.base_url()),
         ("GIT_AI_API_KEY", "test-api-key"),
+        ("GIT_AI_TOKEN_USAGE_METRICS", "true"),
         (
             "GIT_AI_TEST_METRICS_DB_PATH",
             metrics_db_path.to_str().unwrap(),
@@ -8713,6 +9482,7 @@ fn excluded_repo_token_usage_never_uploads_via_the_real_pipeline() {
     let repo = TestRepo::new_with_daemon_env(&[
         ("GIT_AI_API_BASE_URL", mock_api.base_url()),
         ("GIT_AI_API_KEY", "test-api-key"),
+        ("GIT_AI_TOKEN_USAGE_METRICS", "true"),
         (
             "GIT_AI_TEST_METRICS_DB_PATH",
             metrics_db_path.to_str().unwrap(),

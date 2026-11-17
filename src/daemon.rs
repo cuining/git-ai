@@ -396,7 +396,7 @@ impl DaemonConfig {
     }
 
     pub fn from_home(home: &Path) -> Self {
-        let internal_dir = home.join(".git-ai").join("internal");
+        let internal_dir = crate::config::internal_dir_for_home(home);
         Self::from_internal_dir(internal_dir)
     }
 
@@ -859,6 +859,7 @@ fn stash_base_head(repo: &Repository, stash_sha: &str) -> Option<String> {
 struct RewriteMetricContext {
     parent_by_commit: HashMap<String, String>,
     parent_diff_by_commit: HashMap<String, crate::authorship::rewrite::DiffTreeResult>,
+    resolved_notes_by_commit: HashMap<String, String>,
 }
 
 fn process_conflict_resolution_working_logs(
@@ -905,6 +906,7 @@ fn process_conflict_resolution_working_logs(
                 .map(|(commit_sha, parent_sha)| (commit_sha.clone(), parent_sha.clone()))
                 .collect(),
             parent_diff_by_commit: HashMap::new(),
+            resolved_notes_by_commit: HashMap::new(),
         }
     } else {
         RewriteMetricContext::default()
@@ -946,7 +948,7 @@ fn process_conflict_resolution_working_logs(
         let existing_shifted_log = existing_notes
             .get(commit_sha)
             .and_then(|raw| AuthorshipLog::deserialize_from_string(raw).ok());
-        post_conflict_resolution_working_log(
+        let resolution_log = post_conflict_resolution_working_log(
             repo,
             parent_sha,
             commit_sha,
@@ -954,6 +956,14 @@ fn process_conflict_resolution_working_logs(
             existing_shifted_log,
             diff_by_commit.get(commit_sha.as_str()).copied(),
         )?;
+        if collect_metric_context
+            && let Some(log) = resolution_log
+            && let Ok(note) = log.serialize_to_string()
+        {
+            metric_context
+                .resolved_notes_by_commit
+                .insert(commit_sha.clone(), note);
+        }
     }
     Ok(metric_context)
 }
@@ -971,6 +981,9 @@ fn rewrite_metric_commits_with_context(
             if let Some(diff) = context.parent_diff_by_commit.get(&commit.new_sha) {
                 commit = commit.with_parent_diff(diff.clone());
             }
+            if let Some(note) = context.resolved_notes_by_commit.get(&commit.new_sha) {
+                commit = commit.with_authorship_note(note.clone());
+            }
             commit
         })
         .collect()
@@ -983,9 +996,9 @@ fn post_conflict_resolution_working_log(
     author: String,
     existing_shifted_log: Option<AuthorshipLog>,
     precomputed_parent_diff: Option<&crate::authorship::rewrite::DiffTreeResult>,
-) -> Result<(), GitAiError> {
+) -> Result<Option<AuthorshipLog>, GitAiError> {
     if !repo.storage.has_working_log(parent_sha) {
-        return Ok(());
+        return Ok(None);
     }
 
     let commit_for_transform = commit_sha.to_string();
@@ -1011,7 +1024,7 @@ fn post_conflict_resolution_working_log(
             )
         },
     )
-    .map(|_| ())
+    .map(|(_, log)| Some(log))
 }
 
 fn rfc3339_to_unix_nanos(value: &str) -> Option<u128> {
@@ -1367,24 +1380,101 @@ fn transcript_sweep_triggers_for_events(
     triggers
 }
 
-fn apply_pull_notes_sync_side_effect(
+fn kunpeng_review_fetch_remote(args: &[String]) -> Option<&str> {
+    // Only accept options whose operands can be skipped without changing fetch mode.
+    let mut args = args.iter().map(String::as_str);
+    let mut positionals = [None; 2];
+    let mut slots = positionals.iter_mut();
+    let mut parse_options = true;
+    while let Some(arg) = args.next() {
+        if parse_options && arg.starts_with('-') {
+            let (flag, value) = arg
+                .split_once('=')
+                .map_or((arg, None), |(flag, value)| (flag, Some(value)));
+            match flag {
+                "--" => parse_options = false,
+                "-n"
+                | "--no-tags"
+                | "-t"
+                | "--tags"
+                | "-q"
+                | "--quiet"
+                | "-v"
+                | "--verbose"
+                | "--progress"
+                | "--no-progress"
+                | "-f"
+                | "--force"
+                | "--no-recurse-submodules"
+                | "--recurse-submodules"
+                | "--no-auto-maintenance"
+                | "--no-write-fetch-head" => {}
+                "-j" | "--jobs" | "-o" | "--server-option" | "--depth" | "--deepen"
+                | "--shallow-since" | "--shallow-exclude" | "--filter" | "--upload-pack"
+                | "--refmap" | "--negotiation-tip" => {
+                    if value.is_none() {
+                        args.next()?;
+                    }
+                }
+                _ => return None,
+            }
+            continue;
+        }
+        *slots.next()? = Some(arg);
+    }
+    let [Some(remote), Some(refspec)] = positionals else {
+        return None;
+    };
+    let source_ref = refspec
+        .trim_start_matches('+')
+        .split(':')
+        .next()
+        .unwrap_or_default();
+    let mut segments = source_ref.strip_prefix("refs/revision/")?.split('/');
+    let is_patchset = (0..3).all(|_| {
+        segments
+            .next()
+            .is_some_and(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
+    }) && segments.next().is_none();
+    (is_patchset && !remote.starts_with('-')).then_some(remote)
+}
+
+fn apply_transport_notes_sync_side_effect(
     worktree: &str,
     command: Option<&str>,
     args: &[String],
 ) -> Result<(), GitAiError> {
     use crate::config::NotesBackendKind;
 
-    let repo = find_repository_in_path(worktree)?;
-    let parsed = parsed_invocation_for_side_effect(command, args);
-    let remote = fetch_remote_from_args(&repo, &parsed)?;
+    let review_remote = if command == Some("fetch") {
+        let Some(remote) = kunpeng_review_fetch_remote(args) else {
+            return Ok(());
+        };
+        Some(remote)
+    } else {
+        None
+    };
     let notes_backend = crate::config::Config::fresh().notes_backend_kind();
+    if review_remote.is_some() && notes_backend == NotesBackendKind::Http {
+        return Ok(());
+    }
 
+    let repo = find_repository_in_path(worktree)?;
+    let (remote, message) = if let Some(remote) = review_remote {
+        (remote.to_owned(), "handling fetch notes sync")
+    } else {
+        let parsed = parsed_invocation_for_side_effect(command, args);
+        (
+            fetch_remote_from_args(&repo, &parsed)?,
+            "handling pull notes sync",
+        )
+    };
     tracing::info!(
         command = command.unwrap_or("pull"),
         remote = %remote,
         backend = %notes_backend,
         worktree = %worktree,
-        "handling pull notes sync"
+        "{message}"
     );
 
     if notes_backend == NotesBackendKind::Http {
@@ -1671,37 +1761,43 @@ fn rewrite_metric_branch_for_ref(reference: &str) -> Option<String> {
     crate::authorship::rewrite::branch_name_from_ref(reference)
 }
 
-fn rewrite_metric_branch_for_transition(
+fn rewrite_metric_ref_for_transition(
     cmd: &crate::daemon::domain::NormalizedCommand,
     old_tip: &str,
     new_tip: &str,
-    reference_hint: Option<&str>,
 ) -> Option<String> {
-    reference_hint
-        .and_then(rewrite_metric_branch_for_ref)
-        .or_else(|| {
-            cmd.ref_changes
-                .iter()
-                .rev()
-                .find(|change| {
-                    change.reference.starts_with("refs/heads/")
-                        && change.old == old_tip
-                        && change.new == new_tip
-                })
-                .and_then(|change| rewrite_metric_branch_for_ref(&change.reference))
-        })
+    let mut references = cmd.ref_changes.iter().filter(|change| {
+        change.reference.starts_with("refs/heads/")
+            && change.old == old_tip
+            && change.new == new_tip
+    });
+    let reference = &references.next()?.reference;
+    references
+        .all(|change| &change.reference == reference)
+        .then(|| reference.clone())
 }
 
-fn rewrite_metric_commits_with_branch(
-    metric_commits: Vec<crate::authorship::rewrite::RewriteMetricCommit>,
-    branch: Option<String>,
-) -> Vec<crate::authorship::rewrite::RewriteMetricCommit> {
-    match branch {
-        Some(branch) => metric_commits
-            .into_iter()
-            .map(|commit| commit.with_branch(branch.clone()))
-            .collect(),
-        None => metric_commits,
+fn submit_scoped_rewrite_metrics(
+    repo: &Repository,
+    commits: Vec<crate::authorship::rewrite::RewriteMetricCommit>,
+    reference: Option<String>,
+    before: &str,
+    after: &str,
+    range: rewrite_metrics::RewriteRange,
+) {
+    if let Some(reference) = reference.filter(|reference| reference.starts_with("refs/heads/")) {
+        rewrite_metrics::spawn_scoped_rewrite_metrics(
+            repo,
+            commits,
+            rewrite_metrics::RewriteScope {
+                reference,
+                before: before.to_string(),
+                after: after.to_string(),
+                range,
+            },
+        );
+    } else {
+        rewrite_metrics::spawn_rewrite_commit_metrics(repo, commits);
     }
 }
 
@@ -2626,7 +2722,7 @@ fn prune_stale_daemon_logs(log_dir: &Path) {
 /// count as gone: they have finished writing. Processes we may not signal
 /// (another user's) count as alive.
 #[cfg(unix)]
-fn process_alive(pid: u32) -> bool {
+pub(crate) fn process_alive(pid: u32) -> bool {
     // kill(pid, 0) checks existence without sending a signal.
     let exists = unsafe { libc::kill(pid as libc::pid_t, 0) } == 0
         || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM);
@@ -2649,13 +2745,29 @@ fn process_is_zombie(pid: u32) -> bool {
         .unwrap_or(false)
 }
 
-#[cfg(all(unix, not(target_os = "linux")))]
+#[cfg(target_os = "macos")]
+fn process_is_zombie(pid: u32) -> bool {
+    // proc_pidinfo excludes zombies even while kill(pid, 0) finds them.
+    let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::uninit();
+    let bytes = unsafe {
+        libc::proc_pidinfo(
+            pid as libc::pid_t,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            info.as_mut_ptr().cast(),
+            std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int,
+        )
+    };
+    bytes == 0 && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
+}
+
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
 fn process_is_zombie(_pid: u32) -> bool {
     false
 }
 
 #[cfg(windows)]
-fn process_alive(pid: u32) -> bool {
+pub(crate) fn process_alive(pid: u32) -> bool {
     use windows_sys::Win32::Foundation::{
         CloseHandle, ERROR_ACCESS_DENIED, GetLastError, STILL_ACTIVE,
     };
@@ -2966,6 +3078,10 @@ fn run_blocking_side_effect<T>(operation: impl FnOnce() -> T) -> T {
     } else {
         operation()
     }
+}
+
+fn repository_allows_attribution(worktree: Option<&Path>) -> bool {
+    run_blocking_side_effect(|| config::Config::fresh().is_allowed_repository_at_path(worktree))
 }
 
 #[derive(Debug, Clone)]
@@ -4960,7 +5076,6 @@ impl ActorDaemonCoordinator {
         {
             tokio::time::sleep(delay).await;
         }
-        let trace_id = request.trace_id.clone();
         let file_count = request.files.len();
         let Some(repo_work_dir) = request.files.first().map(|file| file.repo_work_dir.clone())
         else {
@@ -4977,7 +5092,6 @@ impl ActorDaemonCoordinator {
             )
         });
 
-        self.notify_checkpoint_stream(&request);
         self.wait_for_trace_ingest_seq_logging_delay(
             accepted.trace_ingest_target,
             accepted.receipt_seq,
@@ -4989,8 +5103,6 @@ impl ActorDaemonCoordinator {
             component = "daemon",
             phase = "checkpoint_admission",
             receipt_seq = accepted.receipt_seq,
-            %trace_id,
-            %family,
             file_count,
             retained_bytes = accepted.reservation.body_bytes(),
             receipt_to_admission_ms =
@@ -6263,6 +6375,9 @@ impl ActorDaemonCoordinator {
                         tracing::debug!(%family, "untraced fixup pass skipped: family is ignored");
                         continue;
                     }
+                    if !repository_allows_attribution(Some(&worktree)) {
+                        continue;
+                    }
                     let git_dir_key = git_dir.to_string_lossy().to_string();
                     let worktree_key = worktree.to_string_lossy().to_string();
                     let scan = self
@@ -6340,6 +6455,15 @@ impl ActorDaemonCoordinator {
                     receipt_seq,
                     reservation: _reservation,
                 } => {
+                    if !repository_allows_attribution(
+                        request
+                            .files
+                            .first()
+                            .map(|file| file.repo_work_dir.as_path()),
+                    ) {
+                        continue;
+                    }
+                    self.notify_checkpoint_stream(&request);
                     let repo_wd = request
                         .files
                         .first()
@@ -7069,18 +7193,14 @@ impl ActorDaemonCoordinator {
                 )?;
                 let metric_commits =
                     rewrite_metric_commits_with_context(outcome.metric_commits, metric_context);
-                if !metric_commits.is_empty() {
-                    let branch = rewrite_metric_branch_for_transition(
-                        cmd,
-                        &pending.original_head,
-                        &new_tip,
-                        None,
-                    );
-                    crate::daemon::rewrite_metrics::spawn_rewrite_commit_metrics(
-                        &repo,
-                        rewrite_metric_commits_with_branch(metric_commits, branch),
-                    );
-                }
+                submit_scoped_rewrite_metrics(
+                    &repo,
+                    metric_commits,
+                    rewrite_metric_ref_for_transition(cmd, &pending.original_head, &new_tip),
+                    &pending.original_head,
+                    &new_tip,
+                    rewrite_metrics::RewriteRange::Rebase { onto: rebase_onto },
+                );
             }
             return Ok(());
         }
@@ -7134,13 +7254,25 @@ impl ActorDaemonCoordinator {
             };
             let metric_commits =
                 rewrite_metric_commits_with_context(outcome.metric_commits, metric_context);
-            if !metric_commits.is_empty() {
-                let branch =
-                    rewrite_metric_branch_for_transition(cmd, old_tip, new_tip, Some(reference));
-                crate::daemon::rewrite_metrics::spawn_rewrite_commit_metrics(
+            if is_rebase_cmd {
+                submit_scoped_rewrite_metrics(
                     &repo,
-                    rewrite_metric_commits_with_branch(metric_commits, branch),
+                    metric_commits,
+                    Some(reference.to_string()),
+                    old_tip,
+                    new_tip,
+                    rewrite_metrics::RewriteRange::Rebase { onto: rewrite_onto },
                 );
+            } else {
+                let branch = rewrite_metric_branch_for_ref(reference);
+                let commits = metric_commits
+                    .into_iter()
+                    .map(|commit| match &branch {
+                        Some(branch) => commit.with_branch(branch.clone()),
+                        None => commit,
+                    })
+                    .collect();
+                rewrite_metrics::spawn_rewrite_commit_metrics(&repo, commits);
             }
         }
 
@@ -7266,6 +7398,9 @@ impl ActorDaemonCoordinator {
         }
 
         let cmd = &applied.command;
+        if !repository_allows_attribution(cmd.worktree.as_deref()) {
+            return Ok(());
+        }
         let events = &applied.analysis.events;
 
         let primary = cmd.primary_command.as_deref().unwrap_or("unknown");
@@ -7579,8 +7714,15 @@ impl ActorDaemonCoordinator {
                     crate::daemon::domain::SemanticEvent::CloneCompleted { .. } => {
                         apply_clone_notes_sync_side_effect(&worktree)?;
                     }
+                    crate::daemon::domain::SemanticEvent::FetchCompleted { .. } => {
+                        apply_transport_notes_sync_side_effect(
+                            &worktree,
+                            Some("fetch"),
+                            &cmd.invoked_args,
+                        )?;
+                    }
                     crate::daemon::domain::SemanticEvent::PullCompleted { .. } => {
-                        apply_pull_notes_sync_side_effect(
+                        apply_transport_notes_sync_side_effect(
                             &worktree,
                             cmd.invoked_command.as_deref(),
                             &cmd.invoked_args,
@@ -7779,14 +7921,20 @@ impl ActorDaemonCoordinator {
                                     crate::authorship::rewrite::handle_rewrite_event_with_metrics(
                                         &repo,
                                         crate::authorship::rewrite::RewriteEvent::SquashMerge {
-                                            source_head: pending.source_head,
+                                            source_head: pending.source_head.clone(),
                                             squash_commit: new_head.clone(),
-                                            onto: pending.onto,
+                                            onto: pending.onto.clone(),
                                         },
                                     )?;
-                                crate::daemon::rewrite_metrics::spawn_rewrite_commit_metrics(
+                                submit_scoped_rewrite_metrics(
                                     &repo,
                                     outcome.metric_commits,
+                                    rewrite_metric_ref_for_transition(cmd, &pending.onto, new_head),
+                                    &pending.onto,
+                                    new_head,
+                                    rewrite_metrics::RewriteRange::Squash {
+                                        source_head: pending.source_head,
+                                    },
                                 );
                                 handled_as_squash_merge = true;
                             } else {
@@ -7944,7 +8092,7 @@ impl ActorDaemonCoordinator {
                                 )
                             })?;
                             if crate::authorship::rewrite::rewrite_metrics_enabled() {
-                                crate::daemon::rewrite_metrics::spawn_rewrite_commit_metrics(
+                                submit_scoped_rewrite_metrics(
                                     &repo,
                                     vec![
                                         crate::authorship::rewrite::RewriteMetricCommit::new(
@@ -7955,6 +8103,10 @@ impl ActorDaemonCoordinator {
                                         .with_parent_sha(amend_result.parent_sha)
                                         .with_authorship_note(amend_result.authorship_note),
                                     ],
+                                    rewrite_metric_ref_for_transition(cmd, old_head, new_head),
+                                    old_head,
+                                    new_head,
+                                    rewrite_metrics::RewriteRange::Amend,
                                 );
                             }
                         }
@@ -8668,6 +8820,9 @@ impl ActorDaemonCoordinator {
                 started_at_ns,
                 command,
             } => {
+                if !repository_allows_attribution(Some(Path::new(&repo_work_dir))) {
+                    return ControlResponse::ok(None, None);
+                }
                 let worktree_key = Self::worktree_state_key(Path::new(&repo_work_dir));
                 let original_cwd = original_cwd.unwrap_or_else(|| repo_work_dir.clone());
                 if let Ok(db) = crate::daemon::bash_history_db::BashHistoryDatabase::global()
@@ -8722,6 +8877,9 @@ impl ActorDaemonCoordinator {
                     .as_ref()
                     .map(|s| s.repo_work_dir.clone())
                     .unwrap_or_else(|| Self::worktree_state_key(Path::new(&repo_work_dir)));
+                if !repository_allows_attribution(Some(Path::new(&worktree_key))) {
+                    return ControlResponse::ok(None, None);
+                }
                 let original_cwd = original_cwd
                     .map(|cwd| Self::worktree_state_key(Path::new(&cwd)))
                     .unwrap_or_else(|| worktree_key.clone());
@@ -8774,6 +8932,11 @@ impl ActorDaemonCoordinator {
                 started_at_ns,
                 command,
             } => {
+                if !repository_allows_attribution(Some(Path::new(
+                    discovered_repo_work_dir.as_deref().unwrap_or(&original_cwd),
+                ))) {
+                    return ControlResponse::ok(None, None);
+                }
                 let discovered_repo_work_dir = discovered_repo_work_dir
                     .as_deref()
                     .map(Path::new)
@@ -8810,6 +8973,11 @@ impl ActorDaemonCoordinator {
                 ended_at_ns,
                 command,
             } => {
+                if !repository_allows_attribution(Some(Path::new(
+                    discovered_repo_work_dir.as_deref().unwrap_or(&original_cwd),
+                ))) {
+                    return ControlResponse::ok(None, None);
+                }
                 let discovered_repo_work_dir = discovered_repo_work_dir
                     .as_deref()
                     .map(Path::new)
@@ -8899,7 +9067,12 @@ impl ActorDaemonCoordinator {
                         "checkpoint acceptance closed for graceful shutdown"
                     );
                     match self.drain_accepted_checkpoints().await {
-                        Ok(()) => Ok(ControlResponse::ok(None, None)),
+                        Ok(()) => Ok(ControlResponse::ok(
+                            None,
+                            Some(serde_json::json!({
+                                "shutdown_deadline_secs": daemon_shutdown_deadline().as_secs(),
+                            })),
+                        )),
                         Err(error) => {
                             if let Err(reopen_error) = self.set_checkpoint_acceptance(true) {
                                 tracing::error!(
@@ -10984,6 +11157,7 @@ pub(crate) async fn run_daemon(config: DaemonConfig) -> Result<DaemonExitAction,
 }
 
 const DAEMON_SHUTDOWN_DEADLINE_SECS: u64 = 5;
+const DAEMON_SHUTDOWN_REPORT_TIMEOUT: Duration = Duration::from_millis(500);
 
 fn daemon_shutdown_deadline() -> Duration {
     std::env::var("GIT_AI_DAEMON_SHUTDOWN_DEADLINE_SECS")
@@ -10991,6 +11165,17 @@ fn daemon_shutdown_deadline() -> Duration {
         .and_then(|v| v.parse::<u64>().ok())
         .map(Duration::from_secs)
         .unwrap_or(Duration::from_secs(DAEMON_SHUTDOWN_DEADLINE_SECS))
+}
+
+pub(crate) fn shutdown_wait_timeout(response: &ControlResponse) -> Duration {
+    let deadline_secs = response
+        .data
+        .as_ref()
+        .and_then(|data| data["shutdown_deadline_secs"].as_u64())
+        .unwrap_or(DAEMON_SHUTDOWN_DEADLINE_SECS);
+    Duration::from_secs(deadline_secs)
+        .saturating_add(DAEMON_SHUTDOWN_REPORT_TIMEOUT)
+        .saturating_add(Duration::from_secs(1))
 }
 
 /// Terminal backstop for invariant "git is never blocked": once shutdown is
@@ -11036,7 +11221,7 @@ fn spawn_shutdown_deadline_enforcer(
             // to guarantee (the DB's busy_timeout alone is 5s).
             let report_coordinator = coordinator.clone();
             let report = std::thread::spawn(move || report_ingest_losses(&report_coordinator));
-            let report_deadline = std::time::Instant::now() + Duration::from_millis(500);
+            let report_deadline = std::time::Instant::now() + DAEMON_SHUTDOWN_REPORT_TIMEOUT;
             while !report.is_finished() && std::time::Instant::now() < report_deadline {
                 std::thread::sleep(Duration::from_millis(10));
             }
